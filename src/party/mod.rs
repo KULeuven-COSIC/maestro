@@ -7,10 +7,8 @@ mod online;
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use sha2::Sha256;
 use crate::network::{CommChannel, ConnectedParty};
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
-use crate::party::error::MpcResult;
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
 

@@ -1,5 +1,4 @@
 use rand_chacha::ChaCha20Rng;
-use sha2::digest::generic_array::functional::FunctionalSequence;
 use sha2::Sha256;
 use crate::network::CommChannel;
 use crate::party::broadcast::{Broadcast, BroadcastContext};

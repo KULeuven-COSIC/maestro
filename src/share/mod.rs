@@ -64,6 +64,8 @@ impl<F: Field> Mul<F> for RssShare<F> {
     }
 }
 
+impl<F: Field+Copy> Copy for RssShare<F> {}
+
 pub trait FieldRngExt<F: Field> {
     fn generate(&mut self, n: usize) -> Vec<F>;
 }
