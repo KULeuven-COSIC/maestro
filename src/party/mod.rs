@@ -9,7 +9,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use crate::network::{CommChannel, ConnectedParty};
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
-use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
+use crate::share::{Field, FieldRngExt, RssShare};
 
 
 pub struct Party {
@@ -108,16 +108,54 @@ impl Party {
 
 #[cfg(test)]
 pub mod test {
+    use std::fs::File;
+    use std::io::BufReader;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::path::PathBuf;
     use std::str::FromStr;
     use std::thread;
     use std::thread::JoinHandle;
     use rand::RngCore;
+    use rustls::pki_types::{PrivateKeyDer, CertificateDer};
     use crate::network::{Config, ConnectedParty, CreatedParty};
     use crate::party::correlated_randomness::{GlobalRng, SharedRng};
     use crate::party::Party;
     use crate::share::field::GF8;
     use crate::share::test::{assert_eq, consistent};
+
+    const TEST_KEY_DIR: &str = "keys";
+
+    type KeyPair = (PrivateKeyDer<'static>, CertificateDer<'static>);
+
+    pub fn create_certificates() -> (KeyPair, KeyPair, KeyPair) {
+        fn key_path(filename: &str) -> PathBuf {
+            let mut p = PathBuf::from("./");
+            p.push(TEST_KEY_DIR);
+            p.push(filename);
+            return p;
+        }
+
+        fn load_key(name: &str) -> PrivateKeyDer<'static> {
+            let mut reader = BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
+            let key = rustls_pemfile::private_key(&mut reader).expect(&format!("Cannot read private key in {}", name))
+            .expect(&format!("No private key in {}", name));
+            return key;
+        }
+
+        fn load_cert(name: &str) -> CertificateDer<'static> {
+            let mut reader = BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
+            let cert: Vec<_> = rustls_pemfile::certs(&mut reader).map(|r|r.expect(&format!("Cannot read certificate in {}", name))).collect();
+            assert_eq!(cert.len(), 1);
+            let cert = cert[0].clone();
+            return cert;
+        }
+        
+        return (
+            (load_key("p1.key"), load_cert("p1.pem")),
+            (load_key("p2.key"), load_cert("p2.pem")),
+            (load_key("p3.key"), load_cert("p3.pem")),
+        )
+    }
 
     pub fn localhost_connect<T1: Send + 'static, F1: Send + FnOnce(ConnectedParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(ConnectedParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(ConnectedParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<T1>, JoinHandle<T2>, JoinHandle<T3>) {
         let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
@@ -130,42 +168,50 @@ pub mod test {
         let port2 = party2.port().unwrap();
         let port3 = party3.port().unwrap();
 
+        // create certificates
+        let certs = create_certificates();
+        let (sk1, pk1) = certs.0;
+        let (sk2, pk2) = certs.1;
+        let (sk3, pk3) = certs.2;
+
+        let certificates = vec![pk1.clone(), pk2.clone(), pk3.clone()];
+
         let ports = vec![port1, port2, port3];
         // println!("Ports: {:?}", ports);
 
         let party1 = {
-            let config = Config::new( addr, ports.clone());
-            thread::spawn(move || {
+            let config = Config::new( addr, ports.clone(), certificates.clone(), pk1, sk1);
+            thread::Builder::new().name("party1".to_string()).spawn(move || {
                 // println!("P1 running");
                 let party1 = party1.connect(config).unwrap();
                 // println!("P1 connected");
                 let res = f1(party1);
                 res
-            })
+            }).unwrap()
         };
 
         let party2 = {
             let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
-            let config = Config::new(addr, ports.clone());
-            thread::spawn(move || {
+            let config = Config::new(addr, ports.clone(), certificates.clone(), pk2, sk2);
+            thread::Builder::new().name("party2".to_string()).spawn(move || {
                 // println!("P2 running");
                 let party2 = party2.connect(config).unwrap();
                 // println!("P2 connected");
                 let res = f2(party2);
                 res
-            })
+            }).unwrap()
         };
 
         let party3 = {
             let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
-            let config = Config::new(addr, ports);
-            thread::spawn(move || {
+            let config = Config::new(addr, ports, certificates, pk3, sk3);
+            thread::Builder::new().name("party3".to_string()).spawn(move || {
                 // println!("P3 running");
                 let party3 = party3.connect(config).unwrap();
                 // println!("P3 connected");
                 let res = f3(party3);
                 res
-            })
+            }).unwrap()
         };
 
         (party1, party2, party3)
@@ -205,7 +251,6 @@ pub mod test {
     }
 
     #[test]
-    //#[serial]
     fn correct_channel_connection() {
         let f1 = |mut p: ConnectedParty| {
             p.comm_next.write("P12".as_bytes()).unwrap();
