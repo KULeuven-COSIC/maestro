@@ -103,6 +103,43 @@ impl Party {
         let sii = self.random_next.as_mut().generate(n);
         si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
     }
+
+    pub fn teardown(&mut self) {
+        match self.i {
+            0 => {
+                // 01
+                self.comm_next.teardown();
+                // 02
+                self.comm_prev.teardown();
+            }
+            1 => {
+                // 01
+                self.comm_prev.teardown();
+                // 12
+                self.comm_next.teardown();
+            }
+            2 => {
+                // 02
+                self.comm_next.teardown();
+                // 12
+                self.comm_prev.teardown();
+            }
+            _ => unreachable!()
+        };
+    }
+
+    pub fn print_comm_statistics(&self) {
+        let sent_next = self.comm_next.get_bytes_sent();
+        let sent_prev = self.comm_prev.get_bytes_sent();
+        let received_next = self.comm_next.get_bytes_received();
+        let received_prev = self.comm_prev.get_bytes_received();
+
+        let p_next = ((self.i+1) % 3) + 1;
+        let p_prev = ((3 + self.i-1) % 3) + 1;
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, sent_next, received_next, self.comm_next.get_rounds());
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, sent_prev, received_prev, self.comm_prev.get_rounds());
+        println!("Total communication: {} bytes send, {} bytes received", sent_next + sent_prev, received_next + received_prev);
+    }
 }
 
 
@@ -223,6 +260,7 @@ pub mod test {
             let mut p = Party::setup(p);
             // println!("P1: After Setup");
             let res = f1(&mut p);
+            p.teardown();
             (res, p)
         };
         let _f2 = |p: ConnectedParty| {
@@ -230,6 +268,7 @@ pub mod test {
             let mut p = Party::setup(p);
             // println!("P2: After Setup");
             let res = f2(&mut p);
+            p.teardown();
             (res, p)
         };
         let _f3 = |p: ConnectedParty| {
@@ -237,6 +276,7 @@ pub mod test {
             let mut p = Party::setup(p);
             // println!("P3: After Setup");
             let res = f3(&mut p);
+            p.teardown();
             (res, p)
         };
         localhost_connect(_f1, _f2, _f3)
@@ -303,6 +343,20 @@ pub mod test {
         assert_ne!(&buf1, &buf2);
         assert_ne!(&buf2, &buf3);
         assert_ne!(&buf1, &buf3);
+    }
+
+    #[test]
+    fn correct_party_teardown() {
+        fn send_receive_teardown(p: &mut Party) {
+            let mut buf = vec![0u8;16];
+            p.comm_next.write(&buf).unwrap();
+            p.comm_prev.read(&mut buf).unwrap();
+            p.teardown();
+        }
+        let (p1, p2, p3) = localhost_setup(send_receive_teardown, send_receive_teardown, send_receive_teardown);
+        p1.join().unwrap();
+        p2.join().unwrap();
+        p3.join().unwrap();
     }
 
     #[test]

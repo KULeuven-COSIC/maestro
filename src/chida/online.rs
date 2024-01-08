@@ -1,19 +1,55 @@
+use std::io;
+
 use crate::party::error::MpcResult;
 use crate::party::Party;
 use crate::share::field::GF8;
 use crate::share::{FieldVectorCommChannel, RssShare};
 
-pub struct AesState {
+// a row-wise representation of the AES (round) key
+#[derive(Clone)]
+pub struct AesKeyState {
     si: [GF8; 16],
     sii: [GF8; 16]
 }
 
-impl AesState {
+impl AesKeyState {
     pub fn new() -> Self {
         Self {
             si: [GF8(0); 16],
             sii: [GF8(0); 16],
         }
+    }
+
+    // vec is interpreted as column-wise (see FIPS 97)
+    pub fn from_bytes(vec: Vec<RssShare<GF8>>) -> Self {
+        debug_assert_eq!(vec.len(), 16);
+        let mut state = Self::new();
+        for i in 0..4 {
+            for j in 0..4 {
+                state.si[4*i+j] = vec[4*j+i].si;
+                state.sii[4*i+j] = vec[4*j+i].sii;
+            }
+        }
+        return state;
+    }
+
+    // vec must be in row-wise representation
+    pub fn from_rss_vec(vec: Vec<RssShare<GF8>>) -> Self {
+        debug_assert_eq!(16, vec.len());
+        let mut state = Self::new();
+        for (i,x) in vec.into_iter().enumerate() {
+            state.si[i] = x.si;
+            state.sii[i] = x.sii;
+        };
+        return state;
+    }
+
+    pub fn to_rss_vec(self) -> Vec<RssShare<GF8>> {
+        let mut out = Vec::with_capacity(16);
+        for i in 0..16 {
+            out.push(RssShare::from(self.si[i], self.sii[i]));
+        }
+        return out;
     }
 }
 
@@ -34,26 +70,42 @@ impl VectorAesState {
         }
     }
 
+    // fills AES states column-wise (as in FIPS 97)
+    // bytes.len() must be a multiple of 16
+    pub fn from_bytes(bytes: Vec<RssShare<GF8>>) -> Self {
+        let n = bytes.len() / 16;
+        debug_assert_eq!(16*n, bytes.len());
+        let mut state = Self::new(n);
+        for k in 0..n {
+            for i in 0..4 {
+                for j in 0..4 {
+                    state.si[16*k + 4*i+j] = bytes[16*k + 4*j+i].si;
+                    state.sii[16*k + 4*i+j] = bytes[16*k + 4*j+i].sii;
+                }
+            }
+        }
+        state
+    }
+
+    // outputs the AES states column-wise (as in FIPS 97)
+    pub fn to_bytes(self) -> Vec<RssShare<GF8>> {
+        let mut vec = Vec::with_capacity(self.n*16);
+        for k in 0..self.n {
+            for i in 0..4 {
+                for j in 0..4 {
+                    vec.push(RssShare::from(self.si[16*k + 4*j+i], self.sii[16*k + 4*j+i]));
+                }
+            }
+        }
+        vec
+    }
+
     fn with_capacity(n: usize) -> Self {
         Self {
             si: Vec::with_capacity(16*n),
             sii: Vec::with_capacity(16*n),
             n
         }
-    }
-
-    pub fn from_rss_vec(vec: Vec<RssShare<GF8>>) -> Self {
-        debug_assert_eq!(vec.len() % 16, 0);
-        let mut state = Self::with_capacity(vec.len()/16);
-        for x in vec {
-            state.si.push(x.si);
-            state.sii.push(x.sii);
-        }
-        state
-    }
-
-    pub fn to_rss_vec(self) -> Vec<RssShare<GF8>> {
-        self.si.into_iter().zip(self.sii).map(|(si,sii)| RssShare::from(si, sii)).collect()
     }
 
     pub fn append(&mut self, mut other: Self) {
@@ -80,6 +132,17 @@ impl VectorAesState {
             self.permute4(16*i+8, [2,3,0,1]);
             // rotate row 4 by 3 to the left
             self.permute4(16*i+12, [3,0,1,2]);
+        }
+    }
+
+    pub fn inv_shift_rows(&mut self) {
+        for i in 0..self.n {
+            // rotate row 2 by 1 to the right
+            self.permute4(16*i+4, [3,0,1,2]);
+            // rotate row 3 by 2 to the right
+            self.permute4(16*i+8, [2,3,0,1]);
+            // rotate row 4 by 3 to the right
+            self.permute4(16*i+12, [1,2,3,0]);
         }
     }
 
@@ -110,6 +173,36 @@ impl VectorAesState {
             self.mix_single_column(16*i+1);
             self.mix_single_column(16*i+2);
             self.mix_single_column(16*i+3);
+        }
+    }
+
+    #[inline]
+    fn inv_mix_single_column(&mut self, start: usize) {
+        let c0 = RssShare::from(self.si[start], self.sii[start]);
+        let c1 = RssShare::from(self.si[start+4], self.sii[start+4]);
+        let c2 = RssShare::from(self.si[start+8], self.sii[start+8]);
+        let c3 = RssShare::from(self.si[start+12], self.sii[start+12]);
+
+        let m0 = c0 * GF8(0xe) + c1 * GF8(0xb) + c2 * GF8(0xd) + c3 * GF8(0x9);
+        let m1 = c0 * GF8(0x9) + c1 * GF8(0xe) + c2 * GF8(0xb) + c3 * GF8(0xd);
+        let m2 = c0 * GF8(0xd) + c1 * GF8(0x9) + c2 * GF8(0xe) + c3 * GF8(0xb);
+        let m3 = c0 * GF8(0xb) + c1 * GF8(0xd) + c2 * GF8(0x9) + c3 * GF8(0xe);
+        self.si[start] = m0.si;
+        self.sii[start] = m0.sii;
+        self.si[start+4] = m1.si;
+        self.sii[start+4] = m1.sii;
+        self.si[start+8] = m2.si;
+        self.sii[start+8] = m2.sii;
+        self.si[start+12] = m3.si;
+        self.sii[start+12] = m3.sii;
+    }
+
+    pub fn inv_mix_columns(&mut self) {
+        for i in 0..self.n {
+            self.inv_mix_single_column(16*i);
+            self.inv_mix_single_column(16*i+1);
+            self.inv_mix_single_column(16*i+2);
+            self.inv_mix_single_column(16*i+3);
         }
     }
 }
@@ -157,9 +250,9 @@ pub fn input_round(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcResult<(Vector
     };
 
     // reshape into VectorAesState
-    let in1 = VectorAesState::from_rss_vec(in1);
-    let in2 = VectorAesState::from_rss_vec(in2);
-    let in3 = VectorAesState::from_rss_vec(in3);
+    let in1 = VectorAesState::from_bytes(in1);
+    let in2 = VectorAesState::from_bytes(in2);
+    let in3 = VectorAesState::from_bytes(in3);
     Ok((in1, in2, in3))
 
     // s1 = r1
@@ -214,12 +307,14 @@ fn mul(party: &mut Party, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF
     for (i, alpha_i) in alphas.into_iter().enumerate() {
         ci[i] = ai[i] * bi[i] + ai[i] * bii[i] + aii[i] * bi[i] + alpha_i;
     }
-    party.comm_prev.write_vector(ci)?;
-    party.comm_next.read_vector(cii)?;
+    // println!("Writing {} elements to comm_prev", ci.len());
+    party.comm_prev.write_vector(ci).map_err(|err| io::Error::new(err.kind(), format!("writing to comm_prev: {}", err.to_string())))?;
+    // println!("Expecting {} elements from comm_next", cii.len());
+    party.comm_next.read_vector(cii).map_err(|err| io::Error::new(err.kind(), format!("reading from comm_next: {}", err.to_string())))?;
     Ok(())
 }
 
-fn add_round_key(states: &mut VectorAesState, round_key: &AesState) {
+fn add_round_key(states: &mut VectorAesState, round_key: &AesKeyState) {
     for j in 0..states.n {
         for i in 0..16 {
             states.si[16*j+i] += round_key.si[i];
@@ -228,62 +323,90 @@ fn add_round_key(states: &mut VectorAesState, round_key: &AesState) {
     }
 }
 
-fn square(s: &VectorAesState) -> VectorAesState {
-    VectorAesState {
-        si: s.si.iter().map(|x| x.square()).collect(),
-        sii: s.sii.iter().map(|x| x.square()).collect(),
-        n: s.n
-    }
+fn sub_bytes(party: &mut Party, states: &mut VectorAesState) -> MpcResult<()> {
+    sbox_layer(party, &mut states.si, &mut states.sii)
 }
 
-fn sub_bytes(party: &mut Party, states: &mut VectorAesState) -> MpcResult<()> {
+#[inline]
+fn square_layer(v: &[GF8]) -> Vec<GF8> {
+    v.iter().map(|x| x.square()).collect()
+}
+
+#[inline]
+fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
+    let mut res = vec![GF8(0); a.len() + b.len()];
+    res[..a.len()].copy_from_slice(a);
+    res[a.len()..].copy_from_slice(b);
+    res
+}
+
+fn gf8_inv_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    let n = si.len();
     // this is not yet the multiplication that chida et al use
-    let x2 = square(&states);
+    let x2 = (square_layer(si), square_layer(sii)); //square(&states);
     // x^3 = x^2 * x
-    let mut x3 = VectorAesState::new(states.n);
-    mul(party, &mut x3.si, &mut x3.sii, &states.si, &states.sii, &x2.si, &x2.sii)?;
+    let mut x3 = (vec![GF8(0); n], vec![GF8(0); n]); //VectorAesState::new(states.n);
+    mul(party, &mut x3.0, &mut x3.1, si, sii, &x2.0, &x2.1)?;
 
-    let x6 = square(&x3);
-    let x12 = square(&x6);
+    let x6 = (square_layer(&x3.0), square_layer(&x3.1));
+    let x12 = (square_layer(&x6.0), square_layer(&x6.1));
 
-    let x12_x12 = {
-        let mut clone = x12.clone();
-        clone.append(x12);
-        clone
-    };
-    let x3_x2 = {
-        x3.append(x2);
-        x3
-    };
+    let x12_x12 = (append(&x12.0, &x12.0), append(&x12.1, &x12.1));
+    let x3_x2 = (append(&x3.0, &x2.0), append(&x3.1, &x2.1));
 
-    let mut x15_x14 = VectorAesState::new(x12_x12.n);
+    let mut x15_x14 = (vec![GF8(0); 2*n], vec![GF8(0); 2*n]); // VectorAesState::new(x12_x12.n);
     // x^15 = x^12 * x^3 and x^14 = x^12 * x^2 in one round
-    mul(party, &mut x15_x14.si, &mut x15_x14.sii, &x12_x12.si, &x12_x12.sii, &x3_x2.si, &x3_x2.sii)?;
+    mul(party, &mut x15_x14.0, &mut x15_x14.1, &x12_x12.0, &x12_x12.1, &x3_x2.0, &x3_x2.1)?;
 
-    let n = states.n;
     // x^15 square in-place x^240 = (x^15)^16
-    for i in 0..(16*n) {
-        x15_x14.si[i] = x15_x14.si[i].square().square().square().square();
-        x15_x14.sii[i] = x15_x14.sii[i].square().square().square().square();
+    for i in 0..n {
+        x15_x14.0[i] = x15_x14.0[i].square().square().square().square();
+        x15_x14.1[i] = x15_x14.1[i].square().square().square().square();
     }
     // x^254 = x^240 * x^14
-    mul(party, &mut states.si, &mut states.sii, &x15_x14.si[..16*n], &x15_x14.sii[..16*n], &x15_x14.si[16*n..], &x15_x14.sii[16*n..])?;
+    // write directly to output buffers si,sii
+    mul(party, si, sii, &x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..])
+}
+
+fn sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    // first inverse, then affine transform
+    gf8_inv_layer(party, si, sii)?;
 
     // apply affine transform
-    for i in 0..(16*n) {
-        states.si[i] = states.si[i].aes_sbox_affine_transform();
-        states.sii[i] = states.sii[i].aes_sbox_affine_transform();
+    for i in 0..si.len() {
+        si[i] = si[i].aes_sbox_affine_transform();
+        sii[i] = sii[i].aes_sbox_affine_transform();
 
         if party.i == 0 {
-            states.si[i] += GF8(0x63);
+            si[i] += GF8(0x63);
         } else if party.i == 2 {
-            states.sii[i] += GF8(0x63);
+            sii[i] += GF8(0x63);
         }
     }
     Ok(())
 }
 
-pub fn aes128_no_keyschedule(party: &mut Party, inputs: VectorAesState, round_key: &Vec<AesState>) -> MpcResult<VectorAesState> {
+fn inv_sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    // first inverse affine transform, then gf8 inverse
+    // apply inverse affine transform
+    for i in 0..si.len() {
+        if party.i == 0 {
+            si[i] += GF8(0x63);
+        } else if party.i == 2 {
+            sii[i] += GF8(0x63);
+        }
+
+        si[i] = si[i].inv_aes_sbox_affine_transform();
+        sii[i] = sii[i].inv_aes_sbox_affine_transform();
+    }
+    gf8_inv_layer(party, si, sii)
+}
+
+fn inv_sub_bytes(party: &mut Party, state: &mut VectorAesState) -> MpcResult<()> {
+    inv_sbox_layer(party, &mut state.si, &mut state.sii)
+}
+
+pub fn aes128_no_keyschedule(party: &mut Party, inputs: VectorAesState, round_key: &Vec<AesKeyState>) -> MpcResult<VectorAesState> {
     debug_assert_eq!(round_key.len(), 11);
     let mut state = inputs;
 
@@ -298,30 +421,81 @@ pub fn aes128_no_keyschedule(party: &mut Party, inputs: VectorAesState, round_ke
     state.shift_rows();
     add_round_key(&mut state, &round_key[10]);
     Ok(state)
+}
 
+pub fn aes128_inv_no_keyschedule(party: &mut Party, inputs: VectorAesState, key_schedule: &Vec<AesKeyState>) -> MpcResult<VectorAesState> {
+    debug_assert_eq!(key_schedule.len(), 11);
+    let mut state = inputs;
+
+    add_round_key(&mut state, &key_schedule[10]);
+    for r in (1..=9).rev() {
+        state.inv_shift_rows();
+        inv_sub_bytes(party, &mut state)?;
+        add_round_key(&mut state, &key_schedule[r]);
+        state.inv_mix_columns();
+    }
+    state.inv_shift_rows();
+    inv_sub_bytes(party, &mut state)?;
+    add_round_key(&mut state, &key_schedule[0]);
+    Ok(state)
+}
+
+fn aes128_keyschedule_round(party: &mut Party, rk: &AesKeyState, rcon: GF8) -> MpcResult<AesKeyState> {
+    let mut rot_i = [rk.si[7], rk.si[11], rk.si[15], rk.si[3]];
+    let mut rot_ii = [rk.sii[7], rk.sii[11], rk.sii[15], rk.sii[3]];
+    sbox_layer(party, &mut rot_i, &mut rot_ii)?;
+    
+    let mut output = rk.clone();
+    for i in 0..4 {
+        output.si[4*i] += rot_i[i];
+        output.sii[4*i] += rot_ii[i];
+    }
+    if party.i == 0 {
+        output.si[0] += rcon;
+    }else if party.i == 2 {
+        output.sii[0] += rcon;
+    }
+    
+    for j in 1..4 {
+        for i in 0..4 {
+            output.si[4*i+j] += output.si[4*i+j-1];
+            output.sii[4*i+j] += output.sii[4*i+j-1];
+        }
+    }
+    Ok(output)
+}
+
+pub fn aes128_keyschedule(party: &mut Party, key: Vec<RssShare<GF8>>) -> MpcResult<Vec<AesKeyState>> {
+    debug_assert_eq!(key.len(), 16);
+    const ROUND_CONSTANTS: [GF8; 10] = [GF8(0x01), GF8(0x02), GF8(0x04), GF8(0x08), GF8(0x10), GF8(0x20), GF8(0x40), GF8(0x80), GF8(0x1b), GF8(0x36)];
+    let mut ks = Vec::with_capacity(11);
+    ks.push(AesKeyState::from_bytes(key)); // rk0
+    for i in 1..=10 {
+        let rki = aes128_keyschedule_round(party, &ks[i-1], ROUND_CONSTANTS[i-1])?;
+        ks.push(rki);
+    }
+    Ok(ks)
 }
 
 #[cfg(test)]
 mod test {
     use rand::{CryptoRng, Rng, thread_rng};
-    use crate::chida::online::{aes128_no_keyschedule, AesState, input_round, mul, output_round, square, sub_bytes, VectorAesState};
+    use crate::chida::online::{aes128_no_keyschedule, AesKeyState, input_round, mul, output_round, sub_bytes, VectorAesState, aes128_inv_no_keyschedule};
     use crate::party::Party;
     use crate::party::test::localhost_setup;
     use crate::share::field::GF8;
     use crate::share::{FieldRngExt, RssShare};
     use crate::share::test::{assert_eq, consistent, secret_share};
 
+    use super::{square_layer, aes128_keyschedule};
+
     const AES_SBOX: [u8; 256] = [0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76, 0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0, 0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15, 0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A, 0x07, 0x12, 0x80, 0xE2, 0xEB, 0x27, 0xB2, 0x75, 0x09, 0x83, 0x2C, 0x1A, 0x1B, 0x6E, 0x5A, 0xA0, 0x52, 0x3B, 0xD6, 0xB3, 0x29, 0xE3, 0x2F, 0x84, 0x53, 0xD1, 0x00, 0xED, 0x20, 0xFC, 0xB1, 0x5B, 0x6A, 0xCB, 0xBE, 0x39, 0x4A, 0x4C, 0x58, 0xCF, 0xD0, 0xEF, 0xAA, 0xFB, 0x43, 0x4D, 0x33, 0x85, 0x45, 0xF9, 0x02, 0x7F, 0x50, 0x3C, 0x9F, 0xA8, 0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10, 0xFF, 0xF3, 0xD2, 0xCD, 0x0C, 0x13, 0xEC, 0x5F, 0x97, 0x44, 0x17, 0xC4, 0xA7, 0x7E, 0x3D, 0x64, 0x5D, 0x19, 0x73, 0x60, 0x81, 0x4F, 0xDC, 0x22, 0x2A, 0x90, 0x88, 0x46, 0xEE, 0xB8, 0x14, 0xDE, 0x5E, 0x0B, 0xDB, 0xE0, 0x32, 0x3A, 0x0A, 0x49, 0x06, 0x24, 0x5C, 0xC2, 0xD3, 0xAC, 0x62, 0x91, 0x95, 0xE4, 0x79, 0xE7, 0xC8, 0x37, 0x6D, 0x8D, 0xD5, 0x4E, 0xA9, 0x6C, 0x56, 0xF4, 0xEA, 0x65, 0x7A, 0xAE, 0x08, 0xBA, 0x78, 0x25, 0x2E, 0x1C, 0xA6, 0xB4, 0xC6, 0xE8, 0xDD, 0x74, 0x1F, 0x4B, 0xBD, 0x8B, 0x8A, 0x70, 0x3E, 0xB5, 0x66, 0x48, 0x03, 0xF6, 0x0E, 0x61, 0x35, 0x57, 0xB9, 0x86, 0xC1, 0x1D, 0x9E, 0xE1, 0xF8, 0x98, 0x11, 0x69, 0xD9, 0x8E, 0x94, 0x9B, 0x1E, 0x87, 0xE9, 0xCE, 0x55, 0x28, 0xDF, 0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16];
 
     #[test]
     fn square_gf8() {
-        let x = VectorAesState {
-            si: (0..256).map(|i| GF8(i as u8)).collect(),
-            sii: vec![GF8(0); 256],
-            n: 256/16
-        };
-        let sq = square(&x);
-        for (x,x2) in x.si.into_iter().zip(sq.si) {
+        let x = (0..256).map(|i| GF8(i as u8)).collect::<Vec<_>>();
+        let sq = square_layer(&x);
+        for (x,x2) in x.into_iter().zip(sq) {
             assert_eq!(x*x, x2);
         }
     }
@@ -329,7 +503,18 @@ mod test {
     fn random_vectorstate(n: usize) -> (Vec<GF8>, VectorAesState, VectorAesState, VectorAesState) {
         let mut rng = thread_rng();
         let x = rng.generate(n*16);
-        let (state1, state2, state3) = secret_share_vectorstate(&mut rng, &x);
+        let mut state1 = VectorAesState::new(n);
+        let mut state2 = VectorAesState::new(n);
+        let mut state3 = VectorAesState::new(n);
+        for (i, xi) in x.iter().enumerate() {
+            let (s1, s2, s3) = secret_share(&mut rng, xi);
+            state1.si[i] = s1.si;
+            state1.sii[i] = s1.sii;
+            state2.si[i] = s2.si;
+            state2.sii[i] = s2.sii;
+            state3.si[i] = s3.si;
+            state3.sii[i] = s3.sii;
+        }
         (x, state1, state2, state3)
     }
 
@@ -341,25 +526,13 @@ mod test {
         let mut s3 = Vec::with_capacity(n*16);
         for xi in state {
             let (share1, share2, share3) = secret_share(rng, xi);
-            s1.push(share1.si);
-            s2.push(share2.si);
-            s3.push(share3.si);
+            s1.push(share1);
+            s2.push(share2);
+            s3.push(share3);
         }
-        let state1 = VectorAesState {
-            si: s1.clone(),
-            sii: s2.clone(),
-            n,
-        };
-        let state2 = VectorAesState {
-            si: s2,
-            sii: s3.clone(),
-            n
-        };
-        let state3 = VectorAesState {
-            si: s3,
-            sii: s1,
-            n
-        };
+        let state1 = VectorAesState::from_bytes(s1);
+        let state2 = VectorAesState::from_bytes(s2);
+        let state3 = VectorAesState::from_bytes(s3);
         (state1, state2, state3)
     }
 
@@ -389,21 +562,6 @@ mod test {
             assert_eq!(x_sbox.0, AES_SBOX[i]);
         }
     }
-
-    // #[test]
-    // fn aes_sbox_affine_shared() {
-    //     let mut rng = thread_rng();
-    //     for i in 0..256 {
-    //         let x = GF8(i as u8);
-    //         let x_inv = GF8(INV_GF8[x.0 as usize]);
-    //         let (x1, x2, x3) = secret_share(&mut rng, &x_inv);
-    //         let x1_affine = RssShare::from(x1.si.aes_sbox_affine_transform() + GF8(0x63), x1.sii.aes_sbox_affine_transform());
-    //         let x2_affine = RssShare::from(x2.si.aes_sbox_affine_transform(), x2.sii.aes_sbox_affine_transform());
-    //         let x3_affine = RssShare::from(x3.si.aes_sbox_affine_transform(), x3.sii.aes_sbox_affine_transform() + GF8(0x63));
-    //         let x_sbox = x1_affine.si + x2_affine.si + x3_affine.si;
-    //         assert_eq!(x_sbox.0, AES_SBOX[i]);
-    //     }
-    // }
 
     #[test]
     fn mul_gf8() {
@@ -497,10 +655,10 @@ mod test {
         }
     }
 
-    fn secret_share_aes_state<R: Rng + CryptoRng>(rng: &mut R, state: &[GF8]) -> (AesState, AesState, AesState) {
-        let mut state1 = AesState::new();
-        let mut state2 = AesState::new();
-        let mut state3 = AesState::new();
+    fn secret_share_aes_key_state<R: Rng + CryptoRng>(rng: &mut R, state: &[GF8]) -> (AesKeyState, AesKeyState, AesKeyState) {
+        let mut state1 = AesKeyState::new();
+        let mut state2 = AesKeyState::new();
+        let mut state3 = AesKeyState::new();
         for (i, (s1, s2, s3)) in state.iter().map(|x| secret_share(rng, x)).enumerate() {
             state1.si[i] = s1.si;
             state1.sii[i] = s1.sii;
@@ -515,9 +673,9 @@ mod test {
     #[test]
     fn aes128_no_keyschedule_gf8() {
         // FIPS 197 Appendix B
-        let input: [u8; 16] = [0x32, 0x88, 0x31, 0xe0, 0x43, 0x5a, 0x31, 0x37, 0xf6, 0x30, 0x98, 0x07, 0xa8, 0x8d, 0xa2, 0x34];
+        let input: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
         let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
-        let round_keys: [[u8; 16]; 11] = [
+        let round_keys: [[u8; 16]; 11] = [ // already in row-first representation
             [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
             [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
             [0xf2, 0x7a, 0x59, 0x73, 0xc2, 0x96, 0x35, 0x59, 0x95, 0xb9, 0x80, 0xf6, 0xf2, 0x43, 0x7a, 0x7f],
@@ -530,20 +688,20 @@ mod test {
             [0xac, 0x19, 0x28, 0x57, 0x77, 0xfa, 0xd1, 0x5c, 0x66, 0xdc, 0x29, 0x00, 0xf3, 0x21, 0x41, 0x6e],
             [0xd0, 0xc9, 0xe1, 0xb6, 0x14, 0xee, 0x3f, 0x63, 0xf9, 0x25, 0x0c, 0x0c, 0xa8, 0x89, 0xc8, 0xa6],
         ];
-        let expected = [0x39, 0x02, 0xdc, 0x19, 0x25, 0xdc, 0x11, 0x6a, 0x84, 0x09, 0x85, 0x0b, 0x1d, 0xfb, 0x97, 0x32];
+        let expected = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32];
         let mut rng = thread_rng();
         let (in1, in2, in3) = secret_share_vectorstate(&mut rng, &input);
         let mut ks1 = Vec::with_capacity(11);
         let mut ks2 = Vec::with_capacity(11);
         let mut ks3 = Vec::with_capacity(11);
         for i in 0..11 {
-            let (s1, s2, s3) = secret_share_aes_state(&mut rng, &round_keys[i].map(|x|GF8(x)));
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &round_keys[i].map(|x|GF8(x)));
             ks1.push(s1);
             ks2.push(s2);
             ks3.push(s3);
         }
 
-        let program = |input: VectorAesState, ks: Vec<AesState>| {
+        let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
             move |p: &mut Party| {
                 aes128_no_keyschedule(p, input, &ks).unwrap()
             }
@@ -555,7 +713,9 @@ mod test {
         assert_eq!(s1.n, 1);
         assert_eq!(s2.n, 1);
         assert_eq!(s3.n, 1);
-        let shares = into_rss_share(s1, s2, s3);
+
+        let shares: Vec<_> = s1.to_bytes().into_iter().zip(s2.to_bytes().into_iter().zip(s3.to_bytes()))
+            .map(|(s1, (s2,s3))| (s1, s2, s3)).collect();
 
         for (s1,s2,s3) in &shares {
             consistent(s1, s2, s3);
@@ -633,26 +793,149 @@ mod test {
         let ((a2, b2, c2), _) = h2.join().unwrap();
         let ((a3, b3, c3), _) = h3.join().unwrap();
 
-        let a = into_rss_share(a1, a2, a3);
-        let b = into_rss_share(b1, b2, b3);
-        let c = into_rss_share(c1, c2, c3);
-
-        assert_eq!(a.len(), in1.len());
-        for (input, (a1,a2,a3)) in in1.into_iter().zip(a) {
-            consistent(&a1, &a2, &a3);
-            assert_eq(a1, a2, a3, input);
+        fn check(expected_input: Vec<GF8>, x1: VectorAesState, x2: VectorAesState, x3: VectorAesState) {
+            let x1 = x1.to_bytes();
+            let x2 = x2.to_bytes();
+            let x3 = x3.to_bytes();
+            assert_eq!(expected_input.len(), x1.len());
+            assert_eq!(expected_input.len(), x2.len());
+            assert_eq!(expected_input.len(), x3.len());
+            
+            for (input, (x1, (x2, x3))) in expected_input.into_iter().zip(x1.into_iter().zip(x2.into_iter().zip(x3))) {
+                consistent(&x1, &x2, &x3);
+                assert_eq(x1, x2, x3, input);
+            }
         }
 
-        assert_eq!(b.len(), in2.len());
-        for (input, (b1,b2,b3)) in in2.into_iter().zip(b) {
-            consistent(&b1, &b2, &b3);
-            assert_eq(b1, b2, b3, input);
+        check(in1, a1, a2, a3);
+        check(in2, b1, b2, b3);
+        check(in3, c1, c2, c3);
+    }
+
+
+    #[test]
+    fn aes128_keyschedule_gf8() {
+        let mut rng = thread_rng();
+        let key = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
+        let (key1, key2, key3) = transpose(key.into_iter().map(|x| secret_share(&mut rng, &GF8(x))));
+
+        let program = |key: Vec<RssShare<GF8>>| {
+            move |p: &mut Party| {
+                aes128_keyschedule(p, key).unwrap()
+            }
+        };
+
+        let (h1, h2, h3) = localhost_setup(program(key1), program(key2), program(key3));
+        let (ks1, _) = h1.join().unwrap();
+        let (ks2, _) = h2.join().unwrap();
+        let (ks3, _) = h3.join().unwrap();
+
+        assert_eq!(ks1.len(), 11);
+        assert_eq!(ks2.len(), 11);
+        assert_eq!(ks3.len(), 11);
+
+        let mut ks = Vec::with_capacity(11);
+        for (ks1, (ks2, ks3)) in ks1.into_iter().zip(ks2.into_iter().zip(ks3)) {
+            let mut rk = Vec::with_capacity(16);
+            let ks1 = ks1.to_rss_vec();
+            let ks2 = ks2.to_rss_vec();
+            let ks3 = ks3.to_rss_vec();
+            assert_eq!(ks1.len(), 16);
+            assert_eq!(ks2.len(), 16);
+            assert_eq!(ks3.len(), 16);
+            for i in 0..16 {
+                consistent(&ks1[i], &ks2[i], &ks3[i]);
+                rk.push((ks1[i], ks2[i], ks3[i]));
+            }
+            ks.push(rk);
+        }
+        // round keys in row-first notation
+        let round_keys: [[u8; 16]; 11] = [
+            [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
+            [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
+            [0xf2, 0x7a, 0x59, 0x73, 0xc2, 0x96, 0x35, 0x59, 0x95, 0xb9, 0x80, 0xf6, 0xf2, 0x43, 0x7a, 0x7f],
+            [0x3d, 0x47, 0x1e, 0x6d, 0x80, 0x16, 0x23, 0x7a, 0x47, 0xfe, 0x7e, 0x88, 0x7d, 0x3e, 0x44, 0x3b],
+            [0xef, 0xa8, 0xb6, 0xdb, 0x44, 0x52, 0x71, 0x0b, 0xa5, 0x5b, 0x25, 0xad, 0x41, 0x7f, 0x3b, 0x00],
+            [0xd4, 0x7c, 0xca, 0x11, 0xd1, 0x83, 0xf2, 0xf9, 0xc6, 0x9d, 0xb8, 0x15, 0xf8, 0x87, 0xbc, 0xbc],
+            [0x6d, 0x11, 0xdb, 0xca, 0x88, 0x0b, 0xf9, 0x00, 0xa3, 0x3e, 0x86, 0x93, 0x7a, 0xfd, 0x41, 0xfd],
+            [0x4e, 0x5f, 0x84, 0x4e, 0x54, 0x5f, 0xa6, 0xa6, 0xf7, 0xc9, 0x4f, 0xdc, 0x0e, 0xf3, 0xb2, 0x4f],
+            [0xea, 0xb5, 0x31, 0x7f, 0xd2, 0x8d, 0x2b, 0x8d, 0x73, 0xba, 0xf5, 0x29, 0x21, 0xd2, 0x60, 0x2f],
+            [0xac, 0x19, 0x28, 0x57, 0x77, 0xfa, 0xd1, 0x5c, 0x66, 0xdc, 0x29, 0x00, 0xf3, 0x21, 0x41, 0x6e],
+            [0xd0, 0xc9, 0xe1, 0xb6, 0x14, 0xee, 0x3f, 0x63, 0xf9, 0x25, 0x0c, 0x0c, 0xa8, 0x89, 0xc8, 0xa6],
+        ];
+        for i in 0..11 {
+            for j in 0..16 {
+                let (x1, x2, x3) = ks[i][j];
+                assert_eq(x1, x2, x3, GF8(round_keys[i][j]));
+            }
+        }
+    }
+
+    #[test]
+    fn inv_shift_rows() {
+        let mut state = VectorAesState::new(1);
+        // fill with sequence
+        state.si.copy_from_slice(&(0..16).map(|x|GF8(x)).collect::<Vec<_>>());
+
+        let mut copy = state.clone();
+        copy.shift_rows();
+        copy.inv_shift_rows();
+        assert_eq!(state.si, copy.si);
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8() {
+        // FIPS 197 Appendix B
+        let input: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32]; //[0x32, 0x88, 0x31, 0xe0, 0x43, 0x5a, 0x31, 0x37, 0xf6, 0x30, 0x98, 0x07, 0xa8, 0x8d, 0xa2, 0x34];
+        let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
+        let round_keys: [[u8; 16]; 11] = [ // already in row-first representation
+            [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
+            [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
+            [0xf2, 0x7a, 0x59, 0x73, 0xc2, 0x96, 0x35, 0x59, 0x95, 0xb9, 0x80, 0xf6, 0xf2, 0x43, 0x7a, 0x7f],
+            [0x3d, 0x47, 0x1e, 0x6d, 0x80, 0x16, 0x23, 0x7a, 0x47, 0xfe, 0x7e, 0x88, 0x7d, 0x3e, 0x44, 0x3b],
+            [0xef, 0xa8, 0xb6, 0xdb, 0x44, 0x52, 0x71, 0x0b, 0xa5, 0x5b, 0x25, 0xad, 0x41, 0x7f, 0x3b, 0x00],
+            [0xd4, 0x7c, 0xca, 0x11, 0xd1, 0x83, 0xf2, 0xf9, 0xc6, 0x9d, 0xb8, 0x15, 0xf8, 0x87, 0xbc, 0xbc],
+            [0x6d, 0x11, 0xdb, 0xca, 0x88, 0x0b, 0xf9, 0x00, 0xa3, 0x3e, 0x86, 0x93, 0x7a, 0xfd, 0x41, 0xfd],
+            [0x4e, 0x5f, 0x84, 0x4e, 0x54, 0x5f, 0xa6, 0xa6, 0xf7, 0xc9, 0x4f, 0xdc, 0x0e, 0xf3, 0xb2, 0x4f],
+            [0xea, 0xb5, 0x31, 0x7f, 0xd2, 0x8d, 0x2b, 0x8d, 0x73, 0xba, 0xf5, 0x29, 0x21, 0xd2, 0x60, 0x2f],
+            [0xac, 0x19, 0x28, 0x57, 0x77, 0xfa, 0xd1, 0x5c, 0x66, 0xdc, 0x29, 0x00, 0xf3, 0x21, 0x41, 0x6e],
+            [0xd0, 0xc9, 0xe1, 0xb6, 0x14, 0xee, 0x3f, 0x63, 0xf9, 0x25, 0x0c, 0x0c, 0xa8, 0x89, 0xc8, 0xa6],
+        ];
+        let expected = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34]; //[0x39, 0x02, 0xdc, 0x19, 0x25, 0xdc, 0x11, 0x6a, 0x84, 0x09, 0x85, 0x0b, 0x1d, 0xfb, 0x97, 0x32];
+        let mut rng = thread_rng();
+        let (in1, in2, in3) = secret_share_vectorstate(&mut rng, &input);
+        let mut ks1 = Vec::with_capacity(11);
+        let mut ks2 = Vec::with_capacity(11);
+        let mut ks3 = Vec::with_capacity(11);
+        for i in 0..11 {
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &round_keys[i].map(|x|GF8(x)));
+            ks1.push(s1);
+            ks2.push(s2);
+            ks3.push(s3);
         }
 
-        assert_eq!(c.len(), in3.len());
-        for (input, (c1,c2,c3)) in in3.into_iter().zip(c) {
-            consistent(&c1, &c2, &c3);
-            assert_eq(c1, c2, c3, input);
+        let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
+            move |p: &mut Party| {
+                aes128_inv_no_keyschedule(p, input, &ks).unwrap()
+            }
+        };
+        let (h1, h2, h3) = localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3));
+        let (s1, _) = h1.join().unwrap();
+        let (s2, _) = h2.join().unwrap();
+        let (s3, _) = h3.join().unwrap();
+        assert_eq!(s1.n, 1);
+        assert_eq!(s2.n, 1);
+        assert_eq!(s3.n, 1);
+
+        let shares: Vec<_> = s1.to_bytes().into_iter().zip(s2.to_bytes().into_iter().zip(s3.to_bytes()))
+            .map(|(s1, (s2,s3))| (s1, s2, s3)).collect();
+
+        for (s1,s2,s3) in &shares {
+            consistent(s1, s2, s3);
+        }
+
+        for (i,(s1, s2, s3)) in shares.into_iter().enumerate() {
+            assert_eq(s1, s2, s3, GF8(expected[i]));
         }
     }
 }

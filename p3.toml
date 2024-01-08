@@ -1,0 +1,18 @@
+party_index = 3
+[p1]
+address = "127.0.0.1"
+port = 8100
+certificate = "keys/p1.pem"
+private_key = "keys/p1.key"
+
+[p2]
+address = "127.0.0.1"
+port = 8101
+certificate = "keys/p2.pem"
+private_key = "keys/p2.key"
+
+[p3]
+address = "127.0.0.1"
+port = 8102
+certificate = "keys/p3.pem"
+private_key = "keys/p3.key"
