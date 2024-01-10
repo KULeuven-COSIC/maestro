@@ -5,6 +5,12 @@ use crate::party::Party;
 use crate::share::field::GF8;
 use crate::share::{FieldVectorCommChannel, RssShare};
 
+#[derive(Clone, Copy)]
+pub enum ImplVariant {
+    Simple,     // uses the gf8 inversion as in Figure 6
+    Optimized   // uses gf8 inversion as in Algorithm 5
+}
+
 // a row-wise representation of the AES (round) key
 #[derive(Clone)]
 pub struct AesKeyState {
@@ -212,8 +218,7 @@ pub fn input_round(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcResult<(Vector
     let n = input.len();
     // create 3n*16 random elements
     let random = party.generate_random(3*16*n);
-    let mut my_random = output_round(party, &random[..n*16], &random[n*16..2*n*16], &random[2*n*16..])?;
-    let mut i = 0;
+    let my_random = output_round(party, &random[..n*16], &random[n*16..2*n*16], &random[2*n*16..])?;
 
     let (mut pi_random, pii_random, mut piii_random) = match party.i {
         0 => (random[..n*16].to_vec(), random[n*16..2*n*16].to_vec(), random[2*n*16..].to_vec()),
@@ -323,8 +328,8 @@ fn add_round_key(states: &mut VectorAesState, round_key: &AesKeyState) {
     }
 }
 
-fn sub_bytes(party: &mut Party, states: &mut VectorAesState) -> MpcResult<()> {
-    sbox_layer(party, &mut states.si, &mut states.sii)
+fn sub_bytes(party: &mut Party, states: &mut VectorAesState, variant: ImplVariant) -> MpcResult<()> {
+    sbox_layer(party, &mut states.si, &mut states.sii, variant)
 }
 
 #[inline]
@@ -340,6 +345,7 @@ fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
     res
 }
 
+// the straight-forward gf8 inversion using 4 multiplication and only squaring (see Chida et al. "High-Throughput Secure AES Computation" in WAHC'18 [Figure 6])
 fn gf8_inv_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     let n = si.len();
     // this is not yet the multiplication that chida et al use
@@ -368,9 +374,56 @@ fn gf8_inv_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResul
     mul(party, si, sii, &x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..])
 }
 
-fn sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    let n = si.len();
+    let x2 = (square_layer(si), square_layer(sii));
+    // MULT(x²,x)
+    let x3ii: Vec<_> = party.generate_random(n)
+    .into_iter().enumerate()
+    .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
+    .collect();
+    // send to P+1
+    party.comm_next.write_vector(&x3ii)?;
+    let mut x3i = vec![GF8(0); n];
+    // receive from P-1
+    party.comm_prev.read_vector(&mut x3i)?;
+
+    // MULT(x^12, x^2) and MULT(x^12, x^3)
+    let mut x14x15ii: Vec<_> = party.generate_random(2*n)
+    .into_iter().map(|alpha| alpha.si + alpha.sii)
+    .collect();
+    for i in 0..n {
+        x14x15ii[i] += GF8::x4y2(x3i[i] + x3ii[i], si[i] + sii[i]) + GF8::x4y2(x3i[i], si[i]);
+    }
+    for i in 0..n {
+        let tmp = x3i[i] + x3ii[i];
+        x14x15ii[n+i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
+    }
+    // send to P+1
+    party.comm_next.write_vector(&x14x15ii)?;
+    let mut x14x15i = vec![GF8(0); 2*n];
+    // receive from P-1
+    party.comm_prev.read_vector(&mut x14x15i)?;
+
+    // MULT(x^240, x^14)
+    let x254ii: Vec<_> = party.generate_random(n).into_iter().enumerate()
+    .map(|(i, alpha)| alpha.si + alpha.sii + GF8::x16y(x14x15i[n+i] + x14x15ii[n+i], x14x15i[i] + x14x15ii[i]) + GF8::x16y(x14x15i[n+i], x14x15i[i]))
+    .collect();
+    sii.copy_from_slice(&x254ii);
+    // send to P+1
+    party.comm_next.write_vector(sii)?;
+    // receive from P-1
+    party.comm_prev.read_vector(si)?;
+    Ok(())
+}
+
+fn sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
     // first inverse, then affine transform
-    gf8_inv_layer(party, si, sii)?;
+    match variant {
+        ImplVariant::Simple => gf8_inv_layer(party, si, sii)?,
+        ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)?
+    };
+    
 
     // apply affine transform
     for i in 0..si.len() {
@@ -386,7 +439,7 @@ fn sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<(
     Ok(())
 }
 
-fn inv_sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+fn inv_sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
     // first inverse affine transform, then gf8 inverse
     // apply inverse affine transform
     for i in 0..si.len() {
@@ -399,51 +452,54 @@ fn inv_sbox_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResu
         si[i] = si[i].inv_aes_sbox_affine_transform();
         sii[i] = sii[i].inv_aes_sbox_affine_transform();
     }
-    gf8_inv_layer(party, si, sii)
+    match variant {
+        ImplVariant::Simple => gf8_inv_layer(party, si, sii),
+        ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)
+    }
 }
 
-fn inv_sub_bytes(party: &mut Party, state: &mut VectorAesState) -> MpcResult<()> {
-    inv_sbox_layer(party, &mut state.si, &mut state.sii)
+fn inv_sub_bytes(party: &mut Party, state: &mut VectorAesState, variant: ImplVariant) -> MpcResult<()> {
+    inv_sbox_layer(party, &mut state.si, &mut state.sii, variant)
 }
 
-pub fn aes128_no_keyschedule(party: &mut Party, inputs: VectorAesState, round_key: &Vec<AesKeyState>) -> MpcResult<VectorAesState> {
+pub fn aes128_no_keyschedule(party: &mut Party, inputs: VectorAesState, round_key: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
     debug_assert_eq!(round_key.len(), 11);
     let mut state = inputs;
 
     add_round_key(&mut state, &round_key[0]);
     for r in 1..= 9 {
-        sub_bytes(party, &mut state)?;
+        sub_bytes(party, &mut state, variant)?;
         state.shift_rows();
         state.mix_columns();
         add_round_key(&mut state, &round_key[r]);
     }
-    sub_bytes(party, &mut state)?;
+    sub_bytes(party, &mut state, variant)?;
     state.shift_rows();
     add_round_key(&mut state, &round_key[10]);
     Ok(state)
 }
 
-pub fn aes128_inv_no_keyschedule(party: &mut Party, inputs: VectorAesState, key_schedule: &Vec<AesKeyState>) -> MpcResult<VectorAesState> {
+pub fn aes128_inv_no_keyschedule(party: &mut Party, inputs: VectorAesState, key_schedule: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
     debug_assert_eq!(key_schedule.len(), 11);
     let mut state = inputs;
 
     add_round_key(&mut state, &key_schedule[10]);
     for r in (1..=9).rev() {
         state.inv_shift_rows();
-        inv_sub_bytes(party, &mut state)?;
+        inv_sub_bytes(party, &mut state, variant)?;
         add_round_key(&mut state, &key_schedule[r]);
         state.inv_mix_columns();
     }
     state.inv_shift_rows();
-    inv_sub_bytes(party, &mut state)?;
+    inv_sub_bytes(party, &mut state, variant)?;
     add_round_key(&mut state, &key_schedule[0]);
     Ok(state)
 }
 
-fn aes128_keyschedule_round(party: &mut Party, rk: &AesKeyState, rcon: GF8) -> MpcResult<AesKeyState> {
+fn aes128_keyschedule_round(party: &mut Party, rk: &AesKeyState, rcon: GF8, variant: ImplVariant) -> MpcResult<AesKeyState> {
     let mut rot_i = [rk.si[7], rk.si[11], rk.si[15], rk.si[3]];
     let mut rot_ii = [rk.sii[7], rk.sii[11], rk.sii[15], rk.sii[3]];
-    sbox_layer(party, &mut rot_i, &mut rot_ii)?;
+    sbox_layer(party, &mut rot_i, &mut rot_ii, variant)?;
     
     let mut output = rk.clone();
     for i in 0..4 {
@@ -465,13 +521,13 @@ fn aes128_keyschedule_round(party: &mut Party, rk: &AesKeyState, rcon: GF8) -> M
     Ok(output)
 }
 
-pub fn aes128_keyschedule(party: &mut Party, key: Vec<RssShare<GF8>>) -> MpcResult<Vec<AesKeyState>> {
+pub fn aes128_keyschedule(party: &mut Party, key: Vec<RssShare<GF8>>, variant: ImplVariant) -> MpcResult<Vec<AesKeyState>> {
     debug_assert_eq!(key.len(), 16);
     const ROUND_CONSTANTS: [GF8; 10] = [GF8(0x01), GF8(0x02), GF8(0x04), GF8(0x08), GF8(0x10), GF8(0x20), GF8(0x40), GF8(0x80), GF8(0x1b), GF8(0x36)];
     let mut ks = Vec::with_capacity(11);
     ks.push(AesKeyState::from_bytes(key)); // rk0
     for i in 1..=10 {
-        let rki = aes128_keyschedule_round(party, &ks[i-1], ROUND_CONSTANTS[i-1])?;
+        let rki = aes128_keyschedule_round(party, &ks[i-1], ROUND_CONSTANTS[i-1], variant)?;
         ks.push(rki);
     }
     Ok(ks)
@@ -487,7 +543,7 @@ mod test {
     use crate::share::{FieldRngExt, RssShare};
     use crate::share::test::{assert_eq, consistent, secret_share};
 
-    use super::{square_layer, aes128_keyschedule};
+    use super::{square_layer, aes128_keyschedule, ImplVariant};
 
     const AES_SBOX: [u8; 256] = [0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76, 0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0, 0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15, 0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A, 0x07, 0x12, 0x80, 0xE2, 0xEB, 0x27, 0xB2, 0x75, 0x09, 0x83, 0x2C, 0x1A, 0x1B, 0x6E, 0x5A, 0xA0, 0x52, 0x3B, 0xD6, 0xB3, 0x29, 0xE3, 0x2F, 0x84, 0x53, 0xD1, 0x00, 0xED, 0x20, 0xFC, 0xB1, 0x5B, 0x6A, 0xCB, 0xBE, 0x39, 0x4A, 0x4C, 0x58, 0xCF, 0xD0, 0xEF, 0xAA, 0xFB, 0x43, 0x4D, 0x33, 0x85, 0x45, 0xF9, 0x02, 0x7F, 0x50, 0x3C, 0x9F, 0xA8, 0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10, 0xFF, 0xF3, 0xD2, 0xCD, 0x0C, 0x13, 0xEC, 0x5F, 0x97, 0x44, 0x17, 0xC4, 0xA7, 0x7E, 0x3D, 0x64, 0x5D, 0x19, 0x73, 0x60, 0x81, 0x4F, 0xDC, 0x22, 0x2A, 0x90, 0x88, 0x46, 0xEE, 0xB8, 0x14, 0xDE, 0x5E, 0x0B, 0xDB, 0xE0, 0x32, 0x3A, 0x0A, 0x49, 0x06, 0x24, 0x5C, 0xC2, 0xD3, 0xAC, 0x62, 0x91, 0x95, 0xE4, 0x79, 0xE7, 0xC8, 0x37, 0x6D, 0x8D, 0xD5, 0x4E, 0xA9, 0x6C, 0x56, 0xF4, 0xEA, 0x65, 0x7A, 0xAE, 0x08, 0xBA, 0x78, 0x25, 0x2E, 0x1C, 0xA6, 0xB4, 0xC6, 0xE8, 0xDD, 0x74, 0x1F, 0x4B, 0xBD, 0x8B, 0x8A, 0x70, 0x3E, 0xB5, 0x66, 0x48, 0x03, 0xF6, 0x0E, 0x61, 0x35, 0x57, 0xB9, 0x86, 0xC1, 0x1D, 0x9E, 0xE1, 0xF8, 0x98, 0x11, 0x69, 0xD9, 0x8E, 0x94, 0x9B, 0x1E, 0x87, 0xE9, 0xCE, 0x55, 0x28, 0xDF, 0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16];
 
@@ -604,8 +660,7 @@ mod test {
         }).collect()
     }
 
-    #[test]
-    fn sub_bytes_() {
+    fn test_sub_bytes(variant: ImplVariant) {
         // check all possible S-box inputs by using 16 AES states in parallel
         let mut rng = thread_rng();
         let inputs: Vec<_> = (0..256).map(|x| secret_share(&mut rng, &GF8(x as u8)))
@@ -631,7 +686,7 @@ mod test {
 
         let program = |mut state: VectorAesState| {
             move |p: &mut Party| {
-                sub_bytes(p, &mut state).unwrap();
+                sub_bytes(p, &mut state, variant).unwrap();
                 state
             }
         };
@@ -655,6 +710,16 @@ mod test {
         }
     }
 
+    #[test]
+    fn sub_bytes_simple() {
+        test_sub_bytes(ImplVariant::Simple);
+    }
+
+    #[test]
+    fn sub_bytes_optimized() {
+        test_sub_bytes(ImplVariant::Optimized);
+    }
+
     fn secret_share_aes_key_state<R: Rng + CryptoRng>(rng: &mut R, state: &[GF8]) -> (AesKeyState, AesKeyState, AesKeyState) {
         let mut state1 = AesKeyState::new();
         let mut state2 = AesKeyState::new();
@@ -670,8 +735,7 @@ mod test {
         (state1, state2, state3)
     }
 
-    #[test]
-    fn aes128_no_keyschedule_gf8() {
+    fn test_aes128_no_keyschedule_gf8(variant: ImplVariant) {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
         let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
@@ -703,7 +767,7 @@ mod test {
 
         let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
             move |p: &mut Party| {
-                aes128_no_keyschedule(p, input, &ks).unwrap()
+                aes128_no_keyschedule(p, input, &ks, variant).unwrap()
             }
         };
         let (h1, h2, h3) = localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3));
@@ -724,6 +788,16 @@ mod test {
         for (i,(s1, s2, s3)) in shares.into_iter().enumerate() {
             assert_eq(s1, s2, s3, GF8(expected[i]));
         }
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8_simple() {
+        test_aes128_no_keyschedule_gf8(ImplVariant::Simple);
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8_optimized() {
+        test_aes128_no_keyschedule_gf8(ImplVariant::Optimized);
     }
 
     fn transpose<T>(v: impl IntoIterator<Item=(T,T,T)>) -> (Vec<T>, Vec<T>, Vec<T>) {
@@ -812,16 +886,14 @@ mod test {
         check(in3, c1, c2, c3);
     }
 
-
-    #[test]
-    fn aes128_keyschedule_gf8() {
+    fn test_aes128_keyschedule_gf8(variant: ImplVariant) {
         let mut rng = thread_rng();
         let key = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
         let (key1, key2, key3) = transpose(key.into_iter().map(|x| secret_share(&mut rng, &GF8(x))));
 
         let program = |key: Vec<RssShare<GF8>>| {
             move |p: &mut Party| {
-                aes128_keyschedule(p, key).unwrap()
+                aes128_keyschedule(p, key, variant).unwrap()
             }
         };
 
@@ -872,6 +944,16 @@ mod test {
     }
 
     #[test]
+    fn aes128_keyschedule_gf8_simple() {
+        test_aes128_keyschedule_gf8(ImplVariant::Simple);
+    }
+
+    #[test]
+    fn aes128_keyschedule_gf8_optimized() {
+        test_aes128_keyschedule_gf8(ImplVariant::Optimized);
+    }
+
+    #[test]
     fn inv_shift_rows() {
         let mut state = VectorAesState::new(1);
         // fill with sequence
@@ -883,8 +965,7 @@ mod test {
         assert_eq!(state.si, copy.si);
     }
 
-    #[test]
-    fn inv_aes128_no_keyschedule_gf8() {
+    fn test_inv_aes128_no_keyschedule_gf8(variant: ImplVariant) {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32]; //[0x32, 0x88, 0x31, 0xe0, 0x43, 0x5a, 0x31, 0x37, 0xf6, 0x30, 0x98, 0x07, 0xa8, 0x8d, 0xa2, 0x34];
         let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
@@ -916,7 +997,7 @@ mod test {
 
         let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
             move |p: &mut Party| {
-                aes128_inv_no_keyschedule(p, input, &ks).unwrap()
+                aes128_inv_no_keyschedule(p, input, &ks, variant).unwrap()
             }
         };
         let (h1, h2, h3) = localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3));
@@ -937,5 +1018,15 @@ mod test {
         for (i,(s1, s2, s3)) in shares.into_iter().enumerate() {
             assert_eq(s1, s2, s3, GF8(expected[i]));
         }
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8_simple() {
+        test_inv_aes128_no_keyschedule_gf8(ImplVariant::Simple);
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8_optimized() {
+        test_inv_aes128_no_keyschedule_gf8(ImplVariant::Optimized);
     }
 }

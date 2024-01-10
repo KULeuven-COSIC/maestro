@@ -8,6 +8,7 @@ use crate::share::RssShare;
 use crate::share::field::GF8;
 
 mod online;
+pub use self::online::ImplVariant;
 
 // Party for Chida et al. semi-honest protocol
 pub struct ChidaParty(Party);
@@ -21,12 +22,12 @@ impl ChidaParty {
         VectorAesState::from_bytes(self.0.generate_random(size * 16))
     }
 
-    pub fn aes128_no_keyschedule(&mut self, blocks: VectorAesState, keyschedule: &Vec<AesKeyState>) -> MpcResult<VectorAesState> {
-        online::aes128_no_keyschedule(&mut self.0, blocks, keyschedule)
+    pub fn aes128_no_keyschedule(&mut self, blocks: VectorAesState, keyschedule: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
+        online::aes128_no_keyschedule(&mut self.0, blocks, keyschedule, variant)
     }
 
-    pub fn aes128_keyschedule(&mut self, key: Vec<RssShare<GF8>>) -> MpcResult<Vec<AesKeyState>> {
-        online::aes128_keyschedule(&mut self.0, key)
+    pub fn aes128_keyschedule(&mut self, key: Vec<RssShare<GF8>>, variant: ImplVariant) -> MpcResult<Vec<AesKeyState>> {
+        online::aes128_keyschedule(&mut self.0, key, variant)
     }
 
     pub fn output(&mut self, blocks: VectorAesState) -> MpcResult<Vec<GF8>> {
@@ -36,7 +37,7 @@ impl ChidaParty {
 }
 
 // simd: how many parallel AES calls
-pub fn chida_benchmark(connected: ConnectedParty, simd: usize) {
+pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVariant) {
     let mut party = ChidaParty::setup(connected);
     let input = party.random_state(simd);
     // create random key states for benchmarking purposes
@@ -47,7 +48,7 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize) {
     .collect();
 
     let start = Instant::now();
-    let output = party.aes128_no_keyschedule(input, &ks).unwrap();
+    let output = party.aes128_no_keyschedule(input, &ks, variant).unwrap();
     party.0.teardown();
     let duration = start.elapsed();
     println!("Finished benchmark");

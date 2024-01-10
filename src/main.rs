@@ -9,6 +9,8 @@ use std::{path::PathBuf, time::Duration};
 use clap::{Parser, Subcommand};
 use network::ConnectedParty;
 
+use crate::chida::ImplVariant;
+
 #[derive(Parser)]
 struct Cli {
     #[arg(long, value_name = "FILE")]
@@ -34,7 +36,7 @@ fn main() {
         Commands::ChidaBenchmark { simd } => {
             let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0))).unwrap();
             println!("Connected!");
-            chida::chida_benchmark(connected, simd);
+            chida::chida_benchmark(connected, simd, ImplVariant::Optimized);
         }
     }
 }

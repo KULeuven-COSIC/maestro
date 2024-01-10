@@ -1,4 +1,5 @@
 pub mod field;
+mod gf8_tables;
 
 use std::io;
 use std::ops::{Add, Mul, Neg, Sub};
@@ -68,6 +69,7 @@ impl<F: Field+Copy> Copy for RssShare<F> {}
 
 pub trait FieldRngExt<F: Field> {
     fn generate(&mut self, n: usize) -> Vec<F>;
+    fn fill(&mut self, buf: &mut [F]);
 }
 
 pub trait FieldDigestExt<F: Field> {
