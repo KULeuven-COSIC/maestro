@@ -316,38 +316,38 @@ mod tests {
 
     // #[test]
     fn tcp_single_thread_throughput() {
-        const buf_sizes: [usize; 4] = [1024, 2048, 4096, 8192];
-        const data: usize = 1_000_000_000;
+        const BUF_SIZES: [usize; 4] = [1024, 2048, 4096, 8192];
+        const DATA: usize = 1_000_000_000;
         let server = thread::spawn(|| {
-            let mut listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+            let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
             let (mut stream, _) = listener.accept().unwrap();
-            for buf_size in buf_sizes {
+            for buf_size in BUF_SIZES {
                 let start = Instant::now();
                 let mut buf = vec![0; buf_size];
-                let mut remaining = data as i64;
+                let mut remaining = DATA as i64;
                 while remaining > 0 {
                     stream.read_exact(&mut buf).unwrap();
                     remaining -= buf_size as i64;
                 }
                 let time = start.elapsed();
                 let s = time.as_secs_f64();
-                println!("Server: [{}] {} byte/sec", buf_size, (data as f64)/s);
+                println!("Server: [{}] {} byte/sec", buf_size, (DATA as f64)/s);
             }
         });
 
         let client = thread::spawn(|| {
             let mut stream = TcpStream::connect("127.0.0.1:8080").unwrap();
-            for buf_size in buf_sizes {
+            for buf_size in BUF_SIZES {
                 let start = Instant::now();
                 let buf = vec![0; buf_size];
-                let mut remaining = data as i64;
+                let mut remaining = DATA as i64;
                 while remaining > 0 {
                     stream.write_all(&buf).unwrap();
                     remaining -= buf_size as i64;
                 }
                 let time = start.elapsed();
                 let s = time.as_secs_f64();
-                println!("Client: [{}] {} byte/sec", buf_size, (data as f64)/s);
+                println!("Client: [{}] {} byte/sec", buf_size, (DATA as f64)/s);
             }
         });
 

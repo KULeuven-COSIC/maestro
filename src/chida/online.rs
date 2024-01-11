@@ -376,7 +376,6 @@ fn gf8_inv_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResul
 
 fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     let n = si.len();
-    let x2 = (square_layer(si), square_layer(sii));
     // MULT(x²,x)
     let x3ii: Vec<_> = party.generate_random(n)
     .into_iter().enumerate()

@@ -3,7 +3,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 use crate::network::CommChannel;
 use crate::party::broadcast::{Broadcast, BroadcastContext};
-use crate::party::correlated_randomness::{GlobalRng, SharedRng};
+use crate::party::correlated_randomness::GlobalRng;
 use crate::party::error::MpcError::SacrificeError;
 use crate::party::error::MpcResult;
 use crate::party::Party;

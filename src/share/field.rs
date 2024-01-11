@@ -124,6 +124,10 @@ impl<D: Digest> FieldDigestExt<GF8> for D {
     }
 }
 
+// https://docs.rs/bytemuck/latest/bytemuck/
+// https://docs.rs/safe-transmute/latest/safe_transmute/trivial/trait.TriviallyTransmutable.html
+// https://docs.rs/pod/latest/pod/trait.Pod.html#method.from_byte_slice
+
 impl FieldVectorCommChannel<GF8> for CommChannel {
     fn write_vector(&mut self, vector: &[GF8]) -> std::io::Result<()> {
         let mut buf = vec![0; vector.len()];

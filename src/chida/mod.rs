@@ -48,7 +48,7 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     .collect();
 
     let start = Instant::now();
-    let output = party.aes128_no_keyschedule(input, &ks, variant).unwrap();
+    let _output = party.aes128_no_keyschedule(input, &ks, variant).unwrap();
     party.0.teardown();
     let duration = start.elapsed();
     println!("Finished benchmark");
