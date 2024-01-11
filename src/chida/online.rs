@@ -5,13 +5,13 @@ use crate::party::Party;
 use crate::share::field::GF8;
 use crate::share::{FieldVectorCommChannel, RssShare};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum ImplVariant {
     Simple,     // uses the gf8 inversion as in Figure 6
     Optimized   // uses gf8 inversion as in Algorithm 5
 }
 
-// a row-wise representation of the AES (round) key
+/// A row-wise representation of the AES (round) key
 #[derive(Clone)]
 pub struct AesKeyState {
     si: [GF8; 16],
@@ -19,6 +19,7 @@ pub struct AesKeyState {
 }
 
 impl AesKeyState {
+    /// Returns a all zero state
     pub fn new() -> Self {
         Self {
             si: [GF8(0); 16],
