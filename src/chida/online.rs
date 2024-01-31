@@ -1,9 +1,12 @@
 use std::io;
 
+use rand_chacha::ChaCha20Rng;
+
+use crate::network::CommChannel;
 use crate::party::error::MpcResult;
 use crate::party::Party;
 use crate::share::field::GF8;
-use crate::share::{FieldVectorCommChannel, RssShare};
+use crate::share::{Field, FieldRngExt, FieldVectorCommChannel, RssShare};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ImplVariant {
@@ -269,13 +272,15 @@ pub fn input_round(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcResult<(Vector
 
 }
 
-pub fn output_round(party: &mut Party, to_p1: &[RssShare<GF8>], to_p2: &[RssShare<GF8>], to_p3: &[RssShare<GF8>]) -> MpcResult<Vec<GF8>> {
+pub fn output_round<F: Field + Copy>(party: &mut Party, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> 
+where CommChannel: FieldVectorCommChannel<F>
+{
     let (my, siii) = match party.i {
         0 => {
             // send my share to P2
             party.comm_next.write_vector(&to_p2.into_iter().map(|rss| rss.si).collect::<Vec<_>>())?;
             // receive s3 from P3
-            let mut s3 = vec![GF8(0); to_p1.len()];
+            let mut s3 = vec![F::default(); to_p1.len()];
             party.comm_prev.read_vector(&mut s3)?;
             (to_p1, s3)
         },
@@ -283,7 +288,7 @@ pub fn output_round(party: &mut Party, to_p1: &[RssShare<GF8>], to_p2: &[RssShar
             // send my share to P3
             party.comm_next.write_vector(&to_p3.into_iter().map(|rss| rss.si).collect::<Vec<_>>())?;
             // receive s1 from P1
-            let mut s1 = vec![GF8(0); to_p2.len()];
+            let mut s1 = vec![F::default(); to_p2.len()];
             party.comm_prev.read_vector(&mut s1)?;
             (to_p2, s1)
         },
@@ -291,7 +296,7 @@ pub fn output_round(party: &mut Party, to_p1: &[RssShare<GF8>], to_p2: &[RssShar
             // send my share to P1
             party.comm_next.write_vector(&to_p1.into_iter().map(|rss| rss.si).collect::<Vec<_>>())?;
             // receive s2 from P2
-            let mut s2 = vec![GF8(0); to_p3.len()];
+            let mut s2 = vec![F::default(); to_p3.len()];
             party.comm_prev.read_vector(&mut s2)?;
             (to_p3, s2)
         },
@@ -302,7 +307,9 @@ pub fn output_round(party: &mut Party, to_p1: &[RssShare<GF8>], to_p2: &[RssShar
     Ok(sum)
 }
 
-fn mul(party: &mut Party, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF8], bi: &[GF8], bii: &[GF8]) -> MpcResult<()> {
+
+pub fn mul<F: Field + Send + Sync>(party: &mut Party, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()>
+where ChaCha20Rng: FieldRngExt<F>, CommChannel: FieldVectorCommChannel<F> {
     debug_assert_eq!(ci.len(), ai.len());
     debug_assert_eq!(ci.len(), aii.len());
     debug_assert_eq!(ci.len(), bi.len());
@@ -311,7 +318,7 @@ fn mul(party: &mut Party, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF
 
     let alphas = party.generate_alpha(ci.len());
     for (i, alpha_i) in alphas.into_iter().enumerate() {
-        ci[i] = ai[i] * bi[i] + ai[i] * bii[i] + aii[i] * bi[i] + alpha_i;
+        ci[i] = ai[i].clone() * bi[i].clone() + ai[i].clone() * bii[i].clone() + aii[i].clone() * bi[i].clone() + alpha_i;
     }
     // println!("Writing {} elements to comm_prev", ci.len());
     party.comm_prev.write_vector(ci).map_err(|err| io::Error::new(err.kind(), format!("writing to comm_prev: {}", err.to_string())))?;
@@ -378,7 +385,7 @@ fn gf8_inv_layer(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResul
 fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     let n = si.len();
     // MULT(x²,x)
-    let x3ii: Vec<_> = party.generate_random(n)
+    let x3ii: Vec<_> = party.generate_random::<GF8>(n)
     .into_iter().enumerate()
     .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
     .collect();
@@ -389,7 +396,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     party.comm_prev.read_vector(&mut x3i)?;
 
     // MULT(x^12, x^2) and MULT(x^12, x^3)
-    let mut x14x15ii: Vec<_> = party.generate_random(2*n)
+    let mut x14x15ii: Vec<_> = party.generate_random::<GF8>(2*n)
     .into_iter().map(|alpha| alpha.si + alpha.sii)
     .collect();
     for i in 0..n {
@@ -406,7 +413,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     party.comm_prev.read_vector(&mut x14x15i)?;
 
     // MULT(x^240, x^14)
-    let x254ii: Vec<_> = party.generate_random(n).into_iter().enumerate()
+    let x254ii: Vec<_> = party.generate_random::<GF8>(n).into_iter().enumerate()
     .map(|(i, alpha)| alpha.si + alpha.sii + GF8::x16y(x14x15i[n+i] + x14x15ii[n+i], x14x15i[i] + x14x15ii[i]) + GF8::x16y(x14x15i[n+i], x14x15i[i]))
     .collect();
     sii.copy_from_slice(&x254ii);
@@ -534,11 +541,15 @@ pub fn aes128_keyschedule(party: &mut Party, key: Vec<RssShare<GF8>>, variant: I
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
+    use std::thread::JoinHandle;
+
     use rand::{CryptoRng, Rng, thread_rng};
     use crate::chida::online::{aes128_no_keyschedule, AesKeyState, input_round, mul, output_round, sub_bytes, VectorAesState, aes128_inv_no_keyschedule};
+    use crate::chida::ChidaParty;
+    use crate::network::ConnectedParty;
     use crate::party::Party;
-    use crate::party::test::localhost_setup;
+    use crate::party::test::{localhost_connect, localhost_setup};
     use crate::share::field::GF8;
     use crate::share::{FieldRngExt, RssShare};
     use crate::share::test::{assert_eq, consistent, secret_share};
@@ -591,6 +602,35 @@ mod test {
         let state3 = VectorAesState::from_bytes(s3);
         (state1, state2, state3)
     }
+
+    pub fn chida_localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,ChidaParty)>, JoinHandle<(T2,ChidaParty)>, JoinHandle<(T3,ChidaParty)>) {
+        let _f1 = move |p: ConnectedParty| {
+            // println!("P1: Before Setup");
+            let mut p = ChidaParty::setup(p);
+            // println!("P1: After Setup");
+            let res = f1(&mut p);
+            p.inner.teardown();
+            (res, p)
+        };
+        let _f2 = move |p: ConnectedParty| {
+            // println!("P2: Before Setup");
+            let mut p = ChidaParty::setup(p);
+            // println!("P2: After Setup");
+            let res = f2(&mut p);
+            p.inner.teardown();
+            (res, p)
+        };
+        let _f3 = move |p: ConnectedParty| {
+            // println!("P3: Before Setup");
+            let mut p = ChidaParty::setup(p);
+            // println!("P3: After Setup");
+            let res = f3(&mut p);
+            p.inner.teardown();
+            (res, p)
+        };
+        localhost_connect(_f1, _f2, _f3)
+    }
+
 
     #[test]
     fn mix_columns() {

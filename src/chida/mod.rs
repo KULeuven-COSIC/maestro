@@ -19,34 +19,47 @@ use crate::party::Party;
 use crate::share::RssShare;
 use crate::share::field::GF8;
 
-mod online;
+pub mod online;
 pub use self::online::ImplVariant;
 
 ///
 
 // Party for Chida et al. semi-honest protocol
-pub struct ChidaParty(Party);
+pub struct ChidaParty {
+    inner: Party,
+}
 
 impl ChidaParty {
     pub fn setup(connected: ConnectedParty) -> Self {
-        Self(Party::setup_semi_honest(connected))
+        let party = Party::setup_semi_honest(connected);
+        Self {
+            inner: party,
+        }
+    }
+
+    pub fn inner(&self) -> &Party {
+        &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut Party {
+        &mut self.inner
     }
 
     pub fn random_state(&mut self, size: usize) -> VectorAesState {
-        VectorAesState::from_bytes(self.0.generate_random(size * 16))
+        VectorAesState::from_bytes(self.inner.generate_random(size * 16))
     }
 
     pub fn aes128_no_keyschedule(&mut self, blocks: VectorAesState, keyschedule: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
-        online::aes128_no_keyschedule(&mut self.0, blocks, keyschedule, variant)
+        online::aes128_no_keyschedule(self.inner_mut(), blocks, keyschedule, variant)
     }
 
     pub fn aes128_keyschedule(&mut self, key: Vec<RssShare<GF8>>, variant: ImplVariant) -> MpcResult<Vec<AesKeyState>> {
-        online::aes128_keyschedule(&mut self.0, key, variant)
+        online::aes128_keyschedule(self.inner_mut(), key, variant)
     }
 
     pub fn output(&mut self, blocks: VectorAesState) -> MpcResult<Vec<GF8>> {
         let shares = blocks.to_bytes();
-        online::output_round(&mut self.0, &shares, &shares, &shares)
+        online::output_round(&mut self.inner, &shares, &shares, &shares)
     }
 }
 
@@ -56,7 +69,7 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     let input = party.random_state(simd);
     // create random key states for benchmarking purposes
     let ks: Vec<_> = (0..11).map(|_| {
-        let rk = party.0.generate_random(16);
+        let rk = party.inner.generate_random(16);
         AesKeyState::from_rss_vec(rk)
     })
     .collect();
@@ -65,10 +78,10 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     let output = party.aes128_no_keyschedule(input, &ks, variant).unwrap();
     let duration = start.elapsed();
     let _ = party.output(output).unwrap();
-    party.0.teardown();
+    party.inner.teardown();
     
     println!("Finished benchmark");
     
-    println!("Party {}: Chida et al. with SIMD={} took {}s", party.0.i, simd, duration.as_secs_f64());
-    party.0.print_comm_statistics();
+    println!("Party {}: Chida et al. with SIMD={} took {}s", party.inner.i, simd, duration.as_secs_f64());
+    party.inner.print_comm_statistics();
 }

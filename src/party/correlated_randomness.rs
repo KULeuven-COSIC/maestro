@@ -12,6 +12,11 @@ pub struct SharedRng(ChaCha20Rng);
 
 pub struct GlobalRng(ChaCha20Rng);
 
+pub struct PairwiseSetupResult {
+    pub prev: SharedRng,
+    pub next: SharedRng
+}
+
 impl SharedRng {
 
     pub fn setup_pairwise<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, channel: &mut CommChannel, my_id: usize, to_id: usize) -> MpcResult<Self> {
@@ -57,7 +62,7 @@ impl SharedRng {
         }
     }
 
-    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, comm_next: &mut CommChannel, comm_prev: &mut CommChannel) -> MpcResult<(Self, Self)> {
+    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, comm_next: &mut CommChannel, comm_prev: &mut CommChannel) -> MpcResult<PairwiseSetupResult> {
         // create random seed part
         let mut seed = [0u8; 32];
         rng.fill_bytes(&mut seed[0..CR_SEC_PARAM]);
@@ -66,7 +71,10 @@ impl SharedRng {
         let mut seed_next = [0u8; 32];
         comm_next.read(&mut seed_next[0..CR_SEC_PARAM])?;
 
-        Ok((Self(ChaCha20Rng::from_seed(seed)), Self(ChaCha20Rng::from_seed(seed_next))))
+        Ok(PairwiseSetupResult {
+            prev: Self(ChaCha20Rng::from_seed(seed)),
+            next: Self(ChaCha20Rng::from_seed(seed_next))
+        })
     }
 }
 

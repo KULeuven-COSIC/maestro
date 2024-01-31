@@ -2,7 +2,7 @@ pub mod field;
 mod gf8_tables;
 
 use std::io;
-use std::ops::{Add, Mul, Neg, Sub};
+use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone  { // + AsRef<[u8]>
     /// Returns the field size in byte
@@ -43,6 +43,13 @@ impl<F: Field> Add<Self> for RssShare<F> {
     }
 }
 
+impl<F: Field + AddAssign> AddAssign<Self> for RssShare<F> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.si += rhs.si;
+        self.sii += rhs.sii;
+    }
+}
+
 impl<F: Field> Sub<Self> for RssShare<F> {
     type Output = Self;
 
@@ -79,6 +86,7 @@ pub trait FieldDigestExt<F: Field> {
 #[cfg(test)]
 pub mod test {
     use std::fmt::Debug;
+    use itertools::Itertools;
     use rand::{CryptoRng, Rng, thread_rng};
     use crate::share::{Field, FieldRngExt, RssShare};
     use crate::share::field::GF8;
@@ -94,7 +102,22 @@ pub mod test {
         assert_eq!(actual, value);
     }
 
-    pub fn secret_share<R: Rng + CryptoRng>(rng: &mut R, x: &GF8) -> (RssShare<GF8>, RssShare<GF8>, RssShare<GF8>) {
+    pub fn consistent_vector<F: Field + PartialEq + Debug>(share1: &[RssShare<F>], share2: &[RssShare<F>], share3: &[RssShare<F>]) {
+        assert_eq!(share1.len(), share2.len());
+        assert_eq!(share1.len(), share3.len());
+        for (s1, (s2,s3)) in share1.iter().zip(share2.iter().zip(share3)) {
+            consistent(s1, s2, s3);
+        }
+    }
+
+    pub fn assert_eq_vector<F: Field + PartialEq + Debug>(share1: impl IntoIterator<Item=RssShare<F>>, share2: impl IntoIterator<Item=RssShare<F>>, share3: impl IntoIterator<Item=RssShare<F>>, values: impl IntoIterator<Item=F>) {
+        for (s1, (s2, (s3, v))) in share1.into_iter().zip_eq(share2.into_iter().zip_eq(share3.into_iter().zip_eq(values))) {
+            assert_eq(s1, s2, s3, v);
+        }
+    }
+
+    pub fn secret_share<R: Rng + CryptoRng, F: Field + Copy>(rng: &mut R, x: &F) -> (RssShare<F>, RssShare<F>, RssShare<F>)
+    where R: FieldRngExt<F> {
         let r = rng.generate(2);
         let x1 = RssShare::from(x.clone() - r[0] - r[1], r[0]);
         let x2 = RssShare::from(r[0], r[1]);
@@ -102,12 +125,23 @@ pub mod test {
         (x1,x2,x3)
     }
 
+    pub fn secret_share_vector<R: Rng + CryptoRng, F: Field + Copy>(rng: &mut R, it: impl Iterator<Item=F>) -> (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>) 
+    where R: FieldRngExt<F>
+    {
+        let (s1, s2s3): (Vec<_>, Vec<_>) = it.map(|x| {
+            let (s1, s2, s3) = secret_share(rng, &x);
+            (s1, (s2,s3))
+        }).unzip();
+        let (s2, s3): (Vec<_>, Vec<_>) = s2s3.into_iter().unzip();
+        (s1,s2,s3)
+    }
+
     #[test]
     fn cmul_gf8() {
         const N: usize = 100;
         let mut rng = thread_rng();
         let x = rng.generate(N);
-        let c = rng.generate(N);
+        let c: Vec<GF8> = rng.generate(N);
 
         for i in 0..N {
             let (x1, x2, x3) = secret_share(&mut rng, &x[i]);

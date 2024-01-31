@@ -3,7 +3,7 @@ mod correlated_randomness;
 mod offline;
 mod broadcast;
 pub mod error;
-mod online;
+pub mod online;
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -59,14 +59,14 @@ impl Party {
 
     pub fn setup_semi_honest(mut party: ConnectedParty) -> Self {
         let mut rng = ChaCha20Rng::from_entropy();
-        let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &mut party.comm_next, &mut party.comm_prev).unwrap();
+        let setup = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &mut party.comm_next, &mut party.comm_prev).unwrap();
         Self {
             i: party.i,
             comm_next: party.comm_next,
             comm_prev: party.comm_prev,
-            random_next: rand_next,
-            random_prev: rand_prev,
-            random_local: rng
+            random_next: setup.next,
+            random_prev: setup.prev,
+            random_local: rng,
         }
     }
 
