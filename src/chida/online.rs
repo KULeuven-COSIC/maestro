@@ -1,4 +1,5 @@
 use std::io;
+use std::ops::AddAssign;
 
 use rand_chacha::ChaCha20Rng;
 
@@ -217,8 +218,47 @@ impl VectorAesState {
     }
 }
 
+pub fn input_round<F: Field + Copy + AddAssign>(party: &mut Party, input: Vec<F>) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>
+where ChaCha20Rng: FieldRngExt<F>, CommChannel: FieldVectorCommChannel<F>
+{
+    let n = input.len();
+    let random = party.generate_random(3*n);
+    let my_random = output_round(party, &random[..n], &random[n..2*n], &random[2*n..])?;
+    let (mut pi_random, pii_random, mut piii_random) = match party.i {
+        0 => (random[..n].to_vec(), random[n..2*n].to_vec(), random[2*n..].to_vec()),
+        1 => (random[n..2*n].to_vec(), random[2*n..].to_vec(), random[..n].to_vec()),
+        2 => (random[2*n..].to_vec(), random[..n].to_vec(), random[n..2*n].to_vec()),
+        _ => unreachable!(),
+    };
+
+    for i in 0..n {
+        pi_random[i].sii += input[i] - my_random[i];
+    }
+
+    // send sii to P+1
+    party.comm_next.write_vector(&pi_random.iter().map(|rss| rss.sii).collect::<Vec<_>>())?;
+    // receive si from P-1
+    let mut prev_si = vec![F::default(); piii_random.len()];
+    party.comm_prev.read_vector(&mut prev_si)?;
+
+    let my_input = pi_random;
+    let next_input = pii_random;
+
+    for (i, prev) in prev_si.into_iter().enumerate() {
+        piii_random[i].si = prev;
+    }
+    let prev_input = piii_random;
+    let (in1, in2, in3) = match party.i {
+        0 => (my_input, next_input, prev_input),
+        1 => (prev_input, my_input, next_input),
+        2 => (next_input, prev_input, my_input),
+        _ => unreachable!(),
+    };
+    Ok((in1, in2, in3))
+}
+
 // all parties input the same number of inputs (input.len() AES states)
-pub fn input_round(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcResult<(VectorAesState, VectorAesState, VectorAesState)> {
+pub fn input_round_vectorstate(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcResult<(VectorAesState, VectorAesState, VectorAesState)> {
     let n = input.len();
     // create 3n*16 random elements
     let random = party.generate_random(3*16*n);
@@ -545,7 +585,7 @@ pub mod test {
     use std::thread::JoinHandle;
 
     use rand::{CryptoRng, Rng, thread_rng};
-    use crate::chida::online::{aes128_no_keyschedule, AesKeyState, input_round, mul, output_round, sub_bytes, VectorAesState, aes128_inv_no_keyschedule};
+    use crate::chida::online::{aes128_inv_no_keyschedule, aes128_no_keyschedule, input_round, input_round_vectorstate, mul, output_round, sub_bytes, AesKeyState, VectorAesState};
     use crate::chida::ChidaParty;
     use crate::network::ConnectedParty;
     use crate::party::Party;
@@ -898,7 +938,7 @@ pub mod test {
                     }
                     v.push(block);
                 }
-                let (a,b,c) = input_round(p, v).unwrap();
+                let (a,b,c) = input_round_vectorstate(p, v).unwrap();
                 (a,b,c)
             }
         };

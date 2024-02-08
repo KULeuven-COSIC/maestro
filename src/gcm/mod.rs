@@ -6,7 +6,6 @@ use crate::{party::{Party, online::public_constant, error::{MpcResult, MpcError}
 
 use self::gf128::{GF128, TryFromGF128SliceError};
 mod gf128;
-pub mod aes;
 
 
 
@@ -84,7 +83,7 @@ fn ghash<'a>(party: &mut Party, ghash_key: Vec<RssShare<GF8>>, associated_data: 
     Ok(from_gf128(ghash_state))
 }
 
-fn semi_honest_tag_check(party: &mut Party, expected_tag: &[u8], computed_tag: &[RssShare<GF8>]) -> MpcResult<bool> {
+pub fn semi_honest_tag_check(party: &mut Party, expected_tag: &[u8], computed_tag: &[RssShare<GF8>]) -> MpcResult<bool> {
     if expected_tag.len() != 16 || computed_tag.len() != 16 { 
         return Err(MpcError::InvalidParameters("Invalid tag length".to_string())); 
     }
@@ -102,7 +101,7 @@ fn semi_honest_tag_check(party: &mut Party, expected_tag: &[u8], computed_tag: &
 
 }
 
-fn aes128_gcm_encrypt(party: &mut Party, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+pub fn aes128_gcm_encrypt(party: &mut Party, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
     // check IV length, key length and message lengths
     if key.len() != 16 { return Err(MpcError::InvalidParameters("Invalid key length, expected 128 bit (16 byte) for AES-GCM-128".to_string())); }
     if iv.len() != 12 { return Err(MpcError::InvalidParameters("Invalid IV length. Supported IV length is 96 bit (12 byte)".to_string())); }
@@ -133,7 +132,7 @@ fn aes128_gcm_encrypt(party: &mut Party, iv: &[u8], key: &[RssShare<GF8>], messa
     Ok((tag, ciphertext))
 }
 
-fn aes128_gcm_decrypt<F>(party: &mut Party, nonce: &[u8], key: &[RssShare<GF8>], ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>> 
+pub fn aes128_gcm_decrypt<F>(party: &mut Party, nonce: &[u8], key: &[RssShare<GF8>], ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>> 
 where F: FnOnce(&mut Party, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
 {
     // check key length
@@ -185,7 +184,7 @@ mod test {
     use itertools::Itertools;
     use rand::thread_rng;
 
-    use crate::{chida::{self, online::test::chida_localhost_setup, ChidaParty}, dec::gf128::GF128, party::{Party, test::localhost_setup}, share::{test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}, field::GF8, RssShare}};
+    use crate::{chida::{self, online::test::chida_localhost_setup, ChidaParty}, gcm::gf128::GF128, party::{Party, test::localhost_setup}, share::{test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}, field::GF8, RssShare}};
 
     use super::{aes128_gcm_decrypt, aes128_gcm_encrypt, semi_honest_tag_check};
 

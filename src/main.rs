@@ -1,7 +1,7 @@
 mod share;
 mod party;
 mod network;
-mod dec;
+mod gcm;
 mod chida;
 
 use std::{path::PathBuf, time::Duration};
