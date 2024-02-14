@@ -129,15 +129,25 @@ fn unbit_slice(dst: &mut Vec<Z64Bool>, bitslice: &Vec<Z64Bool>, index: usize) {
     }
 }
 
+fn conv_neg<'a>(it: impl Iterator<Item=&'a Z64Bool>) -> Vec<u64> {
+    it.map(|el| {
+        let neg = -i64::from_le(el.0 as i64);
+        neg as u64
+    }).collect()
+}
 
-/// Converts RSS shares of bytes (that are shared via XOR) into 3-out-of-3 additive shares in Z_64 (the integers mod 2^64)
+fn conv<'a>(it: impl Iterator<Item=&'a Z64Bool>) -> Vec<u64> {
+    it.map(|el| u64::from_le(el.0)).collect()
+}
+
+/// Converts RSS shares of bytes (that are shared via XOR) into RSS shares in Z_64 (the integers mod 2^64)
 /// 8 consecutive bytes are grouped and interpreted as Z_64 element in little endian order; the last group is padded with zero
 /// i.e. let b0, ..., b7, b8, b9 be the bytes in that order in the iterator
 /// then two elements are created z1 = (b0 b1 ... b7) and z2 = (b8 b9 0 ... 0)
 /// for each element, this function outputs a respective share z_1, z_2 and z_3, respectively
 /// s.t. z_1 + z_2 + z_3 = (b0_1 b1_1 ... b7_1) XOR (b0_2 b1_2 ... b7_2) XOR (b0_3 b1_3 ... b7_3)
 /// where '+' is addition in the ring
-pub fn convert_boolean_to_ring(party: &mut Party, bytes: impl Iterator<Item = RssShare<GF8>>) -> MpcResult<Vec<u64>> {
+pub fn convert_boolean_to_ring(party: &mut Party, bytes: impl Iterator<Item = RssShare<GF8>>) -> MpcResult<(Vec<u64>,Vec<u64>)> {
     // convert bytes into Z64 using little endian
     let (el_si, el_sii): (Vec<_>, Vec<_>) = bytes.chunks(8).into_iter().map(|chunk| {
         let chunk: Vec<_> = chunk.collect();
@@ -157,33 +167,61 @@ pub fn convert_boolean_to_ring(party: &mut Party, bytes: impl Iterator<Item = Rs
     let (tmp_i, tmp_ii) = ripple_carry_adder(party, &el_si, &el_sii, &r1.0, &r1.1)?;
     let (r3_i, r3_ii) = ripple_carry_adder(party, &tmp_i, &tmp_ii, &r2.0, &r2.1)?;
 
-    let r1 = r1.0.into_iter().zip(r1.1).map(|(si, sii)| RssShare::from(si, sii)).collect_vec();
-    let r2 = r2.0.into_iter().zip(r2.1).map(|(si, sii)| RssShare::from(si, sii)).collect_vec();
-    let r3 = r3_i.into_iter().zip(r3_ii).map(|(si, sii)| RssShare::from(si, sii)).collect_vec();
+    // to_p1 = r1||r2
+    let to_p1 = r1.0.iter().zip(&r1.1)
+        .chain(r2.0.iter().zip(&r2.1))
+        .map(|(si, sii)| RssShare::from(*si, *sii))
+        .collect_vec();
+    // to_p2 = r2||r3
+    let to_p2 = r2.0.iter().zip(&r2.1)
+        .chain(r3_i.iter().zip(&r3_ii))
+        .map(|(si, sii)| RssShare::from(*si, *sii))
+        .collect_vec();
+    // to_p3 = r3||r1
+    let to_p3 = r3_i.into_iter().zip(r3_ii)
+        .chain(r1.0.into_iter().zip(r1.1))
+        .map(|(si, sii)| RssShare::from(si, sii))
+        .collect_vec();
     // open r1 to P1, r2 to P2, r3 to P3
-    let my_share = chida::online::output_round(party, &r1, &r2, &r3)?;
+    let my_share = chida::online::output_round(party, &to_p1, &to_p2, &to_p3)?;
+    let si = my_share.iter().take(n);
+    let sii = my_share.iter().skip(n);
     // negate r1, r2 locally
-    if party.i == 0 || party.i == 1{
-        Ok(my_share.into_iter().map(|el| {
-            let neg = -i64::from_le(el.0 as i64);
-            neg as u64
-        }).collect())
-    }else{
-        Ok(my_share.into_iter().map(|el| u64::from_le(el.0)).collect())
-    }
+    Ok(match party.i {
+        0 => (conv_neg(si), conv_neg(sii)),
+        1 => (conv_neg(si), conv(sii)),
+        2 => (conv(si), conv_neg(sii)),
+        _ => unreachable!()
+    })
 }
 
-pub fn convert_ring_to_boolean(party: &mut Party, elements: &[u64]) -> MpcResult<Vec<RssShare<GF8>>> {
-    // convert shares locally to secret inputs
-    let si = elements.iter().map(|el| Z64Bool(el.to_le())).collect_vec();
-    let (si, sii, siii) = chida::online::input_round(party, si)?;
-    
-    let si: (Vec<_>, Vec<_>) = si.into_iter().map(|rss|(rss.si, rss.sii)).unzip();
-    let sii: (Vec<_>, Vec<_>) = sii.into_iter().map(|rss|(rss.si, rss.sii)).unzip();
-    let siii: (Vec<_>, Vec<_>) = siii.into_iter().map(|rss|(rss.si, rss.sii)).unzip();
+fn rss_zero(n: usize) -> (Vec<Z64Bool>, Vec<Z64Bool>) {
+    (vec![Z64Bool::zero(); n], vec![Z64Bool::zero(); n])
+}
 
-    let tmp = ripple_carry_adder(party, &si.0, &si.1, &sii.0, &sii.1)?;
-    let res = ripple_carry_adder(party, &tmp.0, &tmp.1, &siii.0, &siii.1)?;
+fn rss_pos<'a>(it: impl Iterator<Item=u64>, first: bool) -> (Vec<Z64Bool>, Vec<Z64Bool>) {
+    it.map(move |el| {
+        if first {
+            (Z64Bool(el.to_le()), Z64Bool::zero())
+        }else{
+            (Z64Bool::zero(), Z64Bool(el.to_le()))
+        }
+    }).unzip()
+}
+
+pub fn convert_ring_to_boolean(party: &mut Party, elements_si: &[u64], elements_sii: &[u64]) -> MpcResult<Vec<RssShare<GF8>>> {
+    // convert shares locally
+    let si: (Vec<_>, Vec<_>) = rss_pos(elements_si.iter().copied(), true);
+    let sii: (Vec<_>, Vec<_>) = rss_pos(elements_sii.iter().copied(), false);
+    let (s1, s2, s3) = match party.i {
+        0 => (si, sii, rss_zero(elements_si.len())),
+        1 => (rss_zero(elements_si.len()), si, sii),
+        2 => (sii, rss_zero(elements_si.len()), si),
+        _ => unreachable!()
+    };
+
+    let tmp = ripple_carry_adder(party, &s1.0, &s1.1, &s2.0, &s2.1)?;
+    let res = ripple_carry_adder(party, &tmp.0, &tmp.1, &s3.0, &s3.1)?;
 
     Ok(res.0.into_iter().zip(res.1).map(|(si, sii)| {
         let bi = si.0.to_le_bytes();
@@ -315,6 +353,18 @@ pub mod test {
         }
     }
 
+    fn consistent_u64(s1i: &[u64], s1ii: &[u64], s2i: &[u64], s2ii: &[u64], s3i: &[u64], s3ii: &[u64]) {
+        assert_eq!(s1i.len(), s1ii.len());
+        assert_eq!(s1i.len(), s2i.len());
+        assert_eq!(s1i.len(), s2ii.len());
+        assert_eq!(s1i.len(), s3i.len());
+        assert_eq!(s1i.len(), s3ii.len());
+
+        assert_eq!(s1i, s3ii);
+        assert_eq!(s1ii, s2i);
+        assert_eq!(s2ii, s3i);
+    }
+
     #[test]
     fn conv_bool_to_ring() {
         let mut rng = thread_rng();
@@ -332,10 +382,10 @@ pub mod test {
         let (r2, _) = h2.join().unwrap();
         let (r3, _) = h3.join().unwrap();
 
-        assert_eq!(a.len(), r1.len());
-        assert_eq!(a.len(), r2.len());
-        assert_eq!(a.len(), r3.len());
-        for (ai, r1i, r2i, r3i) in izip!(a, r1, r2, r3) {
+        assert_eq!(a.len(), r1.0.len());
+        consistent_u64(&r1.0, &r1.1, &r2.0, &r2.1, &r3.0, &r3.1);
+
+        for (ai, r1i, r2i, r3i) in izip!(a, r1.0, r2.0, r3.0) {
             assert_eq!(ai, r1i.overflowing_add(r2i).0.overflowing_add(r3i).0);
         }
     }
@@ -354,12 +404,12 @@ pub mod test {
         let a = random_u64(&mut rng, N);
         let shares = secret_share_vector_ring(&mut rng, &a);
 
-        let program = |share: Vec<u64>| {
+        let program = |share_i: Vec<u64>, share_ii: Vec<u64>| {
             move |p: &mut Party| {
-                convert_ring_to_boolean(p, &share).unwrap()
+                convert_ring_to_boolean(p, &share_i, &share_ii).unwrap()
             }
         };
-        let (h1,h2,h3) = localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1,h2,h3) = localhost_setup(program(shares.0.clone(), shares.1.clone()), program(shares.1, shares.2.clone()), program(shares.2, shares.0));
         let (b1, _) = h1.join().unwrap();
         let (b2, _) = h2.join().unwrap();
         let (b3, _) = h3.join().unwrap();

@@ -73,7 +73,7 @@ struct EncryptArgs {
     key_share: String,
     nonce: String,
     associated_data: String,
-    message_share: Vec<u64>,
+    message_share: Vec<(u64,u64)>,
 }
 
 #[derive(Deserialize)]
@@ -96,7 +96,7 @@ struct EncryptParams {
     key_share: Vec<GF8>,
     nonce: Vec<u8>,
     associated_data: Vec<u8>,
-    message_share: Vec<u64>,
+    message_share: Vec<(u64,u64)>,
 }
 
 struct DecryptParams {
@@ -109,7 +109,7 @@ struct DecryptParams {
 #[derive(Serialize, Deserialize)]
 struct DecryptResult {
     #[serde(skip_serializing_if = "Option::is_none")]
-    message_share: Option<Vec<u64>>,
+    message_share: Option<Vec<(u64,u64)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tag_error: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,7 +172,7 @@ impl From<Rep3AesError> for EncryptResult {
 }
 
 impl DecryptResult {
-    pub fn new_success(ring_share: Vec<u64>) -> Self {
+    pub fn new_success(ring_share: Vec<(u64,u64)>) -> Self {
         Self {
             message_share: Some(ring_share),
             tag_error: None,
@@ -244,7 +244,8 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let mut party = ChidaParty::setup(connected);
                         
                         let key_share = additive_shares_to_rss(party.inner_mut(), encrypt_args.key_share)?;
-                        let message_share = convert_ring_to_boolean(party.inner_mut(), &encrypt_args.message_share)?;
+                        let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.message_share.into_iter().unzip();
+                        let message_share = convert_ring_to_boolean(party.inner_mut(), &message_share_si, &message_share_sii)?;
                         let (mut tag, mut ct) = gcm::aes128_gcm_encrypt(party.inner_mut(), &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
                         ct.append(&mut tag);
                         // open ct||tag
@@ -269,7 +270,8 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         match res {
                             Ok(message_share) => {
                                 // now run b2a conversion
-                                let ring_shares = convert_boolean_to_ring(party.inner_mut(), message_share.into_iter())?;
+                                let (ring_shares_si, ring_shares_sii) = convert_boolean_to_ring(party.inner_mut(), message_share.into_iter())?;
+                                let ring_shares = ring_shares_si.into_iter().zip(ring_shares_sii).collect();
                                 Ok(DecryptResult::new_success(ring_shares))
                             },
                             Err(MpcError::OperationFailed(_)) => Ok(DecryptResult::new_tag_error()),
@@ -318,7 +320,7 @@ mod rep3_aes_main_test {
         let mut rng = thread_rng();
         let (r1, r2, r3) = secret_share_vector_ring(&mut rng, &MESSAGE_RING);
 
-        let party_f = |i: usize, key_share: &'static str, message_share: Vec<u64>| {
+        let party_f = |i: usize, key_share: &'static str, message_share: (Vec<u64>, Vec<u64>)| {
             move || {
                 let path = match i {
                     0 => "p1.toml",
@@ -331,7 +333,7 @@ mod rep3_aes_main_test {
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
                 };
 
-                let list_of_numbers = message_share.into_iter().map(|v| v.to_string()).join(", ");
+                let list_of_numbers = message_share.0.into_iter().zip(message_share.1).map(|(vi, vii)| format!("[{}, {}]", vi, vii)).join(", ");
 
                 // prepare input arg
                 let input_arg = format!("{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}", key_share, NONCE, AD, list_of_numbers);
@@ -352,10 +354,9 @@ mod rep3_aes_main_test {
             }
         };
 
-        let h1 = thread::spawn(party_f(0, KEY_SHARE_1, r1));
-        let h2 = thread::spawn(party_f(1, KEY_SHARE_2, r2));
-        let h3 = thread::spawn(party_f(2, KEY_SHARE_3, r3));
-
+        let h1 = thread::spawn(party_f(0, KEY_SHARE_1, (r1.clone(), r2.clone())));
+        let h2 = thread::spawn(party_f(1, KEY_SHARE_2, (r2, r3.clone())));
+        let h3 = thread::spawn(party_f(2, KEY_SHARE_3, (r3, r1)));
 
         h1.join().unwrap();
         h2.join().unwrap();
@@ -408,7 +409,11 @@ mod rep3_aes_main_test {
         assert_eq!(MESSAGE_RING.len(), share_2.len());
         assert_eq!(MESSAGE_RING.len(), share_3.len());
         for (m, s1, s2, s3) in izip!(MESSAGE_RING, share_1, share_2, share_3) {
-            assert_eq!(m, s1.overflowing_add(s2).0.overflowing_add(s3).0);
+            // check consistent
+            assert_eq!(s1.0, s3.1);
+            assert_eq!(s1.1, s2.0);
+            assert_eq!(s2.1, s3.0);
+            assert_eq!(m, s1.0.overflowing_add(s2.0).0.overflowing_add(s3.0).0);
         }
     }
 }
