@@ -3,11 +3,13 @@ mod party;
 mod network;
 mod gcm;
 mod chida;
+mod conversion;
 
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
 
 use chida::ChidaParty;
 use clap::{Parser, Subcommand};
+use conversion::{convert_boolean_to_ring, convert_ring_to_boolean};
 use itertools::{izip, Itertools};
 use network::{Config, ConnectedParty};
 use party::{error::{MpcError, MpcResult}, Party};
@@ -71,7 +73,7 @@ struct EncryptArgs {
     key_share: String,
     nonce: String,
     associated_data: String,
-    message_share: String,
+    message_share: Vec<u64>,
 }
 
 #[derive(Deserialize)]
@@ -84,7 +86,9 @@ struct DecryptArgs {
 
 #[derive(Serialize, Deserialize)]
 struct EncryptResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
     ciphertext: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
@@ -92,7 +96,7 @@ struct EncryptParams {
     key_share: Vec<GF8>,
     nonce: Vec<u8>,
     associated_data: Vec<u8>,
-    message_share: Vec<GF8>,
+    message_share: Vec<u64>,
 }
 
 struct DecryptParams {
@@ -104,8 +108,11 @@ struct DecryptParams {
 
 #[derive(Serialize, Deserialize)]
 struct DecryptResult {
-    message_share: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_share: Option<Vec<u64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tag_error: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
@@ -119,13 +126,12 @@ impl TryFrom<EncryptArgs> for EncryptParams {
         let key_share = try_decode_hex("key_share", args.key_share)?;
         let nonce = try_decode_hex("nonce", args.nonce)?;
         let ad = try_decode_hex("associated_data", args.associated_data)?;
-        let message = try_decode_hex("message_share", args.message_share)?;
     
         Ok(Self {
             key_share: key_share.into_iter().map(|b| GF8(b)).collect(),
             nonce,
             associated_data: ad,
-            message_share: message.into_iter().map(|b| GF8(b)).collect(),
+            message_share: args.message_share,
         })
     }
 }
@@ -166,9 +172,9 @@ impl From<Rep3AesError> for EncryptResult {
 }
 
 impl DecryptResult {
-    pub fn new_success(message: Vec<RssShare<GF8>>) -> Self {
+    pub fn new_success(ring_share: Vec<u64>) -> Self {
         Self {
-            message_share: Some(hex::encode(message.into_iter().map(|rss| rss.si.0).collect_vec())),
+            message_share: Some(ring_share),
             tag_error: None,
             error: None,
         }
@@ -238,7 +244,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let mut party = ChidaParty::setup(connected);
                         
                         let key_share = additive_shares_to_rss(party.inner_mut(), encrypt_args.key_share)?;
-                        let message_share = additive_shares_to_rss(party.inner_mut(), encrypt_args.message_share)?;
+                        let message_share = convert_ring_to_boolean(party.inner_mut(), &encrypt_args.message_share)?;
                         let (mut tag, mut ct) = gcm::aes128_gcm_encrypt(party.inner_mut(), &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
                         ct.append(&mut tag);
                         // open ct||tag
@@ -261,7 +267,11 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let (ct, tag) = (&decrypt_args.ciphertext[..ctlen-16], &decrypt_args.ciphertext[ctlen-16..]);
                         let res = gcm::aes128_gcm_decrypt(party.inner_mut(), &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check);
                         match res {
-                            Ok(message_share) => Ok(DecryptResult::new_success(message_share)),
+                            Ok(message_share) => {
+                                // now run b2a conversion
+                                let ring_shares = convert_boolean_to_ring(party.inner_mut(), message_share.into_iter())?;
+                                Ok(DecryptResult::new_success(ring_shares))
+                            },
                             Err(MpcError::OperationFailed(_)) => Ok(DecryptResult::new_tag_error()),
                             Err(err) => Err(err.into()),
                         }
@@ -284,21 +294,19 @@ mod rep3_aes_main_test {
     use std::{io::BufWriter, path::PathBuf, sync::Mutex, thread};
 
     use itertools::{izip, Itertools};
+    use rand::thread_rng;
 
-    use crate::{execute_command, Cli, Commands, DecryptResult, EncryptResult, Mode};
+    use crate::{conversion::test::secret_share_vector_ring, execute_command, Cli, Commands, DecryptResult, EncryptResult, Mode};
 
 
     const KEY_SHARE_1: &str = "76c2488bd101fd2999a922d351707fcf";
     const KEY_SHARE_2: &str = "014a3b40b4e7b77f600e6bdacd1c50af";
     const KEY_SHARE_3: &str = "022ccfa18b5c356ffbb22ee3b7e099e7";
-    const NONCE: &str = "1b64f561ab1ce7905b901ee5";
-    const AD: &str = "02a811774dcde13b8760748a76db74a1682a28838f1de43a39ccca945ce8795e918ad6de57b719df";
-    const MESSAGE: &str = "188d698e69dd2fd1085754977539d1ae059b4361";
-    const MESSAGE_SHARE_1: &str = "a3c559badbea203a918f93c2584f8f1f80374841";
-    const MESSAGE_SHARE_2: &str = "66ec85c67bf2bc55380fe9f0bd49e2d5c504760f";
-    const MESSAGE_SHARE_3: &str = "dda4b5f2c9c5b3bea1d72ea5903fbc6440a87d2f";
-    const CT: &str = "498dbaee28d1fe08eb893027043cabc2680ccb45";
-    const TAG: &str = "fbbf997f34f293605e440ebf6401f9ab";
+    const NONCE: &str = "18a04c8f66bdec6a74513af6";
+    const AD: &str = "34643134373530652d323335332d346433302d616332622d65383933383138303736643230820122300d06092a864886f70d01010105000382010f003082010a0282010100a78746c19361dbff7c3c7a3d1b9cdb76dfad38e69bf456184af575244fdb0c7770358dbf637bdeea05fc50d310b5ed1a61859f66a38aa1ede42c5fb2891b640aba34a6a9ba906e414337f8e81573fc6923f3fa6c1b7538ea041d109864d4183f237f882e5ee4af214311d7db298e9da2a00bbb04c44539a0fd86468c60c30a699bc8d41bbbef75ed63a4d523776af621f9b3b00c27c36aca23a290e293688351fdfb919c907b3758acc9b9e34368972759863aa90f76c04fc522d731d6cf1779069e4e07254bafd9c5f79c249a7c5fbad43f3ddc4d3d5429260d91d5ed4506f6aa380e74ee56a636f7a6157992497f18b25d963fe2364162ac08f685df5a5709020301000130820122300d06092a864886f70d01010105000382010f003082010a0282010100cccb626ab39b644ab7c9bb6785616f1689e3999bdfcb64f5575a77d1af8ad8e371e4f43bdb8d99174fce4f6cf0cb54738362b64f4e9089adaec2557294a7c906c8549b2c91db6c1a569a29c61d03a196887e3bf40bb07302aa05561befa7b3ffd2c295fb538944381943f1b03e046eeb10e9e5b67c1773185a85f06aa9d558cd61f407f2084174cefd2ae8e50a89b97ca069f201bd4662f7715d83fbdcb9d02590512355a0e0a67f6a991a77ad715936fa80bc60111727ecb56e735e9c2caf90247d74b8aba82cb0222cfed640fde34a46d507da98b9ee40987347fa7d56f94f3474cb7b3fe780b4dfe925587e96d5606d1fe4dccb4b8054d532bdaee93bb9bf020301000130820122300d06092a864886f70d01010105000382010f003082010a0282010100d8ae66dded6a8d8e7daa8ed8fe4e03b6e107db3b23d81b789a885b804def98a38fd826f93489438dcc694400e5132600a9d8ba16df6662e609eeac10ad803fbc31982d408118dc5478802cd968e61787489c9f2d85bd2d1c24a5c3883226b61d9b0ea74ca89a7d46b363b635e349711bf15c375ee18dc50fd3efac3f231564b4ea06071fabdd1c183eb02540bc9f7eadf61753f2538fbbd6b00dc85a627d5d971649c8014b12a3903c2ad739084fceee2b244cc2eb10414ec4ef402243ff36d3bc663ae14e18d446a851ba38a8aedac539a2f89cfd0b2e98f74e924b2f9d4d96d26cce499133b95e2151f4194f50d1701ac76750041a4de7125bad7a80fd91a7020301000132383334316630372d323836612d343736312d386664652d3232306237626533643463634865617274626561742d44656d6f2d31";
+    const MESSAGE_RING: [u64;5] = [6149648890722733960, 3187258121416518661, 3371553381890320898, 1292927509834657361, 1216049165532225112];
+    const CT: &str = "df9776ec3ce5fbace5b8d3602d0177aabd10527c5e5157a4f68ae4a12bdaf9387ffa60b78fd805b0";
+    const TAG: &str = "26f800262da61ee3320ba0834ada6b9d";
 
     static PORT_LOCK: Mutex<()> = Mutex::new(());
 
@@ -307,7 +315,10 @@ mod rep3_aes_main_test {
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
         let guard = PORT_LOCK.lock().unwrap();
 
-        let party_f = |i: usize, key_share: &'static str, message_share: &'static str| {
+        let mut rng = thread_rng();
+        let (r1, r2, r3) = secret_share_vector_ring(&mut rng, &MESSAGE_RING);
+
+        let party_f = |i: usize, key_share: &'static str, message_share: Vec<u64>| {
             move || {
                 let path = match i {
                     0 => "p1.toml",
@@ -320,8 +331,10 @@ mod rep3_aes_main_test {
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
                 };
 
+                let list_of_numbers = message_share.into_iter().map(|v| v.to_string()).join(", ");
+
                 // prepare input arg
-                let input_arg = format!("{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": \"{}\"}}", key_share, NONCE, AD, message_share);
+                let input_arg = format!("{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}", key_share, NONCE, AD, list_of_numbers);
                 let mut output = BufWriter::new(Vec::new());
                 execute_command(cli, input_arg.as_bytes(), &mut output);
 
@@ -339,9 +352,9 @@ mod rep3_aes_main_test {
             }
         };
 
-        let h1 = thread::spawn(party_f(0, KEY_SHARE_1, MESSAGE_SHARE_1));
-        let h2 = thread::spawn(party_f(1, KEY_SHARE_2, MESSAGE_SHARE_2));
-        let h3 = thread::spawn(party_f(2, KEY_SHARE_3, MESSAGE_SHARE_3));
+        let h1 = thread::spawn(party_f(0, KEY_SHARE_1, r1));
+        let h2 = thread::spawn(party_f(1, KEY_SHARE_2, r2));
+        let h3 = thread::spawn(party_f(2, KEY_SHARE_3, r3));
 
 
         h1.join().unwrap();
@@ -391,12 +404,11 @@ mod rep3_aes_main_test {
 
         drop(guard);
 
-        let v1 = hex::decode(share_1).unwrap();
-        let v2 = hex::decode(share_2).unwrap();
-        let v3 = hex::decode(share_3).unwrap();
-        assert_eq!(v1.len(), v2.len());
-        assert_eq!(v1.len(), v3.len());
-        let message = izip!(v1, v2, v3).map(|(b1, b2, b3)| b1 ^ b2 ^ b3).collect_vec();
-        assert_eq!(hex::decode(MESSAGE).unwrap(), message);
+        assert_eq!(MESSAGE_RING.len(), share_1.len());
+        assert_eq!(MESSAGE_RING.len(), share_2.len());
+        assert_eq!(MESSAGE_RING.len(), share_3.len());
+        for (m, s1, s2, s3) in izip!(MESSAGE_RING, share_1, share_2, share_3) {
+            assert_eq!(m, s1.overflowing_add(s2).0.overflowing_add(s3).0);
+        }
     }
 }
