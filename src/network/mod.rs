@@ -3,7 +3,6 @@ use std::io::BufReader;
 use std::time::Duration;
 use std::{io, fs, thread};
 use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream};
-use mio::net::TcpStream as MioTcpStream;
 use std::path::{Path, PathBuf};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::server::WebPkiClientVerifier;
@@ -11,7 +10,8 @@ use rustls::{ClientConfig, RootCertStore, ServerConfig, ClientConnection, Server
 use serde::Deserialize;
 
 mod non_blocking;
-mod task;
+mod receiver;
+pub mod task;
 
 pub struct Config {
     player_addr: Vec<Ipv4Addr>,
@@ -108,7 +108,7 @@ pub struct CommChannel {
     rounds: usize,
 }
 
-enum Stream {
+pub enum Stream {
     Client(rustls::StreamOwned<ClientConnection, TcpStream>),
     Server(rustls::StreamOwned<ServerConnection, TcpStream>),
 }
@@ -169,6 +169,7 @@ impl CreatedParty {
         })
     }
 
+    #[cfg(test)]
     pub fn port(&self) -> io::Result<u16> {
         self.server_socket
             .local_addr()

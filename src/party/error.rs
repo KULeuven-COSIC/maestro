@@ -9,7 +9,8 @@ pub enum MpcError {
     CommitmentError,
     BroadcastError,
     SacrificeError,
-    IoError(io::Error)
+    IoError(io::Error),
+    RecvError,
 }
 
 
@@ -19,7 +20,8 @@ impl Display for MpcError {
             MpcError::CommitmentError => f.write_str("CommitmentError"),
             MpcError::BroadcastError => f.write_str("BroadcastError"),
             MpcError::SacrificeError => f.write_str("SacrificeError"),
-            MpcError::IoError(io_err) => write!(f, "IoError({})", io_err)
+            MpcError::IoError(io_err) => write!(f, "IoError({})", io_err),
+            MpcError::RecvError => f.write_str("RecvError"),
         }
     }
 }
@@ -29,5 +31,11 @@ impl Error for MpcError {}
 impl From<io::Error> for MpcError {
     fn from(err: io::Error) -> Self {
         Self::IoError(err)
+    }
+}
+
+impl From<oneshot::RecvError> for MpcError {
+    fn from(_err: oneshot::RecvError) -> Self {
+        Self::RecvError
     }
 }

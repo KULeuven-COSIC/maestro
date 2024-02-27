@@ -1,13 +1,13 @@
 use rand::RngCore;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
-use crate::network::CommChannel;
+use crate::network::task::Direction;
 use crate::party::broadcast::{Broadcast, BroadcastContext};
 use crate::party::correlated_randomness::GlobalRng;
 use crate::party::error::MpcError::SacrificeError;
 use crate::party::error::MpcResult;
 use crate::party::Party;
-use crate::share::{Field, FieldRngExt, FieldVectorCommChannel, RssShare, FieldDigestExt};
+use crate::share::{Field, FieldRngExt, RssShare, FieldDigestExt};
 use crate::share::field::GF8;
 
 pub struct MulTriple<F: Field> {pub a: RssShare<F>, pub b: RssShare<F>, pub c: RssShare<F>}
@@ -19,7 +19,6 @@ pub struct RandomBit<F: Field>(RssShare<F>);
 // this is not efficient
 pub fn create_correct_mul_triples<F: Field + Copy>(party: &mut Party, n: usize, soundness: usize) -> MpcResult<Vec<MulTriple<F>>>
     where ChaCha20Rng : FieldRngExt<F>,
-    CommChannel: FieldVectorCommChannel<F>,
     Sha256: FieldDigestExt<F>
 {
     let (total_n, repetitions) = {
@@ -52,10 +51,10 @@ pub fn create_correct_mul_triples<F: Field + Copy>(party: &mut Party, n: usize, 
     }
 
     // send vi to P-1
-    party.comm_prev.write_vector(&c_i)?;
+    party.io().send_field(Direction::Previous, &c_i);
     // receive vii from P+1
-    let mut c_ii = vec![F::zero(); total_n];
-    party.comm_next.read_vector(&mut c_ii)?;
+    let c_ii = party.io().receive_field(Direction::Next, total_n).rcv()?;
+    party.io().wait_for_completion();
 
 
     // get public random t's for sacrifice

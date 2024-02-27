@@ -2,7 +2,9 @@ use std::{collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::mpsc:
 
 use mio::{Events, Interest, Poll, Token};
 
-use super::{non_blocking::NonBlockingCommChannel, CommChannel};
+use crate::share::Field;
+
+use super::{non_blocking::NonBlockingCommChannel, receiver, CommChannel};
 
 #[derive(Copy, Clone, Debug)]
 pub enum Direction { Next, Previous }
@@ -160,13 +162,13 @@ impl IoThreadContext {
                             if self.state.is_working() {
                                 // try to write
                                 if !self.write_queue.is_empty() {
-                                    Self::non_blocking_write(&mut self.comm_prev.stream, &mut self.write_queue, Direction::Previous)?;
-                                    Self::non_blocking_write(&mut self.comm_next.stream, &mut self.write_queue, Direction::Next)?;
+                                    Self::non_blocking_write(&mut self.comm_prev, &mut self.write_queue, Direction::Previous)?;
+                                    Self::non_blocking_write(&mut self.comm_next, &mut self.write_queue, Direction::Next)?;
                                 }
                                 // try to read
                                 if !self.read_queue.is_empty() {
-                                    Self::non_blocking_read(&mut self.comm_prev.stream, &mut self.read_queue, Direction::Previous)?;
-                                    Self::non_blocking_read(&mut self.comm_next.stream, &mut self.read_queue, Direction::Next)?;
+                                    Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
+                                    Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
                                 }
                                 if self.write_queue.is_empty() && self.read_queue.is_empty() {
                                     self.state = State::WaitingForTasks; // the added task was small enough to be completed right away
@@ -199,20 +201,20 @@ impl IoThreadContext {
                                     match event.token() {
                                         PREV_READY => {
                                             if event.is_readable() && !self.read_queue.is_empty_for(Direction::Previous) {
-                                                Self::non_blocking_read(&mut self.comm_prev.stream, &mut self.read_queue, Direction::Previous)?;
+                                                Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
                                             }
 
                                             if event.is_writable() && !self.write_queue.is_empty_for(Direction::Previous) {
-                                                Self::non_blocking_write(&mut self.comm_prev.stream, &mut self.write_queue, Direction::Previous)?;
+                                                Self::non_blocking_write(&mut self.comm_prev, &mut self.write_queue, Direction::Previous)?;
                                             }
                                         },
                                         NEXT_READY => {
                                             if event.is_readable() && !self.read_queue.is_empty_for(Direction::Next) {
-                                                Self::non_blocking_read(&mut self.comm_next.stream, &mut self.read_queue, Direction::Next)?;
+                                                Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
                                             }
 
                                             if event.is_writable() && !self.write_queue.is_empty_for(Direction::Next) {
-                                                Self::non_blocking_write(&mut self.comm_next.stream, &mut self.write_queue, Direction::Next)?;
+                                                Self::non_blocking_write(&mut self.comm_next, &mut self.write_queue, Direction::Next)?;
                                             }
                                         },
                                         _ => unimplemented!(),
@@ -227,16 +229,16 @@ impl IoThreadContext {
                         }
 
                         if !self.read_queue.is_empty_for(Direction::Previous) {
-                            Self::non_blocking_read(&mut self.comm_prev.stream, &mut self.read_queue, Direction::Previous)?;
+                            Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
                         }
                         if !self.read_queue.is_empty_for(Direction::Next) {
-                            Self::non_blocking_read(&mut self.comm_next.stream, &mut self.read_queue, Direction::Next)?;
+                            Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
                         }
                         if !self.write_queue.is_empty_for(Direction::Previous) {
-                            Self::non_blocking_write(&mut self.comm_prev.stream, &mut self.write_queue, Direction::Previous)?;
+                            Self::non_blocking_write(&mut self.comm_prev, &mut self.write_queue, Direction::Previous)?;
                         }
                         if !self.write_queue.is_empty_for(Direction::Next) {
-                            Self::non_blocking_write(&mut self.comm_next.stream, &mut self.write_queue, Direction::Next)?;
+                            Self::non_blocking_write(&mut self.comm_next, &mut self.write_queue, Direction::Next)?;
                         }
 
                         // let's see if new tasks are available
@@ -313,16 +315,17 @@ impl IoThreadContext {
         
     }
 
-    fn non_blocking_read<R: Read + ?Sized>(reader: &mut R, read_task_queue: &mut TaskQueue<ReadTask>, direction: Direction) -> io::Result<()> {
+    fn non_blocking_read(channel: &mut NonBlockingCommChannel, read_task_queue: &mut TaskQueue<ReadTask>, direction: Direction) -> io::Result<()> {
         match read_task_queue.peek(direction) {
             Some(read_task) => {
                 let buf = &mut read_task.buffer[read_task.offset..];
-                match reader.read(buf) {
+                match channel.stream.read(buf) {
                     Ok(n) => {
                         read_task.offset += n;
                         if read_task.offset >= read_task.length {
                             // task is done
                             let t = read_task_queue.pop(direction).unwrap(); // this should not panic since we peeked before
+                            channel.bytes_received += t.length as u64;
                             // send the result back
                             t.mailback.send(t.buffer).expect("Cannot send read result back; receiver was dropped.");
                         }
@@ -345,14 +348,15 @@ impl IoThreadContext {
         
     }
 
-    fn non_blocking_write<W: Write + ?Sized>(writer: &mut W, write_task_queue: &mut TaskQueue<WriteTask>, direction: Direction) -> io::Result<()> {
+    fn non_blocking_write(channel: &mut NonBlockingCommChannel, write_task_queue: &mut TaskQueue<WriteTask>, direction: Direction) -> io::Result<()> {
         match write_task_queue.peek(direction) {
             Some(write_task) => {
-                match writer.write(&write_task.buffer[write_task.offset..]) {
+                match channel.stream.write(&write_task.buffer[write_task.offset..]) {
                     Ok(n) => {
                         write_task.offset += n;
                         if write_task.offset >= write_task.buffer.len() {
                             // task is done
+                            channel.bytes_sent += write_task.buffer.len() as u64;
                             write_task_queue.pop(direction);
                         }
                         Ok(())
@@ -397,18 +401,43 @@ impl IoLayer {
     }
 
     pub fn send(&self, direction: Direction, bytes: Vec<u8>) {
-        match self.task_channel.send(Task::Write { thread_id: 0, direction, data: bytes }) {
-            Ok(()) => (),
-            Err(_) => panic!("The IO is already closed"),
+        if !bytes.is_empty() {
+            match self.task_channel.send(Task::Write { thread_id: 0, direction, data: bytes }) {
+                Ok(()) => (),
+                Err(_) => panic!("The IO is already closed"),
+            }
         }
     }
 
     pub fn receive(&self, direction: Direction, length: usize) -> oneshot::Receiver<Vec<u8>> {
         let (send, recv) = oneshot::channel();
-        match self.task_channel.send(Task::Read { thread_id: 0, direction, length, mailback: send }) {
-            Ok(()) => recv,
-            Err(_) => panic!("The IO is already closed"),
+        if length > 0 {
+            match self.task_channel.send(Task::Read { thread_id: 0, direction, length, mailback: send }) {
+                Ok(()) => recv,
+                Err(_) => panic!("The IO is already closed"),
+            }
+        }else{
+            // immediately populate recv
+            send.send(Vec::new()).unwrap(); // this is safe since `send` returns Err only if recv has been dropped
+            recv
         }
+    }
+
+    pub fn receive_slice<'a>(&self, direction: Direction, dst: &'a mut [u8]) -> receiver::SliceReceiver<'a> {
+        receiver::SliceReceiver::new(self.receive(direction, dst.len()), dst)
+    }
+
+    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=&'a F>) {
+        let as_bytes = F::as_byte_vec(elements);
+        self.send(direction, as_bytes)
+    }
+
+    pub fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
+        receiver::FieldVectorReceiver::new(self.receive(direction, F::size()*num_elements))
+    }
+
+    pub fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
+        receiver::FieldSliceReceiver::new(self.receive(direction, F::size()*dst.len()), dst)
     }
 
     pub fn wait_for_completion(&self) {
@@ -506,8 +535,8 @@ mod test {
     }
 
     #[test]
-    fn can_read_write() {
-        let ((comm_prev, mut comm_prev_receiver), (comm_next, mut comm_next_receiver)) = setup_comm_channels();
+    fn can_read_write_one() {
+        let ((comm_prev, mut comm_prev_receiver), (comm_next, comm_next_receiver)) = setup_comm_channels();
         let io = IoLayer::spawn_io(comm_prev, comm_next).unwrap();
 
         let mut rng = thread_rng();
@@ -547,6 +576,7 @@ mod test {
         assert_eq!(data_to_write, actual_write);
         
         io.shutdown().unwrap();
+        drop(comm_next_receiver);
     }
 
     #[test]
@@ -732,5 +762,24 @@ mod test {
         let (_comm3, _comm4) = io2.shutdown().unwrap();
         let (_comm5, _comm6) = io3.shutdown().unwrap();
 
+    }
+
+    #[test]
+    fn sending_receiving_empty() {
+        let ((comm_prev, comm_prev_receiver), (comm_next, comm_next_receiver)) = setup_comm_channels();
+        let io = IoLayer::spawn_io(comm_prev, comm_next).unwrap();
+        // send and receive empty messages
+        let empty = Vec::new();
+        io.send(Direction::Next, empty.clone());
+        io.send(Direction::Previous, empty);
+        let rcv_next = io.receive(Direction::Next, 0);
+        let rcv_prev = io.receive(Direction::Previous, 0);
+        
+        assert!(rcv_next.recv().unwrap().is_empty());
+        assert!(rcv_prev.recv().unwrap().is_empty());
+        io.wait_for_completion();
+        io.shutdown().unwrap();
+        drop(comm_prev_receiver);
+        drop(comm_next_receiver)
     }
 }

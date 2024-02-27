@@ -1,4 +1,4 @@
-use std::{io::{self, Read, Write}, os::fd::{FromRawFd, IntoRawFd, OwnedFd}};
+use std::{io::{self, Read, Write}, os::fd::{FromRawFd, IntoRawFd}};
 
 use mio::net::TcpStream;
 use rustls::{ClientConnection, ServerConnection, StreamOwned};
@@ -144,7 +144,7 @@ impl Write for NonBlockingStream {
             Self::Server(stream)=> stream.write(buf),
         }
     }
-    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<()> {
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         match self {
             Self::Client(stream) => stream.write_all(buf),
             Self::Server(stream)=> stream.write_all(buf),

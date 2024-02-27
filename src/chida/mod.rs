@@ -28,8 +28,8 @@ pub use self::online::ImplVariant;
 pub struct ChidaParty(Party);
 
 impl ChidaParty {
-    pub fn setup(connected: ConnectedParty) -> Self {
-        Self(Party::setup_semi_honest(connected))
+    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
+        Party::setup_semi_honest(connected).map(|party| Self(party))
     }
 
     pub fn random_state(&mut self, size: usize) -> VectorAesState {
@@ -52,7 +52,7 @@ impl ChidaParty {
 
 // simd: how many parallel AES calls
 pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVariant) {
-    let mut party = ChidaParty::setup(connected);
+    let mut party = ChidaParty::setup(connected).unwrap();
     let input = party.random_state(simd);
     // create random key states for benchmarking purposes
     let ks: Vec<_> = (0..11).map(|_| {
@@ -65,7 +65,7 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     let output = party.aes128_no_keyschedule(input, &ks, variant).unwrap();
     let duration = start.elapsed();
     let _ = party.output(output).unwrap();
-    party.0.teardown();
+    party.0.teardown().unwrap();
     
     println!("Finished benchmark");
     

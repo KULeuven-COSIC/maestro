@@ -8,7 +8,7 @@ use crate::party::Party;
 use crate::share::{Field, FieldDigestExt, FieldRngExt, FieldVectorCommChannel, RssShare};
 
 pub fn my_input<F: Field>(party: &mut Party, context: &mut BroadcastContext, input: &[F]) -> MpcResult<Vec<RssShare<F>>>
-where CommChannel: FieldVectorCommChannel<F>, Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
 {
     let a = party.generate_random(input.len());
     let b = party.open_rss_to(context, &a, party.i)?;
@@ -16,12 +16,12 @@ where CommChannel: FieldVectorCommChannel<F>, Sha256: FieldDigestExt<F>, ChaCha2
     for i in 0..b.len() {
         b[i] = b[i].clone() + input[i].clone();
     }
-    party.broadcast_round(context, &mut [], &mut [], &b)?;
+    party.broadcast_round(context, &mut [], &mut [], b.as_slice())?;
     Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| sub(&public_constant(party, bi), &ai)).collect())
 }
 
 pub fn other_input<F: Field>(party: &mut Party, context: &mut BroadcastContext, input_party: usize, n_inputs: usize) -> MpcResult<Vec<RssShare<F>>>
-where ChaCha20Rng: FieldRngExt<F>, CommChannel: FieldVectorCommChannel<F>, Sha256: FieldDigestExt<F>, {
+where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>, {
     assert_ne!(party.i, input_party);
     let a = party.generate_random(n_inputs);
     let b = party.open_rss_to(context, &a, input_party)?;
@@ -112,7 +112,7 @@ pub fn vector_mul<F: Field>(party: &mut Party, context: &mut BroadcastContext, x
 
 #[cfg(test)]
 mod test {
-    use rand::{thread_rng};
+    use rand::thread_rng;
     use crate::party::broadcast::{Broadcast, BroadcastContext};
     use crate::party::offline::create_correct_mul_triples;
     use crate::party::online::{my_input, other_input, vector_add, vector_mul, vector_sub};

@@ -5,26 +5,41 @@ mod broadcast;
 pub mod error;
 mod online;
 
+use std::io;
+
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use crate::network::{CommChannel, ConnectedParty};
+use crate::network::task::IoLayer;
+use crate::network::ConnectedParty;
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
 use crate::share::{Field, FieldRngExt, RssShare};
+
+use self::error::MpcResult;
+
+struct CommStats {
+    bytes_received: u64,
+    bytes_sent: u64,
+    rounds: usize,
+}
 
 
 pub struct Party {
     pub i: usize,
-    /// Channel to player i+1
-    pub comm_next: CommChannel,
-    /// Channel to player i-1
-    pub comm_prev: CommChannel,
+    io: Option<IoLayer>,
+    // /// Channel to player i+1
+    // pub comm_next: CommChannel,
+    // /// Channel to player i-1
+    // pub comm_prev: CommChannel,
+    stats_next: Option<CommStats>,
+    stats_prev: Option<CommStats>,
     random_next: SharedRng,
     random_prev: SharedRng,
     random_local: ChaCha20Rng,
+
 }
 
 impl Party {
-    pub fn setup(mut party: ConnectedParty) -> Self {
+    pub fn setup(mut party: ConnectedParty) -> MpcResult<Self> {
 
         let mut rng = ChaCha20Rng::from_entropy();
 
@@ -47,27 +62,29 @@ impl Party {
             _ => unreachable!()
         };
 
-        Self {
+        Ok(Self {
             i: party.i,
-            comm_next: party.comm_next,
-            comm_prev: party.comm_prev,
+            io: Some(IoLayer::spawn_io(party.comm_prev, party.comm_next)?),
             random_next: rand_next,
             random_prev: rand_prev,
-            random_local: rng
-        }
+            random_local: rng,
+            stats_next: None,
+            stats_prev: None,
+        })
     }
 
-    pub fn setup_semi_honest(mut party: ConnectedParty) -> Self {
+    pub fn setup_semi_honest(mut party: ConnectedParty) -> MpcResult<Self> {
         let mut rng = ChaCha20Rng::from_entropy();
         let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &mut party.comm_next, &mut party.comm_prev).unwrap();
-        Self {
+        Ok(Self {
             i: party.i,
-            comm_next: party.comm_next,
-            comm_prev: party.comm_prev,
+            io: Some(IoLayer::spawn_io(party.comm_prev, party.comm_next)?),
             random_next: rand_next,
             random_prev: rand_prev,
-            random_local: rng
-        }
+            random_local: rng,
+            stats_next: None,
+            stats_prev: None,
+        })
     }
 
     pub fn generate_zero<F: Field>(&mut self, global_rng: &mut GlobalRng, n: usize) -> Vec<RssShare<F>>
@@ -104,41 +121,66 @@ impl Party {
         si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
     }
 
-    pub fn teardown(&mut self) {
-        match self.i {
-            0 => {
-                // 01
-                self.comm_next.teardown();
-                // 02
-                self.comm_prev.teardown();
-            }
-            1 => {
-                // 01
-                self.comm_prev.teardown();
-                // 12
-                self.comm_next.teardown();
-            }
-            2 => {
-                // 02
-                self.comm_next.teardown();
-                // 12
-                self.comm_prev.teardown();
-            }
-            _ => unreachable!()
-        };
+    pub fn io(&self) -> &IoLayer {
+        self.io.as_ref().expect("Shutdown was called.")
+    }
+
+    pub fn teardown(&mut self) -> MpcResult<()> {
+        debug_assert!(self.io.is_some());
+        self.io.take().map(|io| {
+            let (nb_prev, nb_next) = io.shutdown()?;
+            let mut comm_next = nb_next.into_channel()?;
+            let mut comm_prev = nb_prev.into_channel()?;
+            match self.i {
+                0 => {
+                    // 01
+                    comm_next.teardown();
+                    // 02
+                    comm_prev.teardown();
+                }
+                1 => {
+                    // 01
+                    comm_prev.teardown();
+                    // 12
+                    comm_next.teardown();
+                }
+                2 => {
+                    // 02
+                    comm_next.teardown();
+                    // 12
+                    comm_prev.teardown();
+                }
+                _ => unreachable!()
+            };
+            let stats_next = CommStats {
+                bytes_received: comm_next.get_bytes_received(),
+                bytes_sent: comm_next.get_bytes_sent(),
+                rounds: comm_next.get_rounds(),
+            };
+            let stats_prev = CommStats {
+                bytes_received: comm_prev.get_bytes_received(),
+                bytes_sent: comm_prev.get_bytes_sent(),
+                rounds: comm_prev.get_rounds(),
+            };
+            self.stats_next = Some(stats_next);
+            self.stats_prev = Some(stats_prev);
+            io::Result::Ok(())
+        }).transpose()?
+        .unwrap_or(());
+        Ok(())
     }
 
     pub fn print_comm_statistics(&self) {
-        let sent_next = self.comm_next.get_bytes_sent();
-        let sent_prev = self.comm_prev.get_bytes_sent();
-        let received_next = self.comm_next.get_bytes_received();
-        let received_prev = self.comm_prev.get_bytes_received();
+        assert!(self.io.is_none(), "Call teardown() first");
+
+        let stats_next = self.stats_next.as_ref().unwrap();
+        let stats_prev = self.stats_prev.as_ref().unwrap();
 
         let p_next = ((self.i+1) % 3) + 1;
         let p_prev = ((3 + self.i-1) % 3) + 1;
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, sent_next, received_next, self.comm_next.get_rounds());
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, sent_prev, received_prev, self.comm_prev.get_rounds());
-        println!("Total communication: {} bytes send, {} bytes received", sent_next + sent_prev, received_next + received_prev);
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, stats_next.bytes_sent, stats_next.bytes_received, stats_next.rounds);
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, stats_prev.bytes_sent, stats_prev.bytes_received, stats_prev.rounds);
+        println!("Total communication: {} bytes send, {} bytes received", stats_next.bytes_sent + stats_prev.bytes_sent, stats_next.bytes_received + stats_prev.bytes_received);
     }
 }
 
@@ -154,6 +196,7 @@ pub mod test {
     use std::thread::JoinHandle;
     use rand::RngCore;
     use rustls::pki_types::{PrivateKeyDer, CertificateDer};
+    use crate::network::task::Direction;
     use crate::network::{Config, ConnectedParty, CreatedParty};
     use crate::party::correlated_randomness::{GlobalRng, SharedRng};
     use crate::party::Party;
@@ -257,26 +300,26 @@ pub mod test {
     pub fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,Party)>, JoinHandle<(T2,Party)>, JoinHandle<(T3,Party)>) {
         let _f1 = |p: ConnectedParty| {
             // println!("P1: Before Setup");
-            let mut p = Party::setup(p);
+            let mut p = Party::setup(p).unwrap();
             // println!("P1: After Setup");
             let res = f1(&mut p);
-            p.teardown();
+            p.teardown().unwrap();
             (res, p)
         };
         let _f2 = |p: ConnectedParty| {
             // println!("P2: Before Setup");
-            let mut p = Party::setup(p);
+            let mut p = Party::setup(p).unwrap();
             // println!("P2: After Setup");
             let res = f2(&mut p);
-            p.teardown();
+            p.teardown().unwrap();
             (res, p)
         };
         let _f3 = |p: ConnectedParty| {
             // println!("P3: Before Setup");
-            let mut p = Party::setup(p);
+            let mut p = Party::setup(p).unwrap();
             // println!("P3: After Setup");
             let res = f3(&mut p);
-            p.teardown();
+            p.teardown().unwrap();
             (res, p)
         };
         localhost_connect(_f1, _f2, _f3)
@@ -349,9 +392,10 @@ pub mod test {
     fn correct_party_teardown() {
         fn send_receive_teardown(p: &mut Party) {
             let mut buf = vec![0u8;16];
-            p.comm_next.write(&buf).unwrap();
-            p.comm_prev.read(&mut buf).unwrap();
-            p.teardown();
+            p.io().send(Direction::Next, buf.clone());
+            let rcv_buf = p.io().receive_slice(Direction::Previous, &mut buf);
+            rcv_buf.rcv().unwrap();
+            // p.teardown();
         }
         let (p1, p2, p3) = localhost_setup(send_receive_teardown, send_receive_teardown, send_receive_teardown);
         p1.join().unwrap();

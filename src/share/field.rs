@@ -49,6 +49,18 @@ impl Field for GF8 {
     fn is_zero(&self) -> bool {
         self.0 == 0
     }
+
+    fn as_byte_vec<'a, I: IntoIterator<Item=&'a Self>>(it: I) -> Vec<u8> where Self: 'a {
+        it.into_iter().map(|gf| gf.0).collect()
+    }
+
+    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+        v.into_iter().map(|byte| GF8(byte)).collect()
+    }
+
+    fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
+        v.into_iter().zip(dest).for_each(|(byte, dst)| *dst = GF8(byte))
+    }
 }
 
 impl Add for GF8 {
