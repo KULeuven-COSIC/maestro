@@ -1,6 +1,4 @@
-use std::{collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, thread::{self, JoinHandle}, time::Duration};
-
-use mio::{Events, Interest, Poll, Token};
+use std::{collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, thread::{self, JoinHandle}};
 
 use crate::share::Field;
 
@@ -141,16 +139,6 @@ impl IoThreadContext {
     }
 
     fn handle_io(&mut self) -> io::Result<()> {
-        const PREV_READY: Token = Token(0);
-        const NEXT_READY: Token = Token(1);
-        // const PREV_WRITEABLE: Token = Token(1);
-        let mut poll = Poll::new().expect("Unable to create os-poll object");
-        let mut events = Events::with_capacity(10);
-
-        // register event sources
-        poll.registry().register(self.comm_prev.stream.tcp_stream_mut(), PREV_READY, Interest::READABLE | Interest::WRITABLE)?;
-        poll.registry().register(self.comm_next.stream.tcp_stream_mut(), NEXT_READY, Interest::READABLE | Interest::WRITABLE)?;
-
         loop {
 
             match self.state {
@@ -193,52 +181,17 @@ impl IoThreadContext {
                         };
                     }else{
                         // there is work to do
-                        match poll.poll(&mut events, Some(Duration::from_millis(10))) { // this blocks
-                            Ok(()) => {
-                                println!("poll wakeup");
-                                for event in &events {
-                                    println!("processing event");
-                                    match event.token() {
-                                        PREV_READY => {
-                                            if event.is_readable() && !self.read_queue.is_empty_for(Direction::Previous) {
-                                                Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
-                                            }
-
-                                            if event.is_writable() && !self.write_queue.is_empty_for(Direction::Previous) {
-                                                Self::non_blocking_write(&mut self.comm_prev, &mut self.write_queue, Direction::Previous)?;
-                                            }
-                                        },
-                                        NEXT_READY => {
-                                            if event.is_readable() && !self.read_queue.is_empty_for(Direction::Next) {
-                                                Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
-                                            }
-
-                                            if event.is_writable() && !self.write_queue.is_empty_for(Direction::Next) {
-                                                Self::non_blocking_write(&mut self.comm_next, &mut self.write_queue, Direction::Next)?;
-                                            }
-                                        },
-                                        _ => unimplemented!(),
-                                    }
-                                }
-                            },
-                            Err(poll_err) => {
-                                if poll_err.kind() != ErrorKind::Interrupted {
-                                    return Err(poll_err);
-                                }
-                            }
-                        }
-
-                        if !self.read_queue.is_empty_for(Direction::Previous) {
-                            Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
-                        }
-                        if !self.read_queue.is_empty_for(Direction::Next) {
-                            Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
-                        }
                         if !self.write_queue.is_empty_for(Direction::Previous) {
                             Self::non_blocking_write(&mut self.comm_prev, &mut self.write_queue, Direction::Previous)?;
                         }
                         if !self.write_queue.is_empty_for(Direction::Next) {
                             Self::non_blocking_write(&mut self.comm_next, &mut self.write_queue, Direction::Next)?;
+                        }
+                        if !self.read_queue.is_empty_for(Direction::Previous) {
+                            Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
+                        }
+                        if !self.read_queue.is_empty_for(Direction::Next) {
+                            Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
                         }
 
                         // let's see if new tasks are available

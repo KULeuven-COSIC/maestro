@@ -1,7 +1,5 @@
-use std::{io::{self, Read, Write}, os::fd::{FromRawFd, IntoRawFd}};
-
-use mio::net::TcpStream;
-use rustls::{ClientConnection, ServerConnection, StreamOwned};
+use std::{io::{self, Read, Write}, net::TcpStream};
+use rustls::{ClientConnection, ServerConnection};
 
 use super::{CommChannel, Stream};
 
@@ -20,9 +18,9 @@ pub enum NonBlockingStream {
     Server(rustls::StreamOwned<ServerConnection, TcpStream>),
 }
 
-fn mio_to_net(stream: TcpStream) -> std::net::TcpStream {
-    unsafe { std::net::TcpStream::from_raw_fd(stream.into_raw_fd()) }
-}
+// fn mio_to_net(stream: TcpStream) -> std::net::TcpStream {
+//     unsafe { std::net::TcpStream::from_raw_fd(stream.into_raw_fd()) }
+// }
 
 impl NonBlockingStream {
     pub fn from_stream(stream: Stream) -> io::Result<Self> {
@@ -32,12 +30,10 @@ impl NonBlockingStream {
         };
         match stream {
             Stream::Client(stream) => {
-                let (conn, sock) = stream.into_parts();
-                Ok(Self::Client(StreamOwned::new(conn, TcpStream::from_std(sock))))
+                Ok(Self::Client(stream))
             },
             Stream::Server(stream) => {
-                let (conn, sock) = stream.into_parts();
-                Ok(Self::Server(StreamOwned::new(conn, TcpStream::from_std(sock))))
+                Ok(Self::Server(stream))
             }
         }
     }
@@ -45,38 +41,13 @@ impl NonBlockingStream {
     pub fn into_stream(self) -> io::Result<Stream> {
         match self {
             Self::Client(stream) => {
-                let (conn, sock) = stream.into_parts();
-                let std_stream = mio_to_net(sock);
-                std_stream.set_nonblocking(false)?;
-                Ok(Stream::Client(StreamOwned::new(conn, std_stream)))
+                stream.sock.set_nonblocking(false)?;
+                Ok(Stream::Client(stream))
             },
             Self::Server(stream) => {
-                let (conn, sock) = stream.into_parts();
-                let std_stream = mio_to_net(sock);
-                std_stream.set_nonblocking(false)?;
-                Ok(Stream::Server(StreamOwned::new(conn, std_stream)))
+                stream.sock.set_nonblocking(false)?;
+                Ok(Stream::Server(stream))
             }
-        }
-    }
-
-    // pub fn as_mut_write(&mut self) -> &mut dyn io::Write {
-    //     match self {
-    //         Self::Client(stream) => stream,
-    //         Self::Server(stream) => stream,
-    //     }
-    // }
-
-    // pub fn as_mut_read(&mut self) -> &mut dyn io::Read {
-    //     match self {
-    //         Self::Client(stream) => stream,
-    //         Self::Server(stream)=> stream,
-    //     }
-    // }
-
-    pub fn tcp_stream_mut(&mut self) -> &mut TcpStream {
-        match self {
-            Self::Client(stream) => &mut stream.sock,
-            Self::Server(stream)=> &mut stream.sock,
         }
     }
 }
