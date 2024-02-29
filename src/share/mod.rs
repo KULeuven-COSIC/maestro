@@ -1,6 +1,7 @@
 pub mod field;
 mod gf8_tables;
 
+use std::borrow::Borrow;
 use std::io;
 use std::ops::{Add, Mul, Neg, Sub};
 
@@ -13,7 +14,7 @@ pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self
     // Returns if the value is zero
     fn is_zero(&self) -> bool;
 
-    fn as_byte_vec<'a, I: IntoIterator<Item=&'a Self>>(it: I) -> Vec<u8> where Self: 'a;
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8>;
 
     fn from_byte_vec(v: Vec<u8>) -> Vec<Self>;
 

@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
+use std::slice;
 use sha2::{Sha256, Digest};
 use sha2::digest::FixedOutput;
 use crate::network::task::Direction;
@@ -33,6 +34,17 @@ impl BroadcastContext {
         }
     }
 
+    pub fn add_to_next_view<F: Field>(&mut self, el: &F)
+    where Sha256: FieldDigestExt<F>
+    {
+        FieldDigestExt::update(&mut self.view_next, slice::from_ref(el));
+    }
+
+    pub fn add_to_prev_view<F: Field>(&mut self, el: &F)
+    where Sha256: FieldDigestExt<F>
+    {
+        FieldDigestExt::update(&mut self.view_prev, slice::from_ref(el));
+    }
 }
 
 impl Broadcast for Party {
@@ -58,9 +70,9 @@ impl Broadcast for Party {
     fn broadcast_round<F: Field>(&mut self, context: &mut BroadcastContext, buffer_next: &mut [F], buffer_prev: &mut[F], message: &[F]) -> MpcResult<()>
         where Sha256: FieldDigestExt<F>{
         // first send to P+1
-        self.io().send_field(Direction::Next, message);
+        self.io().send_field::<F>(Direction::Next, message);
         // then send to P-1
-        self.io().send_field(Direction::Previous, message);
+        self.io().send_field::<F>(Direction::Previous, message);
 
         // receive from P-1
         let receive_prev = self.io().receive_field_slice(Direction::Previous, buffer_prev);
@@ -80,7 +92,7 @@ impl Broadcast for Party {
     where Sha256: FieldDigestExt<F>
     {
         // send share_i to P+1
-        self.io().send_field(Direction::Next, share_i);
+        self.io().send_field::<F>(Direction::Next, share_i);
         // receive share_iii from P-1
         let rcv_share_iii = self.io().receive_field(Direction::Previous, share_i.len());
 
@@ -114,7 +126,7 @@ impl Broadcast for Party {
             },
             (0, 1) | (1,2) | (2,0) => {
                 //send my share to P+1
-                self.io().send_field(Direction::Next, shares.iter().map(|s| &s.si));
+                self.io().send_field::<F>(Direction::Next, shares.iter().map(|s| &s.si));
                 self.io().wait_for_completion();
                 Ok(None)
             },
@@ -256,9 +268,9 @@ mod test {
                         let mut context = BroadcastContext::new();
                         let mut prev_buf = vec![GF8(0); N];
                         let mut next_buf = vec![GF8(0); N];
-                        p.io().send_field(Direction::Next, &msg);
+                        p.io().send_field::<GF8>(Direction::Next, &msg);
                         // send the same message except for element N-1 that is different
-                        p.io().send_field(Direction::Previous, msg.iter().take(N-1).chain(&vec![GF8(msg[N-1].0 ^ 0x1)]));
+                        p.io().send_field::<GF8>(Direction::Previous, msg.iter().take(N-1).chain(&vec![GF8(msg[N-1].0 ^ 0x1)]));
                         let rcv_next = p.io().receive_field_slice(Direction::Next, &mut next_buf);
                         let rcv_prev = p.io().receive_field_slice(Direction::Previous, &mut prev_buf);
                         rcv_next.rcv().unwrap();

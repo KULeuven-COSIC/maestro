@@ -3,6 +3,7 @@ mod party;
 mod network;
 mod dec;
 mod chida;
+mod furukawa;
 
 use std::{path::PathBuf, time::Duration};
 

@@ -235,7 +235,7 @@ pub fn input_round(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcResult<(Vector
     }
 
     // send sii to P+1
-    party.io().send_field(Direction::Next, pi_random.iter().map(|rss| &rss.sii));
+    party.io().send_field::<GF8>(Direction::Next, pi_random.iter().map(|rss| &rss.sii));
     // receive si from P-1
     let rcv_prev_si = party.io().receive_field(Direction::Previous, piii_random.len());
 
@@ -273,21 +273,21 @@ pub fn output_round(party: &mut Party, to_p1: &[RssShare<GF8>], to_p2: &[RssShar
     let (my, siii) = match party.i {
         0 => {
             // send my share to P2
-            party.io().send_field(Direction::Next, to_p2.iter().map(|rss| &rss.si));
+            party.io().send_field::<GF8>(Direction::Next, to_p2.iter().map(|rss| &rss.si));
             // receive s3 from P3
             let s3 = party.io().receive_field(Direction::Previous, to_p1.len()).rcv()?;
             (to_p1, s3)
         },
         1 => {
             // send my share to P3
-            party.io().send_field(Direction::Next, to_p3.iter().map(|rss| &rss.si));
+            party.io().send_field::<GF8>(Direction::Next, to_p3.iter().map(|rss| &rss.si));
             // receive s1 from P1
             let s1 = party.io().receive_field(Direction::Previous, to_p2.len()).rcv()?;
             (to_p2, s1)
         },
         2 => {
             // send my share to P1
-            party.io().send_field(Direction::Next, to_p1.iter().map(|rss| &rss.si));
+            party.io().send_field::<GF8>(Direction::Next, to_p1.iter().map(|rss| &rss.si));
             // receive s2 from P2
             let s2 = party.io().receive_field(Direction::Previous, to_p3.len()).rcv()?;
             (to_p3, s2)
@@ -312,7 +312,7 @@ fn mul(party: &mut Party, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF
         ci[i] = ai[i] * bi[i] + ai[i] * bii[i] + aii[i] * bi[i] + alpha_i;
     }
     // println!("Writing {} elements to comm_prev", ci.len());
-    party.io().send_field(Direction::Previous, ci.iter());
+    party.io().send_field::<GF8>(Direction::Previous, ci.iter());
     // println!("Expecting {} elements from comm_next", cii.len());
     party.io().receive_field_slice(Direction::Next, cii).rcv()?;
     party.io().wait_for_completion();
@@ -385,7 +385,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
     .collect();
     // send to P+1
-    party.io().send_field(Direction::Next, &x3ii);
+    party.io().send_field::<GF8>(Direction::Next, &x3ii);
 
     // MULT(x^12, x^2) and MULT(x^12, x^3)
     // receive from P-1
@@ -402,7 +402,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
         x14x15ii[n+i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
     }
     // send to P+1
-    party.io().send_field(Direction::Next, &x14x15ii);
+    party.io().send_field::<GF8>(Direction::Next, &x14x15ii);
 
     // MULT(x^240, x^14)
     let x14x15i = rcv_x14x15i.rcv()?;
@@ -413,7 +413,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     // receive from P-1
     let rcv_si = party.io().receive_field_slice(Direction::Previous, si);
     // send to P+1
-    party.io().send_field(Direction::Next, sii.iter());
+    party.io().send_field::<GF8>(Direction::Next, sii.iter());
     
     rcv_si.rcv()?;
     party.io().wait_for_completion();

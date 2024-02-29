@@ -1,7 +1,7 @@
 mod commitment;
-mod correlated_randomness;
+pub mod correlated_randomness;
 mod offline;
-mod broadcast;
+pub mod broadcast;
 pub mod error;
 mod online;
 

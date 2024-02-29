@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, thread::{self, JoinHandle}};
+use std::{borrow::Borrow, collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, thread::{self, JoinHandle}};
 
 use crate::share::Field;
 
@@ -380,7 +380,8 @@ impl IoLayer {
         receiver::SliceReceiver::new(self.receive(direction, dst.len()), dst)
     }
 
-    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=&'a F>) {
+    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>)
+    {
         let as_bytes = F::as_byte_vec(elements);
         self.send(direction, as_bytes)
     }

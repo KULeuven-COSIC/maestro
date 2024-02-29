@@ -51,7 +51,7 @@ pub fn create_correct_mul_triples<F: Field + Copy>(party: &mut Party, n: usize, 
     }
 
     // send vi to P-1
-    party.io().send_field(Direction::Previous, &c_i);
+    party.io().send_field::<F>(Direction::Previous, &c_i);
     // receive vii from P+1
     let c_ii = party.io().receive_field(Direction::Next, total_n).rcv()?;
     party.io().wait_for_completion();
