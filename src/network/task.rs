@@ -8,13 +8,12 @@ use super::{non_blocking::NonBlockingCommChannel, receiver, CommChannel};
 pub enum Direction { Next, Previous }
 
 pub enum Task {
-    Write { thread_id: u8, direction: Direction, data: Vec<u8>},
-    Read { thread_id: u8, direction: Direction, length: usize, mailback: oneshot::Sender<Vec<u8>> },
+    Write { direction: Direction, data: Vec<u8>},
+    Read { direction: Direction, length: usize, mailback: oneshot::Sender<Vec<u8>> },
     Sync
 }
 
 struct ReadTask {
-    direction: Direction,
     buffer: Vec<u8>,
     length: usize,
     offset: usize,
@@ -22,9 +21,8 @@ struct ReadTask {
 }
 
 impl ReadTask {
-    pub fn new(direction: Direction, length: usize, mailback: oneshot::Sender<Vec<u8>>) -> Self {
+    pub fn new(length: usize, mailback: oneshot::Sender<Vec<u8>>) -> Self {
         Self {
-            direction,
             buffer: vec![0u8; length],
             length,
             offset: 0,
@@ -34,17 +32,13 @@ impl ReadTask {
 }
 
 struct WriteTask {
-    thread_id: u8,
-    direction: Direction,
     buffer: Vec<u8>,
     offset: usize
 }
 
 impl WriteTask {
-    pub fn new(thread_id: u8, direction: Direction, buffer: Vec<u8>) -> Self {
+    pub fn new(buffer: Vec<u8>) -> Self {
         Self {
-            thread_id,
-            direction,
             buffer,
             offset: 0,
         }
@@ -222,15 +216,15 @@ impl IoThreadContext {
 
     fn add_task(&mut self, task: Task) {
         match task {
-            Task::Read { thread_id, direction, length, mailback } => {
-                self.read_queue.put(direction, ReadTask::new(direction, length, mailback));
+            Task::Read { direction, length, mailback } => {
+                self.read_queue.put(direction, ReadTask::new(length, mailback));
                 if !self.state.is_working() {
                     self.state = State::Working { sync_requested: false,  close_requested: false }
                 }
             },
                 
-            Task::Write { thread_id, direction, data } => {
-                self.write_queue.put(direction, WriteTask::new(thread_id, direction, data));
+            Task::Write { direction, data } => {
+                self.write_queue.put(direction, WriteTask::new(data));
                 if !self.state.is_working() {
                     self.state = State::Working { sync_requested: false,  close_requested: false }
                 }
@@ -279,6 +273,7 @@ impl IoThreadContext {
                             // task is done
                             let t = read_task_queue.pop(direction).unwrap(); // this should not panic since we peeked before
                             channel.bytes_received += t.length as u64;
+                            channel.rounds += 1;
                             // send the result back
                             t.mailback.send(t.buffer).expect("Cannot send read result back; receiver was dropped.");
                         }
@@ -310,6 +305,7 @@ impl IoThreadContext {
                         if write_task.offset >= write_task.buffer.len() {
                             // task is done
                             channel.bytes_sent += write_task.buffer.len() as u64;
+                            channel.rounds += 1;
                             write_task_queue.pop(direction);
                         }
                         Ok(())
@@ -355,7 +351,7 @@ impl IoLayer {
 
     pub fn send(&self, direction: Direction, bytes: Vec<u8>) {
         if !bytes.is_empty() {
-            match self.task_channel.send(Task::Write { thread_id: 0, direction, data: bytes }) {
+            match self.task_channel.send(Task::Write { direction, data: bytes }) {
                 Ok(()) => (),
                 Err(_) => panic!("The IO is already closed"),
             }
@@ -365,7 +361,7 @@ impl IoLayer {
     pub fn receive(&self, direction: Direction, length: usize) -> oneshot::Receiver<Vec<u8>> {
         let (send, recv) = oneshot::channel();
         if length > 0 {
-            match self.task_channel.send(Task::Read { thread_id: 0, direction, length, mailback: send }) {
+            match self.task_channel.send(Task::Read { direction, length, mailback: send }) {
                 Ok(()) => recv,
                 Err(_) => panic!("The IO is already closed"),
             }

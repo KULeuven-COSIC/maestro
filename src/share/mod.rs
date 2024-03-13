@@ -3,9 +3,9 @@ mod gf8_tables;
 
 use std::borrow::Borrow;
 use std::io;
-use std::ops::{Add, Mul, Neg, Sub};
+use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
-pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone  { // + AsRef<[u8]>
+pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Copy + PartialEq + AddAssign  { // + AsRef<[u8]>
     /// Returns the field size in byte
     fn size() -> usize;
     /// Returns zero value
@@ -85,10 +85,10 @@ pub trait FieldDigestExt<F: Field> {
 
 #[cfg(test)]
 pub mod test {
+    use std::borrow::Borrow;
     use std::fmt::Debug;
-    use rand::{CryptoRng, Rng, thread_rng};
+    use rand::{rngs::ThreadRng, thread_rng, CryptoRng, Rng};
     use crate::share::{Field, FieldRngExt, RssShare};
-    use crate::share::field::GF8;
 
     pub fn consistent<F: Field + PartialEq + Debug>(share1: &RssShare<F>, share2: &RssShare<F>, share3: &RssShare<F>) {
         assert_eq!(share1.sii, share2.si);
@@ -101,12 +101,37 @@ pub mod test {
         assert_eq!(actual, value);
     }
 
-    pub fn secret_share<R: Rng + CryptoRng>(rng: &mut R, x: &GF8) -> (RssShare<GF8>, RssShare<GF8>, RssShare<GF8>) {
+    pub fn secret_share<F: Field, R: Rng + CryptoRng>(rng: &mut R, x: &F) -> (RssShare<F>, RssShare<F>, RssShare<F>)
+    where R: FieldRngExt<F>
+    {
         let r = rng.generate(2);
         let x1 = RssShare::from(x.clone() - r[0] - r[1], r[0]);
         let x2 = RssShare::from(r[0], r[1]);
         let x3 = RssShare::from(r[1], x.clone() - r[0] - r[1]);
         (x1,x2,x3)
+    }
+
+    pub fn secret_share_vector<F: Field, R: Rng + CryptoRng>(rng: &mut R, elements: impl IntoIterator<Item=impl Borrow<F>>) -> (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>) 
+    where R: FieldRngExt<F> 
+    {
+        let (s1, (s2, s3)) = elements.into_iter().map(|value| {
+            let (s1, s2, s3) = secret_share(rng, value.borrow());
+            (s1, (s2,s3))
+        }).unzip();
+        (s1, s2, s3)
+    }
+
+    pub fn random_secret_shared_vector<F: Field>(n: usize) -> (Vec<F>, Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)
+    where ThreadRng: FieldRngExt<F>
+    {
+        // let mut rng_seed = [0; 32];
+        // thread_rng().fill_bytes(&mut rng_seed);
+        // let mut rng = ChaCha20Rng::from_seed(rng_seed);
+        let mut rng = thread_rng();
+        let x: Vec<F> = FieldRngExt::generate(&mut rng, n);
+        let (s1, s2, s3) = secret_share_vector(&mut rng, x.iter());
+
+        (x, s1, s2, s3)
     }
 
     #[test]

@@ -237,6 +237,10 @@ pub mod test {
         )
     }
 
+    pub trait TestSetup<P> {
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut P) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut P) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut P) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,P)>, JoinHandle<(T2,P)>, JoinHandle<(T3,P)>);
+    }
+
     pub fn localhost_connect<T1: Send + 'static, F1: Send + FnOnce(ConnectedParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(ConnectedParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(ConnectedParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<T1>, JoinHandle<T2>, JoinHandle<T3>) {
         let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
         let party1 = CreatedParty::bind(0, IpAddr::V4(addr[0]), 0).unwrap();
@@ -323,6 +327,13 @@ pub mod test {
             (res, p)
         };
         localhost_connect(_f1, _f2, _f3)
+    }
+
+    struct PartySetup;
+    impl TestSetup<Party> for PartySetup {
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,Party)>, JoinHandle<(T2,Party)>, JoinHandle<(T3,Party)>) {
+            localhost_setup(f1, f2, f3)
+        }
     }
 
     pub fn simple_localhost_setup<F: Send + Clone + Fn(&mut Party) -> T + 'static, T: Send + 'static>(f: F) -> ((T,T,T), (Party, Party, Party)) {
