@@ -26,7 +26,7 @@ pub struct ChidaParty(Party);
 
 impl ChidaParty {
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        Party::setup_semi_honest(connected).map(|party| Self(party))
+        Party::setup(connected).map(|party| Self(party))
     }
 }
 

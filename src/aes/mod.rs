@@ -699,7 +699,10 @@ pub mod test {
             move |p: &mut P| {
                 let n_mults = get_required_mult_for_keyschedule(variant, 1);
                 p.pre_processing(n_mults).unwrap();
-                aes128_keyschedule(p, key, variant).unwrap()
+                let ks = aes128_keyschedule(p, key, variant).unwrap();
+                p.finalize().unwrap();
+                p.io().wait_for_completion();
+                ks
             }
         };
 

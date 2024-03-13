@@ -73,12 +73,13 @@ impl Party {
         })
     }
 
-    pub fn setup_semi_honest(mut party: ConnectedParty) -> MpcResult<Self> {
+    pub fn setup_semi_honest(party: ConnectedParty) -> MpcResult<Self> {
         let mut rng = ChaCha20Rng::from_entropy();
-        let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &mut party.comm_next, &mut party.comm_prev).unwrap();
+        let io_layer = IoLayer::spawn_io(party.comm_prev, party.comm_next)?;
+        let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &io_layer).unwrap();
         Ok(Self {
             i: party.i,
-            io: Some(IoLayer::spawn_io(party.comm_prev, party.comm_next)?),
+            io: Some(io_layer),
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
