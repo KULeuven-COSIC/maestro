@@ -17,7 +17,7 @@ use crate::network::ConnectedParty;
 use crate::party::error::MpcResult;
 use crate::party::Party;
 use crate::share::RssShare;
-use crate::share::field::GF8;
+use crate::share::gf8::GF8;
 
 mod online;
 pub use self::online::ImplVariant;

@@ -16,3 +16,6 @@ Cargo.lock
 # Intellij
 .idea/
 rep3-aes.iml
+
+# Sage
+sage/gf4.sage.py

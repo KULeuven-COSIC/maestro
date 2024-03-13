@@ -1,10 +1,11 @@
-pub mod field;
+pub mod gf8;
 mod gf8_tables;
+pub mod gf4;
 
 use std::io;
 use std::ops::{Add, Mul, Neg, Sub};
 
-pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone  { // + AsRef<[u8]>
+pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone + Copy  { // + AsRef<[u8]>
     /// Returns the field size in byte
     fn size() -> usize;
     /// Returns zero value
@@ -86,8 +87,9 @@ pub trait FieldDigestExt<F: Field> {
 pub mod test {
     use std::fmt::Debug;
     use rand::{CryptoRng, Rng, thread_rng};
+    use crate::share::gf4::GF4;
     use crate::share::{Field, FieldRngExt, RssShare};
-    use crate::share::field::GF8;
+    use crate::share::gf8::GF8;
 
     pub fn consistent<F: Field + PartialEq + Debug>(share1: &RssShare<F>, share2: &RssShare<F>, share3: &RssShare<F>) {
         assert_eq!(share1.sii, share2.si);
@@ -100,7 +102,7 @@ pub mod test {
         assert_eq!(actual, value);
     }
 
-    pub fn secret_share<R: Rng + CryptoRng>(rng: &mut R, x: &GF8) -> (RssShare<GF8>, RssShare<GF8>, RssShare<GF8>) {
+    pub fn secret_share<F: Field, R: Rng + CryptoRng + FieldRngExt<F>>(rng: &mut R, x: &F) -> (RssShare<F>, RssShare<F>, RssShare<F>) {
         let r = rng.generate(2);
         let x1 = RssShare::from(x.clone() - r[0] - r[1], r[0]);
         let x2 = RssShare::from(r[0], r[1]);
@@ -112,8 +114,26 @@ pub mod test {
     fn cmul_gf8() {
         const N: usize = 100;
         let mut rng = thread_rng();
-        let x = rng.generate(N);
-        let c = rng.generate(N);
+        let x:Vec<GF8> = rng.generate(N);
+        let c:Vec<GF8> = rng.generate(N);
+
+        for i in 0..N {
+            let (x1, x2, x3) = secret_share::<GF8, _>(&mut rng, &x[i]);
+            let cx1 = x1 * c[i].clone();
+            let cx2 = x2 * c[i].clone();
+            let cx3 = x3 * c[i].clone();
+
+            consistent(&cx1, &cx2, &cx3);
+            assert_eq(cx1, cx2, cx3, x[i] * c[i]);
+        }
+    }
+
+    #[test]
+    fn cmul_gf4() {
+        const N: usize = 100;
+        let mut rng = thread_rng();
+        let x:Vec<GF4> = rng.generate(N);
+        let c:Vec<GF4> = rng.generate(N);
 
         for i in 0..N {
             let (x1, x2, x3) = secret_share(&mut rng, &x[i]);
@@ -125,4 +145,5 @@ pub mod test {
             assert_eq(cx1, cx2, cx3, x[i] * c[i]);
         }
     }
+
 }

@@ -200,7 +200,7 @@ pub mod test {
     use crate::network::{Config, ConnectedParty, CreatedParty};
     use crate::party::correlated_randomness::{GlobalRng, SharedRng};
     use crate::party::Party;
-    use crate::share::field::GF8;
+    use crate::share::gf8::GF8;
     use crate::share::test::{assert_eq, consistent};
 
     const TEST_KEY_DIR: &str = "keys";

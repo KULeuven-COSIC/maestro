@@ -169,7 +169,7 @@ mod test {
     use crate::party::Party;
     use crate::party::test::localhost_setup;
     use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
-    use crate::share::field::GF8;
+    use crate::share::gf8::GF8;
     use crate::share::test::secret_share;
 
     #[test]

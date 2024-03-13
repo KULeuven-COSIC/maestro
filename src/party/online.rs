@@ -119,7 +119,7 @@ mod test {
     use crate::party::Party;
     use crate::party::test::localhost_setup;
     use crate::share::{FieldRngExt, RssShare};
-    use crate::share::field::GF8;
+    use crate::share::gf8::GF8;
     use crate::share::test::{assert_eq, consistent, secret_share};
 
     fn random_gf8(n: usize) -> (Vec<GF8>, Vec<RssShare<GF8>>, Vec<RssShare<GF8>>, Vec<RssShare<GF8>>) {

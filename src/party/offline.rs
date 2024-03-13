@@ -8,7 +8,7 @@ use crate::party::error::MpcError::SacrificeError;
 use crate::party::error::MpcResult;
 use crate::party::Party;
 use crate::share::{Field, FieldRngExt, RssShare, FieldDigestExt};
-use crate::share::field::GF8;
+use crate::share::gf8::GF8;
 
 pub struct MulTriple<F: Field> {pub a: RssShare<F>, pub b: RssShare<F>, pub c: RssShare<F>}
 
@@ -168,7 +168,7 @@ mod test {
     use crate::party::correlated_randomness::GlobalRng;
     use crate::party::offline::{create_correct_mul_triples, create_random_bits_gf8};
     use crate::party::test::simple_localhost_setup;
-    use crate::share::field::GF8;
+    use crate::share::gf8::GF8;
     use crate::share::test::consistent;
 
 
@@ -177,7 +177,7 @@ mod test {
         const N: usize = 100;
         // generate N triples with soundness 2^-40
         let ((triples1, triples2, triples3), _) = simple_localhost_setup(|p| {
-            create_correct_mul_triples(p, N, 40).unwrap()
+            create_correct_mul_triples::<GF8>(p, N, 40).unwrap()
         });
 
         assert_eq!(N, triples1.len());

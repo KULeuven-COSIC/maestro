@@ -1,7 +1,7 @@
 use crate::network::task::Direction;
 use crate::party::error::MpcResult;
 use crate::party::Party;
-use crate::share::field::GF8;
+use crate::share::gf8::GF8;
 use crate::share::RssShare;
 
 #[derive(Clone, Copy, Debug)]
@@ -380,7 +380,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     // receive from P-1
     let rcv_x3i = party.io().receive_field(Direction::Previous, n);
 
-    let x3ii: Vec<_> = party.generate_random(n)
+    let x3ii: Vec<_> = party.generate_random::<GF8>(n)
     .into_iter().enumerate()
     .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
     .collect();
@@ -390,7 +390,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     // MULT(x^12, x^2) and MULT(x^12, x^3)
     // receive from P-1
     let rcv_x14x15i = party.io().receive_field(Direction::Previous, 2*n);
-    let mut x14x15ii: Vec<_> = party.generate_random(2*n)
+    let mut x14x15ii: Vec<_> = party.generate_random::<GF8>(2*n)
     .into_iter().map(|alpha| alpha.si + alpha.sii)
     .collect();
     let x3i = rcv_x3i.rcv()?;
@@ -406,7 +406,7 @@ fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
 
     // MULT(x^240, x^14)
     let x14x15i = rcv_x14x15i.rcv()?;
-    let x254ii: Vec<_> = party.generate_random(n).into_iter().enumerate()
+    let x254ii: Vec<_> = party.generate_random::<GF8>(n).into_iter().enumerate()
     .map(|(i, alpha)| alpha.si + alpha.sii + GF8::x16y(x14x15i[n+i] + x14x15ii[n+i], x14x15i[i] + x14x15ii[i]) + GF8::x16y(x14x15i[n+i], x14x15i[i]))
     .collect();
     sii.copy_from_slice(&x254ii);
@@ -542,7 +542,7 @@ mod test {
     use crate::chida::online::{aes128_no_keyschedule, AesKeyState, input_round, mul, output_round, sub_bytes, VectorAesState, aes128_inv_no_keyschedule};
     use crate::party::Party;
     use crate::party::test::localhost_setup;
-    use crate::share::field::GF8;
+    use crate::share::gf8::GF8;
     use crate::share::{FieldRngExt, RssShare};
     use crate::share::test::{assert_eq, consistent, secret_share};
 
