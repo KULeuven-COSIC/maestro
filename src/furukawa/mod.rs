@@ -1,10 +1,10 @@
 use std::{ops::AddAssign, time::Instant};
 
 use itertools::{izip, Itertools};
-use permutation::Permutation;
-use rand::seq::SliceRandom;
+use rand::{CryptoRng, RngCore};
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
+use rand::Rng;
 
 use crate::{aes::{self, aes128_no_keyschedule, ArithmeticBlackBox, ImplVariant}, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
@@ -372,26 +372,12 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
     party.io().wait_for_completion();
     let mul_triples_time = mul_triples_time.elapsed();
 
-    let shuffle_time = Instant::now();
     // obtain fresh global randomness
     let mut rng = GlobalRng::setup_global(party)?;
-    let setup_time = shuffle_time.elapsed();
-    // shuffle
-    let create_perm_time = Instant::now();
-    let mut perm = {
-        let mut perm = (0..M).collect_vec();
-        perm.shuffle(rng.as_mut());
-        Permutation::oneline(perm)
-    };
-    let create_perm_time = create_perm_time.elapsed();
-    let apply_slice_time = Instant::now();
-    perm.apply_slice_in_place(&mut a);
-    let apply_slice_time = apply_slice_time.elapsed();
-    perm.apply_slice_in_place(&mut b);
-    perm.apply_slice_in_place(&mut ci);
-    perm.apply_slice_in_place(&mut cii);
+
+    let shuffle_time = Instant::now();
+    shuffle(rng.as_mut(), &mut a, &mut b, &mut ci, &mut cii);
     let shuffle_time = shuffle_time.elapsed();
-    println!("setup: {}s, perm: {}s, apply to slice: {}s", setup_time.as_secs_f64(), create_perm_time.as_secs_f64(), apply_slice_time.as_secs_f64());
 
     let open_check_time = Instant::now();
     // open and check the first C triples
@@ -426,6 +412,37 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
     let sacrifice_time = sacrifice_time.elapsed();
     println!("Bucket cut-and-choose: optimistic multiplication: {}s, shuffle: {}s, open: {}s, sacrifice: {}s", mul_triples_time.as_secs_f64(), shuffle_time.as_secs_f64(), open_check_time.as_secs_f64(), sacrifice_time.as_secs_f64());
     Ok(correct_triples)
+}
+
+fn shuffle<R: RngCore + CryptoRng, F: Field>(rng: &mut R, a: &mut [RssShare<F>], b: &mut [RssShare<F>], ci: &mut [F], cii: &mut [F]) {
+    debug_assert_eq!(a.len(), b.len());
+    debug_assert_eq!(a.len(), ci.len());
+    debug_assert_eq!(a.len(), cii.len());
+
+    fn shuffle_from_random_tape<T>(tape: &[usize], slice: &mut [T]) {
+        let mut tape_idx = 0;
+        for i in (1..slice.len()).rev() {
+            // invariant: elements with index > i have been locked in place.
+            slice.swap(i, tape[tape_idx]);
+            tape_idx += 1;
+        }
+    }
+
+    // generate the random tape first
+    let tape: Vec<_> = (1..a.len()).rev().map(|i| {
+        // random number from 0 to i (inclusive)
+        if i < (core::u32::MAX as usize) {
+            rng.gen_range(0..=i as u32) as usize
+        } else {
+            rng.gen_range(0..=i)
+        }
+    }).collect();
+
+    // apply to a, b, ci, and cii
+    shuffle_from_random_tape(&tape, a);
+    shuffle_from_random_tape(&tape, b);
+    shuffle_from_random_tape(&tape, ci);
+    shuffle_from_random_tape(&tape, cii);
 }
 
 fn open_and_check<F: Field + PartialEq + Copy>(party: &mut Party, a: &[RssShare<F>], b: &[RssShare<F>], ci: &[F], cii: &[F]) -> MpcResult<bool> {
