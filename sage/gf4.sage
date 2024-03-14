@@ -19,6 +19,13 @@ def gen_square_table(F):
     print(", ".join(f'0x0{natural_encoding_to_int(e):x}' for e in square_table), end='')
     print("]")
 
+def gen_mult_by_E_table(F):
+    e = natural_encoding(F,0xE)
+    mul_e_table = [e * natural_encoding(F, a) for a in range(F.order())]
+    print("MUL_E_TABLE = [", end='')
+    print(", ".join(f'0x0{natural_encoding_to_int(a):x}' for a in mul_e_table), end='')
+    print("]") 
+
 def gen_mult_table(F):
     pk = F.order()
     print("MULT_TABLE = [")
@@ -32,4 +39,5 @@ x = polygen(GF(2), 'x')
 F = GF(2**4, name=x, modulus=x^4 + x + 1)
 
 #gen_square_table(F)
-gen_mult_table(F)
+#gen_mult_table(F)
+gen_mult_by_E_table(F)

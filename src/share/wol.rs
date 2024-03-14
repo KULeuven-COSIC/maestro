@@ -29,12 +29,14 @@ const INV_WOL_TABLE: [[u8;16];16] = [
     [0x9f, 0x9e, 0xc3, 0xc2, 0x7f, 0x7e, 0x23, 0x22, 0xcf, 0xce, 0x93, 0x92, 0x2f, 0x2e, 0x73, 0x72],
     ];
 
-pub fn wol_map(a:GF8) -> (GF4,GF4) {
+/// Maps an element of `GF(2^8)` to `GF(2^4)^2` using the WOL transform
+pub fn wol_map(a:&GF8) -> (GF4,GF4) {
     let (ah,al) = WOL_TABLE[a.0 as usize];
     (GF4::new_unchecked(ah), GF4::new_unchecked(al))
 }
 
-pub fn wol_inv_map(ah:GF4,al:GF4) -> GF8 {
+/// Maps an element `GF(2^4)^2` to of `GF(2^8)` using the inverse WOL transform
+pub fn wol_inv_map(ah:&GF4,al:&GF4) -> GF8 {
     GF8(INV_WOL_TABLE[ah.as_u8() as usize][al.as_u8() as usize])
 }
 
@@ -45,9 +47,10 @@ mod test {
 
     #[test]
     fn test_is_bijective(){
-        for a in 0..=255 {
-            let (ah,al) = wol_map(GF8(a));
-            assert_eq!(wol_inv_map(ah, al),GF8(a), "Should be the identity map")
+        for x in 0..=255 {
+            let a = GF8(x);
+            let (ah,al) = wol_map(&a);
+            assert_eq!(wol_inv_map(&ah, &al),a, "Should be the identity map")
         }
     }    
 }

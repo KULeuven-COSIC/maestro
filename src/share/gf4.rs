@@ -11,6 +11,7 @@ use super::{Field, FieldDigestExt, FieldRngExt};
 #[derive(Copy, Clone, Default, PartialEq)]
 pub struct GF4(u8);
 
+const MUL_E_TABLE: [u8; 16] = [0x00, 0x0e, 0x0f, 0x01, 0x0d, 0x03, 0x02, 0x0c, 0x09, 0x07, 0x06, 0x08, 0x04, 0x0a, 0x0b, 0x05];
 const SQ_TABLE: [u8; 16] = [0x00, 0x01, 0x04, 0x05, 0x03, 0x02, 0x07, 0x06, 0x0c, 0x0d, 0x08, 0x09, 0x0f, 0x0e, 0x0b, 0x0a];
 const MUL_TABLE: [[u8; 16];16] = [
     [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
@@ -46,8 +47,13 @@ impl GF4 {
         self.0
     }  
 
-    pub fn cube(self) -> Self {
+    pub fn square(&self) -> Self {
         Self(SQ_TABLE[self.0 as usize])
+    }
+
+    // Returns the produce 0xE * self
+    pub fn mul_e(&self) -> Self {
+        Self(MUL_E_TABLE[self.0 as usize])
     }
 
     /// Pack to elements of GF4 into a single byte
@@ -164,7 +170,7 @@ mod test {
     #[test]
     fn test_debug_format(){
         let x = GF4(0x0a);
-        assert_eq!(format!("{:?}",x),"GF4(0xa)", "Format should match")
+        assert_eq!(format!("{:?}",x),"GF4(0xa)", "Format should match.")
     }
 
     #[test]
@@ -172,7 +178,15 @@ mod test {
         let x = GF4(0x0f);
         let y = GF4(0x01);
         let b = GF4::pack(x,y);
-        assert_eq!((x,y),GF4::unpack(b), "Packing and unpacking should work")
+        assert_eq!((x,y),GF4::unpack(b), "Packing and unpacking should work.")
+    }
+
+    #[test]
+    fn test_mul_e(){
+        let e = GF4(0xe);
+        for x in 0..16 {
+            assert_eq!(e*GF4(x),GF4(x).mul_e(), "Multiplication should match lookup.")
+        }
     }
 
 
