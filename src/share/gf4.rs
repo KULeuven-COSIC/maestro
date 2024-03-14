@@ -32,10 +32,19 @@ const MUL_TABLE: [[u8; 16];16] = [
     ];
 
 impl GF4 {
-    // Generates a new element of `GF(2^4)`. The top 4 bits are ignored.
+    // Generates a new element of `GF(2^4)` from a u8. The top 4 bits are ignored.
     pub fn new(x:u8) -> Self{
         GF4(x & 0x0F)
     }
+
+    // Generates a new element of `GF(2^4)` from a u8 may have undefined behavior if the top 4-bits are set.
+    pub fn new_unchecked(x:u8) -> Self{
+        GF4(x)
+    } 
+
+    pub fn as_u8(self) -> u8 {
+        self.0
+    }  
 
     pub fn cube(self) -> Self {
         Self(SQ_TABLE[self.0 as usize])

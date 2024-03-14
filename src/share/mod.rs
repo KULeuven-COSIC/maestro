@@ -1,6 +1,7 @@
 pub mod gf8;
 mod gf8_tables;
 pub mod gf4;
+pub mod wol;
 
 use std::io;
 use std::ops::{Add, Mul, Neg, Sub};
