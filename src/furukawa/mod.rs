@@ -1,3 +1,13 @@
+//! This module implements the maliciously-secure MPC protocol by Furukawa et al., "High-Throughput Secure Three-Party Computation for Malicious Adversaries and an Honest Majority " (https://eprint.iacr.org/2016/944).
+//! 
+//! In the pre-processing phase, multiplication triples are generated and checked via bucket cut-and-choose.
+//! The online phase proceeds like the semi-honest variant but before outputs are revealed, a post-sacrificing step checks
+//! the validity of all multiplications that are computed in the online phase before.
+//! 
+//! This module notably contains 
+//!   - [furukawa_benchmark] that implements the AES benchmark
+//!   - [FurukawaParty] the party wrapper for the protocol. [FurukawaParty] also implements [ArithmeticBlackBox]
+
 use std::{ops::AddAssign, time::Instant};
 
 use itertools::izip;

@@ -13,6 +13,11 @@ use super::MulTripleVector;
 // required bucket size B for B=C for 2^10, 2^11, ..., 2^19; all batches > 2^19 use B=3; all batches < 2^10 use B=5
 const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];
 
+/// Returns `n` multiplication triples that are checked for correctness using bucket cut-and-choose.
+/// This implementation has a fixed soundness of 40-bit.
+/// 
+/// Note that unless `n` is a power of 2 larger or equal to 2^10, this function will generate more triples but only return exactly `n`.
+/// Depending on `next_power_of_two(n)`, different bucket sizes are chosen internally.
 #[allow(non_snake_case)]
 pub fn bucket_cut_and_choose<F: Field + PartialEq + Copy + AddAssign>(party: &mut Party, n: usize) -> MpcResult<MulTripleVector<F>> 
 where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
@@ -153,6 +158,15 @@ fn open_and_check<F: Field + PartialEq + Copy>(party: &mut Party, a: &[RssShare<
     Ok(true)
 }
 
+/// Computes the sacrificing one triple for another step with support for checking one triple by sacrificing multiple other triples (e.g. a bucket).
+/// 
+/// Parameters
+///  - `n` denotes the number of triples to check
+///  - `sacrifice_bucket_size` denotes the number of triples to sacrifice for **each** triple that is checked.
+///  - `ai_to_check`, `aii_to_check`, `bi_to_check`, `bii_to_check`, `ci_to_check` and `cii_to_check` are slices of length `n` that contain the multiplication triple to check.
+///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
+/// 
+/// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
 pub fn sacrifice<F: Field + Copy + AddAssign>(party: &mut Party, n: usize, sacrifice_bucket_size: usize, 
     ai_to_check: &[F], aii_to_check: &[F], bi_to_check: &[F], bii_to_check: &[F], ci_to_check: &[F], cii_to_check: &[F],
     ai_to_sacrifice: &mut [F], aii_to_sacrifice: &mut [F], bi_to_sacrifice: &mut [F], bii_to_sacrifice: &mut [F], ci_to_sacrifice: &mut [F], cii_to_sacrifice: &mut [F],
