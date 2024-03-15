@@ -1,15 +1,18 @@
+#![allow(dead_code)]
 mod share;
 mod party;
 mod network;
 mod gcm;
 mod chida;
+mod furukawa;
+mod aes;
 
 use std::{path::PathBuf, time::Duration};
 
 use clap::{Parser, Subcommand, ArgAction};
 use network::ConnectedParty;
 
-use crate::chida::ImplVariant;
+use crate::aes::ImplVariant;
 
 #[derive(Parser)]
 struct Cli {
@@ -27,6 +30,12 @@ enum Commands {
         simd: usize,
         #[arg(long="simple", action=ArgAction::SetTrue, help="If set, benchmarks the baseline implementation (cf. ImplVariant::Simple). If not set (default), benchmarks the optimized implementation in Chida et al.")]
         use_simple: bool
+    },
+    /// Benchmarks the Oblivious AES protocol from Chida et al., "High-Throughput Secure AES Computation" in WAHC'18 in the **malicious** setting using the
+    /// protocol from Furukawa et al with bucket-cut-and-choose and post-sacrifice to check correctness of multiplications.
+    MalChidaBenchmark {
+        #[arg(long, help="The number of parallel AES calls to benchmark.")]
+        simd: usize,
     }
 }
 
@@ -42,6 +51,11 @@ fn main() {
             let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0))).unwrap();
             println!("Connected!");
             chida::chida_benchmark(connected, simd, variant);
+        },
+        Commands::MalChidaBenchmark { simd } => {
+            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0))).unwrap();
+            println!("Connected!");
+            furukawa::furukawa_benchmark(connected, simd);
         }
     }
 }

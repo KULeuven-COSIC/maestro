@@ -1,4 +1,5 @@
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
+use crate::network::task::{Direction, IoLayer};
 use crate::network::CommChannel;
 use crate::party::{commitment, Party};
 use rand_chacha::ChaCha20Rng;
@@ -62,14 +63,18 @@ impl SharedRng {
         }
     }
 
-    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, comm_next: &mut CommChannel, comm_prev: &mut CommChannel) -> MpcResult<PairwiseSetupResult> {
+    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, io: &IoLayer) -> MpcResult<PairwiseSetupResult> {
+        // receive seed from P+1
+        let mut seed_next = [0u8; 32];
+        let rcv_seed_next = io.receive_slice(Direction::Next, &mut seed_next[0..CR_SEC_PARAM]);
+
         // create random seed part
         let mut seed = [0u8; 32];
         rng.fill_bytes(&mut seed[0..CR_SEC_PARAM]);
         // send my seed to P-1
-        comm_prev.write(&mut seed[0..CR_SEC_PARAM])?;
-        let mut seed_next = [0u8; 32];
-        comm_next.read(&mut seed_next[0..CR_SEC_PARAM])?;
+        io.send(Direction::Previous, seed[0..CR_SEC_PARAM].to_vec());
+        rcv_seed_next.rcv()?;
+        io.wait_for_completion();
 
         Ok(PairwiseSetupResult {
             prev: Self(ChaCha20Rng::from_seed(seed)),

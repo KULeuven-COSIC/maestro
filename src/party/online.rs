@@ -1,39 +1,14 @@
-use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 use crate::network::CommChannel;
 use crate::party::broadcast::{Broadcast, BroadcastContext};
 use crate::party::error::MpcResult;
 use crate::party::offline::MulTriple;
 use crate::party::Party;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, FieldVectorCommChannel, RssShare};
+use crate::share::{Field, FieldDigestExt, FieldVectorCommChannel, RssShare};
 
-pub fn my_input<F: Field>(party: &mut Party, context: &mut BroadcastContext, input: &[F]) -> MpcResult<Vec<RssShare<F>>>
-where CommChannel: FieldVectorCommChannel<F>, Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
-{
-    let a = party.generate_random(input.len());
-    let b = party.open_rss_to(context, &a, party.i)?;
-    let mut b = b.unwrap(); // this is safe since we open to party.i
-    for i in 0..b.len() {
-        b[i] = b[i].clone() + input[i].clone();
-    }
-    party.broadcast_round(context, &mut [], &mut [], &b)?;
-    Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| sub(&public_constant(party, bi), &ai)).collect())
-}
 
-pub fn other_input<F: Field>(party: &mut Party, context: &mut BroadcastContext, input_party: usize, n_inputs: usize) -> MpcResult<Vec<RssShare<F>>>
-where ChaCha20Rng: FieldRngExt<F>, CommChannel: FieldVectorCommChannel<F>, Sha256: FieldDigestExt<F>, {
-    assert_ne!(party.i, input_party);
-    let a = party.generate_random(n_inputs);
-    let b = party.open_rss_to(context, &a, input_party)?;
-    debug_assert!(b.is_none());
-    let mut b = vec![F::zero(); n_inputs];
-    match (party.i, input_party) {
-        (0,2) | (1,0) | (2,1) => party.broadcast_round(context, &mut [], &mut b, &[])?,
-        (0,1) | (1,2) | (2,0) => party.broadcast_round(context, &mut b, &mut [], &[])?,
-        _ => unreachable!(),
-    }
-    Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| sub(&public_constant(party, bi), &ai)).collect())
-}
+
+
 
 pub fn add<F: Field>(a: &RssShare<F>, b: &RssShare<F>) -> RssShare<F> {
     RssShare {
@@ -49,14 +24,7 @@ pub fn sub<F: Field>(a: &RssShare<F>, b: &RssShare<F>) -> RssShare<F> {
     }
 }
 
-pub fn public_constant<F: Field>(party: &Party, c: F) -> RssShare<F> {
-    match party.i {
-        0 => RssShare::from(c, F::zero()),
-        1 => RssShare::from(F::zero(), F::zero()),
-        2 => RssShare::from(F::zero(), c),
-        _ => unreachable!()
-    }
-}
+
 
 pub fn vector_add<F: Field>(a: &[RssShare<F>], b: &[RssShare<F>]) -> Vec<RssShare<F>> {
     debug_assert_eq!(a.len(), b.len());
@@ -112,10 +80,10 @@ pub fn vector_mul<F: Field>(party: &mut Party, context: &mut BroadcastContext, x
 
 #[cfg(test)]
 mod test {
-    use rand::{thread_rng};
+    use rand::thread_rng;
     use crate::party::broadcast::{Broadcast, BroadcastContext};
     use crate::party::offline::create_correct_mul_triples;
-    use crate::party::online::{my_input, other_input, vector_add, vector_mul, vector_sub};
+    use crate::party::online::{vector_add, vector_mul, vector_sub};
     use crate::party::Party;
     use crate::party::test::localhost_setup;
     use crate::share::{FieldRngExt, RssShare};
@@ -208,58 +176,5 @@ mod test {
         for (i, (c1, (c2, c3))) in c1.into_iter().zip(c2.into_iter().zip(c3)).enumerate() {
             assert_eq(c1, c2, c3, a[i] * b[i]);
         }
-    }
-
-    #[test]
-    fn input_gf8() {
-        const N: usize = 100;
-        let mut rng = thread_rng();
-        let x1 = rng.generate(N);
-        let x2 = rng.generate(N);
-        let x3 = rng.generate(N);
-
-        let program = |x: Vec<GF8>| {
-            move |p: &mut Party| {
-                let mut context = BroadcastContext::new();
-                let in1 = if p.i == 0 {
-                    my_input(p, &mut context, &x).unwrap()
-                }else{
-                    other_input(p, &mut context, 0, N).unwrap()
-                };
-
-                let in2 = if p.i == 1 {
-                    my_input(p, &mut context, &x).unwrap()
-                }else{
-                    other_input(p, &mut context, 1, N).unwrap()
-                };
-
-                let in3 = if p.i == 2 {
-                    my_input(p, &mut context, &x).unwrap()
-                }else{
-                    other_input(p, &mut context, 2, N).unwrap()
-                };
-                p.compare_view(context).unwrap();
-                (in1, in2, in3)
-            }
-        };
-
-        let (h1, h2, h3) = localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
-        let ((x11, x21, x31), _) = h1.join().unwrap();
-        let ((x12, x22, x32), _) = h2.join().unwrap();
-        let ((x13, x23, x33), _) = h3.join().unwrap();
-
-        fn check(x: Vec<GF8>, share1: Vec<RssShare<GF8>>, share2: Vec<RssShare<GF8>>, share3: Vec<RssShare<GF8>>) {
-            assert_eq!(x.len(), share1.len());
-            assert_eq!(x.len(), share2.len());
-            assert_eq!(x.len(), share3.len());
-            for (xi, (s1, (s2, s3))) in x.into_iter().zip(share1.into_iter().zip(share2.into_iter().zip(share3))) {
-                consistent(&s1, &s2, &s3);
-                assert_eq(s1, s2, s3, xi);
-            }
-        }
-
-        check(x1, x11, x12, x13);
-        check(x2, x21, x22, x23);
-        check(x3, x31, x32, x33);
     }
 }

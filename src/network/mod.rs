@@ -9,6 +9,10 @@ use rustls::server::WebPkiClientVerifier;
 use rustls::{ClientConfig, RootCertStore, ServerConfig, ClientConnection, ServerConnection, StreamOwned};
 use serde::Deserialize;
 
+mod non_blocking;
+mod receiver;
+pub mod task;
+
 pub struct Config {
     player_addr: Vec<Ipv4Addr>,
     player_ports: Vec<u16>,
@@ -104,7 +108,7 @@ pub struct CommChannel {
     rounds: usize,
 }
 
-enum Stream {
+pub enum Stream {
     Client(rustls::StreamOwned<ClientConnection, TcpStream>),
     Server(rustls::StreamOwned<ServerConnection, TcpStream>),
 }
@@ -165,6 +169,7 @@ impl CreatedParty {
         })
     }
 
+    #[cfg(test)]
     pub fn port(&self) -> io::Result<u16> {
         self.server_socket
             .local_addr()

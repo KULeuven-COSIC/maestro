@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 use rand::{CryptoRng, Rng};
@@ -48,6 +49,18 @@ impl Field for GF8 {
 
     fn is_zero(&self) -> bool {
         self.0 == 0
+    }
+
+    fn as_byte_vec(it: impl IntoIterator<Item=impl Borrow<Self>>) -> Vec<u8> {
+        it.into_iter().map(|gf| gf.borrow().0).collect()
+    }
+
+    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+        v.into_iter().map(|byte| GF8(byte)).collect()
+    }
+
+    fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
+        v.into_iter().zip(dest).for_each(|(byte, dst)| *dst = GF8(byte))
     }
 }
 

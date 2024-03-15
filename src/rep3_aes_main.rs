@@ -4,6 +4,8 @@ mod network;
 mod gcm;
 mod chida;
 mod conversion;
+mod aes;
+mod furukawa;
 
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
 
