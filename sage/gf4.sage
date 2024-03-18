@@ -35,9 +35,17 @@ def gen_mult_table(F):
         print("["+ ", ".join(f'0x0{natural_encoding_to_int(e):x}' for e in mult_table_row)+"],")
     print("]")
 
+def gen_inv_table(F):
+    square_table = [~natural_encoding(F, e) for e in range(1,F.order())]
+    print("INV_TABLE = [", end='')
+    print("0x00, ", end='') # 0 has no inverse, but we add a dummy value for the convenience of look ups.
+    print(", ".join(f'0x0{natural_encoding_to_int(e):x}' for e in square_table), end='')
+    print("]")    
+
 x = polygen(GF(2), 'x')
 F = GF(2**4, name=x, modulus=x^4 + x + 1)
 
 #gen_square_table(F)
 #gen_mult_table(F)
-gen_mult_by_E_table(F)
+#gen_mult_by_E_table(F)
+gen_inv_table(F)
