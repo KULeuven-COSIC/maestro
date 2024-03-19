@@ -122,6 +122,17 @@ impl Party {
         si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
     }
 
+    #[inline]
+    pub fn constant<F: Field>(&self, value: F) -> RssShare<F> {
+        if self.i == 0 {
+            RssShare::from(value, F::zero())
+        }else if self.i == 2 {
+            RssShare::from(F::zero(), value)
+        }else{
+            RssShare::from(F::zero(), F::zero())
+        }
+    }
+
     pub fn io(&self) -> &IoLayer {
         self.io.as_ref().expect("Shutdown was called.")
     }

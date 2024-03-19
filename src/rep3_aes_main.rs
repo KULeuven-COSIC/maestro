@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod share;
 mod party;
 mod network;
@@ -214,7 +215,7 @@ fn return_to_writer<T: Serialize + From<Rep3AesError>, W: io::Write, F: FnOnce()
 }
 
 fn additive_shares_to_rss(party: &mut Party, shares: Vec<GF8>) -> MpcResult<Vec<RssShare<GF8>>> {
-    let (k1, k2, k3) = chida::online::input_round(party, shares)?;
+    let (k1, k2, k3) = chida::online::input_round(party, &shares)?;
     let key_share_rss: Vec<_> = izip!(k1, k2, k3)
         .map(|(k1, k2, k3)| k1 + k2 + k3)
         .collect();
@@ -243,12 +244,13 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
                         let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0)))?;
-                        let mut party = ChidaParty::setup(connected);
+                        let mut party = ChidaParty::setup(connected)?;
                         
                         let key_share = additive_shares_to_rss(party.inner_mut(), encrypt_args.key_share)?;
                         let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.message_share.into_iter().unzip();
-                        let message_share = convert_ring_to_boolean(party.inner_mut(), &message_share_si, &message_share_sii)?;
-                        let (mut tag, mut ct) = gcm::aes128_gcm_encrypt(party.inner_mut(), &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
+                        let party_index = party.inner_mut().i;
+                        let message_share = convert_ring_to_boolean(&mut party, party_index, &message_share_si, &message_share_sii)?;
+                        let (mut tag, mut ct) = gcm::aes128_gcm_encrypt(&mut party, &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
                         ct.append(&mut tag);
                         // open ct||tag
                         let ct_and_tag = chida::online::output_round(party.inner_mut(), &ct, &ct, &ct)?;
@@ -263,16 +265,16 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
                         let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0)))?;
-                        let mut party = ChidaParty::setup(connected);
+                        let mut party = ChidaParty::setup(connected)?;
                         let key_share = additive_shares_to_rss(party.inner_mut(), decrypt_args.key_share)?;
                         // split ciphertext and tag; tag is the last 16 bytes
                         let ctlen = decrypt_args.ciphertext.len();
                         let (ct, tag) = (&decrypt_args.ciphertext[..ctlen-16], &decrypt_args.ciphertext[ctlen-16..]);
-                        let res = gcm::aes128_gcm_decrypt(party.inner_mut(), &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check);
+                        let res = gcm::aes128_gcm_decrypt(&mut party, &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check);
                         match res {
                             Ok(message_share) => {
                                 // now run b2a conversion
-                                let (ring_shares_si, ring_shares_sii) = convert_boolean_to_ring(party.inner_mut(), message_share.into_iter())?;
+                                let (ring_shares_si, ring_shares_sii) = convert_boolean_to_ring(&mut party, party_index, message_share.into_iter())?;
                                 let ring_shares = ring_shares_si.into_iter().zip(ring_shares_sii).collect();
                                 Ok(DecryptResult::new_success(ring_shares))
                             },

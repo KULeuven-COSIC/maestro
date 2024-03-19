@@ -2,8 +2,9 @@ use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
+use sha2::Digest;
 
-use crate::{chida, network::CommChannel, party::{error::MpcResult, Party}, share::{field::GF8, Field, FieldRngExt, FieldVectorCommChannel, RssShare}};
+use crate::{aes::{ComputePhase, MPCProtocol, OutputPhase}, party::error::MpcResult, share::{field::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 // a bit-wise xor shared ring element mod 2^64
 // encoded as little endian
@@ -19,6 +20,25 @@ impl Field for Z64Bool {
     }
     fn zero() -> Self {
         Self(0)
+    }
+
+    fn as_byte_vec(it: impl IntoIterator<Item= impl std::borrow::Borrow<Self>>) -> Vec<u8> {
+        it.into_iter().flat_map(|z64| z64.borrow().to_owned().0.to_le_bytes().into_iter()).collect()
+    }
+    fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
+        debug_assert!(v.len() % 8 == 0);
+        debug_assert_eq!(dest.len()*8, v.len());
+        dest.iter_mut().zip(v.into_iter().chunks(8).into_iter()).for_each(|(dst, mut chunk)| {
+            let (b0,b1,b2,b3,b4,b5,b6,b7) = chunk.next_tuple().unwrap();
+            *dst = Self(u64::from_le_bytes([b0,b1,b2,b3,b4,b5,b6,b7]));
+        });
+    }
+
+    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+        v.into_iter().chunks(8).into_iter().map(|mut chunk| {
+            let (b0,b1,b2,b3,b4,b5,b6,b7) = chunk.next_tuple().unwrap();
+            Self(u64::from_le_bytes([b0,b1,b2,b3,b4,b5,b6,b7]))
+        }).collect()
     }
 }
 
@@ -65,26 +85,34 @@ impl<R: Rng + CryptoRng> FieldRngExt<Z64Bool> for R {
     }
 }
 
-impl FieldVectorCommChannel<Z64Bool> for CommChannel {
-    fn write_vector(&mut self, vector: &[Z64Bool]) -> std::io::Result<()> {
-        let mut buf = vec![0u8; 8*vector.len()];
-        for (i,v) in vector.iter().enumerate() {
-            let bytes = v.0.to_le_bytes();
-            buf[8*i..8*i+8].copy_from_slice(&bytes);
+impl<D: Digest> FieldDigestExt<Z64Bool> for D {
+    fn update(&mut self, message: &[Z64Bool]) {
+        for m in message {
+            self.update(&m.0.to_le_bytes());
         }
-        self.write(&buf)
-    }
-    fn read_vector(&mut self, buffer: &mut [Z64Bool]) -> std::io::Result<()> {
-        let mut buf = vec![0u8; 8*buffer.len()];
-        self.read(&mut buf)?;
-        for (i, bytes) in buf.chunks_exact(8).enumerate() {
-            let mut arr = [0u8; 8];
-            arr.copy_from_slice(bytes);
-            buffer[i].0 = u64::from_le_bytes(arr);
-        }
-        Ok(())
     }
 }
+
+// impl FieldVectorCommChannel<Z64Bool> for CommChannel {
+//     fn write_vector(&mut self, vector: &[Z64Bool]) -> std::io::Result<()> {
+//         let mut buf = vec![0u8; 8*vector.len()];
+//         for (i,v) in vector.iter().enumerate() {
+//             let bytes = v.0.to_le_bytes();
+//             buf[8*i..8*i+8].copy_from_slice(&bytes);
+//         }
+//         self.write(&buf)
+//     }
+//     fn read_vector(&mut self, buffer: &mut [Z64Bool]) -> std::io::Result<()> {
+//         let mut buf = vec![0u8; 8*buffer.len()];
+//         self.read(&mut buf)?;
+//         for (i, bytes) in buf.chunks_exact(8).enumerate() {
+//             let mut arr = [0u8; 8];
+//             arr.copy_from_slice(bytes);
+//             buffer[i].0 = u64::from_le_bytes(arr);
+//         }
+//         Ok(())
+//     }
+// }
 
 fn bit_slice(dst: &mut Vec<Z64Bool>, a: &[Z64Bool], index: usize) {
     dst.clear();
@@ -147,7 +175,7 @@ fn conv<'a>(it: impl Iterator<Item=&'a Z64Bool>) -> Vec<u64> {
 /// for each element, this function outputs a respective share z_1, z_2 and z_3, respectively
 /// s.t. z_1 + z_2 + z_3 = (b0_1 b1_1 ... b7_1) XOR (b0_2 b1_2 ... b7_2) XOR (b0_3 b1_3 ... b7_3)
 /// where '+' is addition in the ring
-pub fn convert_boolean_to_ring(party: &mut Party, bytes: impl Iterator<Item = RssShare<GF8>>) -> MpcResult<(Vec<u64>,Vec<u64>)> {
+pub fn convert_boolean_to_ring<Protocol: MPCProtocol + ComputePhase<Z64Bool> + OutputPhase<Z64Bool>>(party: &mut Protocol, party_index: usize, bytes: impl Iterator<Item = RssShare<GF8>>) -> MpcResult<(Vec<u64>,Vec<u64>)> {
     // convert bytes into Z64 using little endian
     let (el_si, el_sii): (Vec<_>, Vec<_>) = bytes.chunks(8).into_iter().map(|chunk| {
         let chunk: Vec<_> = chunk.collect();
@@ -183,11 +211,11 @@ pub fn convert_boolean_to_ring(party: &mut Party, bytes: impl Iterator<Item = Rs
         .map(|(si, sii)| RssShare::from(si, sii))
         .collect_vec();
     // open r1 to P1, r2 to P2, r3 to P3
-    let my_share = chida::online::output_round(party, &to_p1, &to_p2, &to_p3)?;
+    let my_share = party.output_to(&to_p1, &to_p2, &to_p3)?;
     let si = my_share.iter().take(n);
     let sii = my_share.iter().skip(n);
     // negate r1, r2 locally
-    Ok(match party.i {
+    Ok(match party_index {
         0 => (conv_neg(si), conv_neg(sii)),
         1 => (conv_neg(si), conv(sii)),
         2 => (conv(si), conv_neg(sii)),
@@ -209,11 +237,11 @@ fn rss_pos<'a>(it: impl Iterator<Item=u64>, first: bool) -> (Vec<Z64Bool>, Vec<Z
     }).unzip()
 }
 
-pub fn convert_ring_to_boolean(party: &mut Party, elements_si: &[u64], elements_sii: &[u64]) -> MpcResult<Vec<RssShare<GF8>>> {
+pub fn convert_ring_to_boolean<Protocol: ComputePhase<Z64Bool>>(party: &mut Protocol, party_index: usize, elements_si: &[u64], elements_sii: &[u64]) -> MpcResult<Vec<RssShare<GF8>>> {
     // convert shares locally
     let si: (Vec<_>, Vec<_>) = rss_pos(elements_si.iter().copied(), true);
     let sii: (Vec<_>, Vec<_>) = rss_pos(elements_sii.iter().copied(), false);
-    let (s1, s2, s3) = match party.i {
+    let (s1, s2, s3) = match party_index {
         0 => (si, sii, rss_zero(elements_si.len())),
         1 => (rss_zero(elements_si.len()), si, sii),
         2 => (sii, rss_zero(elements_si.len()), si),
@@ -232,7 +260,7 @@ pub fn convert_ring_to_boolean(party: &mut Party, elements_si: &[u64], elements_
 }
 
 
-fn ripple_carry_adder(party: &mut Party, a_i: &[Z64Bool], a_ii: &[Z64Bool], b_i: &[Z64Bool], b_ii: &[Z64Bool]) -> MpcResult<(Vec<Z64Bool>,Vec<Z64Bool>)> {
+fn ripple_carry_adder<Protocol: ComputePhase<Z64Bool>>(party: &mut Protocol, a_i: &[Z64Bool], a_ii: &[Z64Bool], b_i: &[Z64Bool], b_ii: &[Z64Bool]) -> MpcResult<(Vec<Z64Bool>,Vec<Z64Bool>)> {
     debug_assert_eq!(a_i.len(), a_ii.len());
     debug_assert_eq!(a_i.len(), b_i.len());
     debug_assert_eq!(a_i.len(), b_ii.len());
@@ -267,7 +295,7 @@ fn ripple_carry_adder(party: &mut Party, a_i: &[Z64Bool], a_ii: &[Z64Bool], b_i:
         }
         unbit_slice(&mut result_i, &slice_c_i, i);
         unbit_slice(&mut result_ii, &slice_c_ii, i);
-        chida::online::mul(party, &mut slice_c_i, &mut slice_c_ii, &slice_a_i, &slice_a_ii, &slice_b_i, &slice_b_ii)?;
+        party.mul(&mut slice_c_i, &mut slice_c_ii, &slice_a_i, &slice_a_ii, &slice_b_i, &slice_b_ii)?;
         for j in 0..n {
             carry_si[j] += slice_c_i[j];
             carry_sii[j] += slice_c_ii[j];
@@ -284,7 +312,7 @@ pub mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
 
-    use crate::{conversion::{convert_boolean_to_ring, convert_ring_to_boolean, ripple_carry_adder}, party::{test::localhost_setup, Party}, share::{field::GF8, test::{consistent_vector, secret_share_vector}, Field, FieldRngExt, RssShare}};
+    use crate::{aes::{ComputePhase, MPCProtocol, OutputPhase, PreProcessing}, chida::online::test::ChidaSetup, conversion::{convert_boolean_to_ring, convert_ring_to_boolean, ripple_carry_adder}, furukawa::test::FurukawaSetup, party::test::TestSetup, share::{field::GF8, test::{consistent_vector, secret_share_vector}, Field, FieldRngExt, RssShare}};
 
     use super::{bit_slice, unbit_slice, Z64Bool};
 
@@ -312,8 +340,7 @@ pub mod test {
         (0..n).map(|_| rng.next_u64()).collect()
     }
 
-    #[test]
-    fn ripple_carry_adder_u64() {
+    fn ripple_carry_adder_u64<P: PreProcessing<Z64Bool> + ComputePhase<Z64Bool>, S: TestSetup<P>>(setup: S) {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);
@@ -325,14 +352,14 @@ pub mod test {
         // consistent_vector(&b_shares.0, &b_shares.1, &b_shares.2);
 
         let program = |a: Vec<RssShare<Z64Bool>>, b: Vec<RssShare<Z64Bool>>| {
-            move |p: &mut Party| {
+            move |p: &mut P| {
                 let (a_i, a_ii): (Vec<_>, Vec<_>) = a.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
                 let (b_i, b_ii): (Vec<_>, Vec<_>) = b.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
                 ripple_carry_adder(p, &a_i, &a_ii, &b_i, &b_ii).unwrap()
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(a_shares.0, b_shares.0), program(a_shares.1, b_shares.1), program(a_shares.2, b_shares.2));
+        let (h1, h2, h3) = S::localhost_setup(program(a_shares.0, b_shares.0), program(a_shares.1, b_shares.1), program(a_shares.2, b_shares.2));
         let (res1, _) = h1.join().unwrap();
         let (res2, _) = h2.join().unwrap();
         let (res3, _) = h3.join().unwrap();
@@ -353,6 +380,11 @@ pub mod test {
         }
     }
 
+    #[test]
+    fn ripple_carry_adder_u64_chida() {
+        ripple_carry_adder_u64(ChidaSetup)
+    }
+
     fn consistent_u64(s1i: &[u64], s1ii: &[u64], s2i: &[u64], s2ii: &[u64], s3i: &[u64], s3ii: &[u64]) {
         assert_eq!(s1i.len(), s1ii.len());
         assert_eq!(s1i.len(), s2i.len());
@@ -365,19 +397,18 @@ pub mod test {
         assert_eq!(s2ii, s3i);
     }
 
-    #[test]
-    fn conv_bool_to_ring() {
+    fn conv_bool_to_ring<P: MPCProtocol + ComputePhase<Z64Bool> + OutputPhase<Z64Bool>, S: TestSetup<P>>(setup: S) {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);
         let a_as_le_bytes = a.iter().map(|ai| ai.to_le_bytes().into_iter()).flatten().map(|b| GF8(b)).collect_vec();
         let shares = secret_share_vector(&mut rng, a_as_le_bytes.into_iter());
-        let program = |share: Vec<RssShare<GF8>>| {
-            move |p: &mut Party| {
-                convert_boolean_to_ring(p, share.into_iter()).unwrap()
+        let program = |share: Vec<RssShare<GF8>>, i: usize| {
+            move |p: &mut P| {
+                convert_boolean_to_ring(p, i, share.into_iter()).unwrap()
             }
         };
-        let (h1, h2, h3) = localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) = S::localhost_setup(program(shares.0, 0), program(shares.1, 1), program(shares.2, 2));
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
         let (r3, _) = h3.join().unwrap();
@@ -390,6 +421,11 @@ pub mod test {
         }
     }
 
+    #[test]
+    fn conv_bool_to_ring_chida() {
+        conv_bool_to_ring(ChidaSetup)
+    }
+
     pub fn secret_share_vector_ring<R: Rng + CryptoRng>(rng: &mut R, values: &[u64]) -> (Vec<u64>,Vec<u64>,Vec<u64>) {
         let s1 = random_u64(rng, values.len());
         let s2 = random_u64(rng, values.len());
@@ -397,19 +433,18 @@ pub mod test {
         (s1, s2, s3)
     }
 
-    #[test]
-    fn conv_ring_to_bool() {
+    fn conv_ring_to_bool<P: ComputePhase<Z64Bool>, S: TestSetup<P>>(setup: S) {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);
         let shares = secret_share_vector_ring(&mut rng, &a);
 
-        let program = |share_i: Vec<u64>, share_ii: Vec<u64>| {
-            move |p: &mut Party| {
-                convert_ring_to_boolean(p, &share_i, &share_ii).unwrap()
+        let program = |share_i: Vec<u64>, share_ii: Vec<u64>, i: usize| {
+            move |p: &mut P| {
+                convert_ring_to_boolean(p, i,&share_i, &share_ii).unwrap()
             }
         };
-        let (h1,h2,h3) = localhost_setup(program(shares.0.clone(), shares.1.clone()), program(shares.1, shares.2.clone()), program(shares.2, shares.0));
+        let (h1,h2,h3) = S::localhost_setup(program(shares.0.clone(), shares.1.clone(), 0), program(shares.1, shares.2.clone(), 1), program(shares.2, shares.0, 2));
         let (b1, _) = h1.join().unwrap();
         let (b2, _) = h2.join().unwrap();
         let (b3, _) = h3.join().unwrap();
@@ -424,5 +459,10 @@ pub mod test {
             arr.copy_from_slice(&b);
             assert_eq!(ai.to_le_bytes(), arr);
         }
+    }
+
+    #[test]
+    fn conv_ring_to_bool_chida() {
+        conv_ring_to_bool(ChidaSetup)
     }
 }

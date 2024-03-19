@@ -3,8 +3,9 @@ use itertools::Itertools;
 // use bytemuck::TransparentWrapper;
 use ghash::{GHash, universal_hash::{KeyInit, UniversalHash}};
 use rand::{Rng, CryptoRng};
+use sha2::Digest;
 
-use crate::{share::{Field, field::GF8, FieldRngExt, FieldVectorCommChannel}, network::CommChannel};
+use crate::share::{field::GF8, Field, FieldDigestExt, FieldRngExt};
 
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)] //, TransparentWrapper)]
@@ -26,6 +27,31 @@ impl Field for GF128 {
     }
     fn zero() -> Self {
         GF128([0u8; 16])
+    }
+
+    fn as_byte_vec(it: impl IntoIterator<Item= impl std::borrow::Borrow<Self>>) -> Vec<u8> {
+        it.into_iter().flat_map(|gf| {
+            let arr = gf.borrow().0.clone();
+            arr.into_iter()
+        }).collect()
+    }
+
+    fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
+        debug_assert_eq!(dest.len()*16, v.len());
+        dest.iter_mut().zip(v.into_iter().chunks(16).into_iter()).for_each(|(dst, chunk)| {
+            chunk.into_iter().enumerate().for_each(|(i,byte)| {
+                dst.0[i] = byte;
+            });
+        });
+    }
+
+    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+        debug_assert!(v.len()%16 == 0);
+        v.into_iter().chunks(16).into_iter().map(|chunk| {
+            let mut bytes = [0u8; 16];
+            bytes.iter_mut().zip(chunk.into_iter()).for_each(|(dst,byte)| *dst = byte);
+            Self(bytes)
+        }).collect()
     }
 }
 
@@ -128,26 +154,34 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF128> for R {
     }
 }
 
-impl FieldVectorCommChannel<GF128> for CommChannel {
-    fn read_vector(&mut self, buffer: &mut [GF128]) -> std::io::Result<()> {
-        let mut buf = vec![0u8; 16*buffer.len()];
-        self.read(&mut buf)?;
-        for (dst, chunk) in buffer.iter_mut().zip(buf.into_iter().chunks(16).into_iter()) {
-            for (i,x) in chunk.enumerate() {
-                dst.0[i] = x;
-            }
+impl<D: Digest> FieldDigestExt<GF128> for D {
+    fn update(&mut self, message: &[GF128]) {
+        for m in message {
+            self.update(m.0);
         }
-        Ok(())
-    }
-
-    fn write_vector(&mut self, vector: &[GF128]) -> std::io::Result<()> {
-        let mut buf = vec![0u8; 16*vector.len()];
-        for (i,xi) in vector.iter().enumerate() {
-            buf[16*i..16*i+16].copy_from_slice(&xi.0);
-        }
-        self.write(&buf)
     }
 }
+
+// impl FieldVectorCommChannel<GF128> for CommChannel {
+//     fn read_vector(&mut self, buffer: &mut [GF128]) -> std::io::Result<()> {
+//         let mut buf = vec![0u8; 16*buffer.len()];
+//         self.read(&mut buf)?;
+//         for (dst, chunk) in buffer.iter_mut().zip(buf.into_iter().chunks(16).into_iter()) {
+//             for (i,x) in chunk.enumerate() {
+//                 dst.0[i] = x;
+//             }
+//         }
+//         Ok(())
+//     }
+
+//     fn write_vector(&mut self, vector: &[GF128]) -> std::io::Result<()> {
+//         let mut buf = vec![0u8; 16*vector.len()];
+//         for (i,xi) in vector.iter().enumerate() {
+//             buf[16*i..16*i+16].copy_from_slice(&xi.0);
+//         }
+//         self.write(&buf)
+//     }
+// }
 
 #[cfg(test)]
 mod test {

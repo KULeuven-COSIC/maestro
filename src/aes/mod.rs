@@ -1,19 +1,54 @@
-use crate::{network::task::{Direction, IoLayer}, party::error::MpcResult, share::{field::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use rand_chacha::ChaCha20Rng;
 
-pub trait ArithmeticBlackBox<F: Field> {
-    type Digest: FieldDigestExt<F>;
-    type Rng: FieldRngExt<F>;
+use crate::{chida::ChidaParty, furukawa::FurukawaParty, network::task::Direction, party::{error::MpcResult, Party}, share::{field::GF8, Field, FieldRngExt, RssShare}};
 
+pub trait PreProcessing<F: Field> {
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>>;
-    fn io(&self) -> &IoLayer;
-    
+}
+
+pub trait InputPhase<F: Field> {
     fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
-    fn constant(&self, value: F) -> RssShare<F>;
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()>;
-    fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
+}
+
+pub trait MPCProtocol {
+    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>> where ChaCha20Rng: FieldRngExt<F>;
+    fn constant<F: Field>(&self, value: F) -> RssShare<F>;
+    fn check_input_phase(&mut self) -> MpcResult<()>;
     fn finalize(&mut self) -> MpcResult<()>;
 }
+
+pub trait ComputePhase<F: Field> {
+    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()>;
+}
+
+pub trait OutputPhase<F: Field> {
+    fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>>;
+}
+
+pub trait ComputeInverse<F: Field> {
+    fn invert(&mut self, si: &mut [F], sii: &mut [F], variant: ImplVariant) -> MpcResult<()>;
+}
+
+// pub trait ArithmeticBlackBox<F: Field> {
+//     type Digest: FieldDigestExt<F>;
+//     type Rng: FieldRngExt<F>;
+//     type InputPhase: ABBInputPhase<F>;
+
+//     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
+    
+//     fn io(&self) -> &IoLayer;
+//     // fn party_index(&self) -> usize;
+
+
+//     fn input_phase(&mut self) -> Self::InputPhase;
+//     fn end_input_phase(phase: Self::InputPhase) -> MpcResult<()>;
+//     // fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
+    
+    
+    
+    
+// }
 
 #[derive(Clone, Copy, Debug)]
 pub enum ImplVariant {
@@ -236,12 +271,12 @@ pub fn get_required_mult_for_aes128_no_keyschedule(variant: ImplVariant, n_block
     }
 }
 
-pub fn random_state<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, size: usize) -> VectorAesState {
+pub fn random_state<Protocol: MPCProtocol>(party: &mut Protocol, size: usize) -> VectorAesState {
     VectorAesState::from_bytes(party.generate_random(size * 16))
 }
 
 /// returns random key states for benchmarking purposes
-pub fn random_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol) -> Vec<AesKeyState> {
+pub fn random_keyschedule<Protocol: MPCProtocol>(party: &mut Protocol) -> Vec<AesKeyState> {
     (0..11).map(|_| {
         let rk = party.generate_random(16);
         AesKeyState::from_rss_vec(rk)
@@ -249,7 +284,7 @@ pub fn random_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protoco
     .collect()
 }
 
-pub fn aes128_no_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, inputs: VectorAesState, round_key: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
+pub fn aes128_no_keyschedule<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8>>(party: &mut Protocol, inputs: VectorAesState, round_key: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
     debug_assert_eq!(round_key.len(), 11);
     let mut state = inputs;
 
@@ -266,7 +301,7 @@ pub fn aes128_no_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Prot
     Ok(state)
 }
 
-pub fn aes128_inv_no_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, inputs: VectorAesState, key_schedule: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
+pub fn aes128_inv_no_keyschedule<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8>>(party: &mut Protocol, inputs: VectorAesState, key_schedule: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
     debug_assert_eq!(key_schedule.len(), 11);
     let mut state = inputs;
 
@@ -283,7 +318,7 @@ pub fn aes128_inv_no_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut 
     Ok(state)
 }
 
-fn aes128_keyschedule_round<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, rk: &AesKeyState, rcon: GF8, variant: ImplVariant) -> MpcResult<AesKeyState> {
+fn aes128_keyschedule_round<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8>>(party: &mut Protocol, rk: &AesKeyState, rcon: GF8, variant: ImplVariant) -> MpcResult<AesKeyState> {
     let mut rot_i = [rk.si[7], rk.si[11], rk.si[15], rk.si[3]];
     let mut rot_ii = [rk.sii[7], rk.sii[11], rk.sii[15], rk.sii[3]];
     sbox_layer(party, &mut rot_i, &mut rot_ii, variant)?;
@@ -306,7 +341,7 @@ fn aes128_keyschedule_round<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Proto
     Ok(output)
 }
 
-pub fn aes128_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, key: Vec<RssShare<GF8>>, variant: ImplVariant) -> MpcResult<Vec<AesKeyState>> {
+pub fn aes128_keyschedule<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8>>(party: &mut Protocol, key: Vec<RssShare<GF8>>, variant: ImplVariant) -> MpcResult<Vec<AesKeyState>> {
     debug_assert_eq!(key.len(), 16);
     const ROUND_CONSTANTS: [GF8; 10] = [GF8(0x01), GF8(0x02), GF8(0x04), GF8(0x08), GF8(0x10), GF8(0x20), GF8(0x40), GF8(0x80), GF8(0x1b), GF8(0x36)];
     let mut ks = Vec::with_capacity(11);
@@ -318,7 +353,7 @@ pub fn aes128_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protoco
     Ok(ks)
 }
 
-pub fn output<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, blocks: VectorAesState) -> MpcResult<Vec<GF8>> {
+pub fn output<Protocol: OutputPhase<GF8>>(party: &mut Protocol, blocks: VectorAesState) -> MpcResult<Vec<GF8>> {
     let shares = blocks.to_bytes();
     let (si, sii): (Vec<_>, Vec<_>) = shares.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
     party.output_round(&si, &sii)
@@ -333,12 +368,13 @@ fn add_round_key(states: &mut VectorAesState, round_key: &AesKeyState) {
     }
 }
 
-fn sbox_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
+fn sbox_layer<Protocol: MPCProtocol + ComputeInverse<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
     // first inverse, then affine transform
-    match variant {
-        ImplVariant::Simple => gf8_inv_layer(party, si, sii)?,
-        ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)?
-    };
+    party.invert(si, sii, variant)?;
+    // match variant {
+    //     ImplVariant::Simple => gf8_inv_layer(party, si, sii)?,
+    //     ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)?
+    // };
         
     // apply affine transform
     let c = party.constant(GF8(0x63));
@@ -351,7 +387,7 @@ fn sbox_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut 
 
 
 
-fn inv_sbox_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
+fn inv_sbox_layer<Protocol: MPCProtocol + ComputeInverse<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
     // first inverse affine transform, then gf8 inverse
     // apply inverse affine transform
     let c = party.constant(GF8(0x63));
@@ -360,10 +396,11 @@ fn inv_sbox_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &
         si[i] = (si[i] + c.si).inv_aes_sbox_affine_transform();
         sii[i] = (sii[i] + c.sii).inv_aes_sbox_affine_transform();
     }
-    match variant {
-        ImplVariant::Simple => gf8_inv_layer(party, si, sii),
-        ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)
-    }
+    party.invert(si, sii, variant)
+    // match variant {
+    //     ImplVariant::Simple => gf8_inv_layer(party, si, sii),
+    //     ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)
+    // }
 }
 
 #[inline]
@@ -379,8 +416,26 @@ fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
     res
 }
 
+impl ComputeInverse<GF8> for ChidaParty {
+    fn invert(&mut self, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
+        match variant {
+            ImplVariant::Simple => gf8_inv_layer(self, si, sii),
+            ImplVariant::Optimized => gf8_inv_layer_opt(self.inner_mut(), si, sii)
+        }
+    }
+}
+
+impl ComputeInverse<GF8> for FurukawaParty<GF8> {
+    fn invert(&mut self, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
+        match variant {
+            ImplVariant::Simple => gf8_inv_layer(self, si, sii),
+            ImplVariant::Optimized => panic!("Use Simple impl variant for malicious security"),
+        }
+    }
+}
+
 // the straight-forward gf8 inversion using 4 multiplication and only squaring (see Chida et al. "High-Throughput Secure AES Computation" in WAHC'18 [Figure 6])
-fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+fn gf8_inv_layer<Protocol: ComputePhase<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     let n = si.len();
     // this is not yet the multiplication that chida et al use
     let x2 = (square_layer(si), square_layer(sii)); //square(&states);
@@ -408,13 +463,13 @@ fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &m
     party.mul(si, sii, &x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..])
 }
 
-fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+fn gf8_inv_layer_opt(party: &mut Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     let n = si.len();
     // MULT(x²,x)
     // receive from P-1
     let rcv_x3i = party.io().receive_field(Direction::Previous, n);
 
-    let x3ii: Vec<_> = party.generate_random(n)
+    let x3ii: Vec<_> = party.generate_random::<GF8>(n)
     .into_iter().enumerate()
     .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
     .collect();
@@ -424,7 +479,7 @@ fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si
     // MULT(x^12, x^2) and MULT(x^12, x^3)
     // receive from P-1
     let rcv_x14x15i = party.io().receive_field(Direction::Previous, 2*n);
-    let mut x14x15ii: Vec<_> = party.generate_random(2*n)
+    let mut x14x15ii: Vec<_> = party.generate_random::<GF8>(2*n)
     .into_iter().map(|alpha| alpha.si + alpha.sii)
     .collect();
     let x3i = rcv_x3i.rcv()?;
@@ -440,7 +495,7 @@ fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si
 
     // MULT(x^240, x^14)
     let x14x15i = rcv_x14x15i.rcv()?;
-    let x254ii: Vec<_> = party.generate_random(n).into_iter().enumerate()
+    let x254ii: Vec<_> = party.generate_random::<GF8>(n).into_iter().enumerate()
     .map(|(i, alpha)| alpha.si + alpha.sii + GF8::x16y(x14x15i[n+i] + x14x15ii[n+i], x14x15i[i] + x14x15ii[i]) + GF8::x16y(x14x15i[n+i], x14x15i[i]))
     .collect();
     sii.copy_from_slice(&x254ii);
@@ -461,7 +516,7 @@ pub mod test {
 
     use crate::{aes::{aes128_inv_no_keyschedule, aes128_keyschedule, aes128_no_keyschedule, get_required_mult_for_aes128_no_keyschedule, get_required_mult_for_keyschedule, sbox_layer}, chida::{online::test::{localhost_setup_chida, ChidaSetup}, ChidaParty}, furukawa::test::FurukawaSetup, party::test::TestSetup, share::{field::GF8, test::{assert_eq, consistent, secret_share}, RssShare}};
 
-    use super::{square_layer, AesKeyState, ArithmeticBlackBox, ImplVariant, VectorAesState};
+    use super::{square_layer, AesKeyState, ComputeInverse, ComputePhase, ImplVariant, MPCProtocol, PreProcessing, VectorAesState};
 
     const AES_SBOX: [u8; 256] = [0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76, 0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0, 0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15, 0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A, 0x07, 0x12, 0x80, 0xE2, 0xEB, 0x27, 0xB2, 0x75, 0x09, 0x83, 0x2C, 0x1A, 0x1B, 0x6E, 0x5A, 0xA0, 0x52, 0x3B, 0xD6, 0xB3, 0x29, 0xE3, 0x2F, 0x84, 0x53, 0xD1, 0x00, 0xED, 0x20, 0xFC, 0xB1, 0x5B, 0x6A, 0xCB, 0xBE, 0x39, 0x4A, 0x4C, 0x58, 0xCF, 0xD0, 0xEF, 0xAA, 0xFB, 0x43, 0x4D, 0x33, 0x85, 0x45, 0xF9, 0x02, 0x7F, 0x50, 0x3C, 0x9F, 0xA8, 0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10, 0xFF, 0xF3, 0xD2, 0xCD, 0x0C, 0x13, 0xEC, 0x5F, 0x97, 0x44, 0x17, 0xC4, 0xA7, 0x7E, 0x3D, 0x64, 0x5D, 0x19, 0x73, 0x60, 0x81, 0x4F, 0xDC, 0x22, 0x2A, 0x90, 0x88, 0x46, 0xEE, 0xB8, 0x14, 0xDE, 0x5E, 0x0B, 0xDB, 0xE0, 0x32, 0x3A, 0x0A, 0x49, 0x06, 0x24, 0x5C, 0xC2, 0xD3, 0xAC, 0x62, 0x91, 0x95, 0xE4, 0x79, 0xE7, 0xC8, 0x37, 0x6D, 0x8D, 0xD5, 0x4E, 0xA9, 0x6C, 0x56, 0xF4, 0xEA, 0x65, 0x7A, 0xAE, 0x08, 0xBA, 0x78, 0x25, 0x2E, 0x1C, 0xA6, 0xB4, 0xC6, 0xE8, 0xDD, 0x74, 0x1F, 0x4B, 0xBD, 0x8B, 0x8A, 0x70, 0x3E, 0xB5, 0x66, 0x48, 0x03, 0xF6, 0x0E, 0x61, 0x35, 0x57, 0xB9, 0x86, 0xC1, 0x1D, 0x9E, 0xE1, 0xF8, 0x98, 0x11, 0x69, 0xD9, 0x8E, 0x94, 0x9B, 0x1E, 0x87, 0xE9, 0xCE, 0x55, 0x28, 0xDF, 0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16];
 
@@ -602,7 +657,7 @@ pub mod test {
         (state1, state2, state3)
     }
 
-    fn test_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: ArithmeticBlackBox<GF8>>(variant: ImplVariant)
+    fn test_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: MPCProtocol +  PreProcessing<GF8> + ComputePhase<GF8> + ComputeInverse<GF8>>(variant: ImplVariant)
     {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
@@ -639,7 +694,6 @@ pub mod test {
                 p.pre_processing(n_mults).unwrap();
                 let output = aes128_no_keyschedule(p, input, &ks, variant).unwrap();
                 p.finalize().unwrap();
-                p.io().wait_for_completion();
                 output
             }
         };
@@ -690,7 +744,7 @@ pub mod test {
         (v1, v2, v3)
     }
 
-    fn test_aes128_keyschedule_gf8<S: TestSetup<P>, P: ArithmeticBlackBox<GF8>>(variant: ImplVariant) {
+    fn test_aes128_keyschedule_gf8<S: TestSetup<P>, P: MPCProtocol +  PreProcessing<GF8> + ComputePhase<GF8> + ComputeInverse<GF8>>(variant: ImplVariant) {
         let mut rng = thread_rng();
         let key = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
         let (key1, key2, key3) = transpose(key.into_iter().map(|x| secret_share(&mut rng, &GF8(x))));
@@ -701,7 +755,6 @@ pub mod test {
                 p.pre_processing(n_mults).unwrap();
                 let ks = aes128_keyschedule(p, key, variant).unwrap();
                 p.finalize().unwrap();
-                p.io().wait_for_completion();
                 ks
             }
         };
@@ -779,7 +832,7 @@ pub mod test {
         assert_eq!(state.si, copy.si);
     }
 
-    fn test_inv_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: ArithmeticBlackBox<GF8>>(variant: ImplVariant) {
+    fn test_inv_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: MPCProtocol +  PreProcessing<GF8> + ComputePhase<GF8> + ComputeInverse<GF8>>(variant: ImplVariant) {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32]; //[0x32, 0x88, 0x31, 0xe0, 0x43, 0x5a, 0x31, 0x37, 0xf6, 0x30, 0x98, 0x07, 0xa8, 0x8d, 0xa2, 0x34];
         let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
@@ -815,7 +868,6 @@ pub mod test {
                 p.pre_processing(n_mults).unwrap();
                 let output = aes128_inv_no_keyschedule(p, input, &ks, variant).unwrap();
                 p.finalize().unwrap();
-                p.io().wait_for_completion();
                 output
             }
         };

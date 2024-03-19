@@ -93,6 +93,7 @@ pub trait FieldDigestExt<F: Field> {
 #[cfg(test)]
 pub mod test {
     use std::borrow::Borrow;
+    use itertools::Itertools;
     use std::fmt::Debug;
     use rand::{rngs::ThreadRng, thread_rng, CryptoRng, Rng};
     use crate::share::{Field, FieldRngExt, RssShare};

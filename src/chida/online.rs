@@ -1,66 +1,70 @@
 use itertools::izip;
 use rand_chacha::ChaCha20Rng;
-use sha2::Sha256;
 
-use crate::aes::ArithmeticBlackBox;
-use crate::network::task::{Direction, IoLayer};
+use crate::aes::{ComputePhase, InputPhase, MPCProtocol, OutputPhase, PreProcessing};
+use crate::network::task::Direction;
 use crate::party::error::MpcResult;
 use crate::party::Party;
 use crate::share::field::GF8;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
+use crate::share::{Field, FieldRngExt, RssShare};
 
 use super::aes::VectorAesState;
 use super::ChidaParty;
 
-
-impl<F: Field> ArithmeticBlackBox<F> for ChidaParty
-where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
+impl<F: Field> InputPhase<F> for ChidaParty
+where ChaCha20Rng: FieldRngExt<F>
 {
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
-
-    fn pre_processing(&mut self, _n_multiplications: usize) -> MpcResult<()> {
-        Ok(()) // no pre-processing needed
-    }
-
-    fn io(&self) -> &IoLayer {
-        self.0.io()
-    }
-
-    fn constant(&self, value: F) -> RssShare<F> {
-        if self.0.i == 0 {
-            RssShare::from(value, F::zero())
-        }else if self.0.i == 2 {
-            RssShare::from(F::zero(), value)
-        }else{
-            RssShare::from(F::zero(), F::zero())
-        }
-    }
-
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
-        self.0.generate_random(n)
-    }
-
-    // all parties input the same number of inputs
     fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         input_round(&mut self.0, my_input)
     }
+}
 
+impl MPCProtocol for ChidaParty {
+    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    where ChaCha20Rng: FieldRngExt<F>
+    {
+        self.0.generate_random(n)
+    }
+    fn constant<F: Field>(&self, value: F) -> RssShare<F> {
+        self.0.constant(value)
+    }
+    fn check_input_phase(&mut self) -> MpcResult<()> {
+        self.inner_mut().io().wait_for_completion();
+        Ok(()) // nothing to do
+    }
+    fn finalize(&mut self) -> MpcResult<()> {
+        self.inner_mut().io().wait_for_completion();
+        Ok(()) // nothing to do
+    }
+}
+
+impl<F: Field> ComputePhase<F> for ChidaParty
+where ChaCha20Rng: FieldRngExt<F>
+{
     fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
         mul(&mut self.0, ci, cii, ai, aii, bi, bii)
     }
+}
 
+impl<F: Field> OutputPhase<F> for ChidaParty {
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
         debug_assert_eq!(si.len(), sii.len());
         let rss: Vec<_> = si.iter().zip(sii).map(|(si,sii)| RssShare::from(*si, *sii)).collect();
         output_round(&mut self.0, &rss, &rss, &rss)
     }
 
-    fn finalize(&mut self) -> MpcResult<()> {
-        // nothing to do
-        Ok(())
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+        output_round(&mut self.0, to_p1, to_p2, to_p3)
     }
-} 
+}
+
+impl<F: Field> PreProcessing<F> for ChidaParty {
+    fn pre_processing(&mut self, _n_multiplications: usize) -> MpcResult<()> {
+        self.inner_mut().io().wait_for_completion();
+        Ok(()) // nothing to do
+    }
+}
+
 
 // all parties input the same number of inputs (input.len() AES states)
 pub fn input_round<F: Field>(party: &mut Party, input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> where ChaCha20Rng: FieldRngExt<F> {
@@ -209,7 +213,6 @@ pub mod test {
     use std::thread::JoinHandle;
 
     use rand::thread_rng;
-    use crate::aes::ArithmeticBlackBox;
     use crate::chida::online::{input_round, input_round_aes_states, mul, output_round, VectorAesState};
     use crate::chida::ChidaParty;
     use crate::network::ConnectedParty;
@@ -223,7 +226,6 @@ pub mod test {
         fn adapter<T, Fx: FnOnce(&mut ChidaParty)->T>(conn: ConnectedParty, f: Fx) -> (T,ChidaParty) {
             let mut party = ChidaParty::setup(conn).unwrap();
             let t = f(&mut party);
-            party.finalize().unwrap();
             party.0.teardown().unwrap();
             (t, party)
         }

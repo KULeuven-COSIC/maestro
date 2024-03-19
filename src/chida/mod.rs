@@ -28,6 +28,10 @@ impl ChidaParty {
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
         Party::setup(connected).map(|party| Self(party))
     }
+
+    pub fn inner_mut(&mut self) -> &mut Party {
+        &mut self.0
+    }
 }
 
 // simd: how many parallel AES calls

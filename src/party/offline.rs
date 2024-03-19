@@ -177,7 +177,7 @@ mod test {
         const N: usize = 100;
         // generate N triples with soundness 2^-40
         let ((triples1, triples2, triples3), _) = simple_localhost_setup(|p| {
-            create_correct_mul_triples(p, N, 40).unwrap()
+            create_correct_mul_triples::<GF8>(p, N, 40).unwrap()
         });
 
         assert_eq!(N, triples1.len());

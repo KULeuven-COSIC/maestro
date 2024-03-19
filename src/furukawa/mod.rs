@@ -14,7 +14,7 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, ArithmeticBlackBox, ImplVariant}, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, ComputePhase, ImplVariant, InputPhase, MPCProtocol, OutputPhase, PreProcessing}, network::{task::Direction, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
@@ -81,66 +81,123 @@ impl<F> MulTripleVector<F> {
     }
 }
 
-pub struct FurukawaParty<F: Field + Copy> {
+pub struct CombinedFurukawaParty<F1: Field, F2: Field> {
     inner: Party,
+    part_f1: FurukawaPartyPart<F1>,
+    part_f2: FurukawaPartyPart<F2>,
+}
+
+pub struct FurukawaParty<F: Field> {
+    inner: Party,
+    input_context: Option<BroadcastContext>,
+    output_context: Option<BroadcastContext>,
+    part: FurukawaPartyPart<F>
+}
+
+pub struct FurukawaPartyPart<F: Field> {
     triples_to_check: MulTripleVector<F>,
     pre_processing: Option<MulTripleVector<F>>,
 }
 
-impl<F: Field + Copy> FurukawaParty<F>
+impl<F: Field> FurukawaParty<F>
 where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
 {
-
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
         Party::setup(connected).map(|party| Self {
             inner: party,
-            triples_to_check: MulTripleVector::new(),
-            pre_processing: None,
+            input_context: None,
+            output_context: None,
+            part: FurukawaPartyPart::new(),
         })
     }
+}
 
-    pub fn prepare_multiplications(&mut self, n_mults: usize) -> MpcResult<()> where F: AddAssign {
+impl<F: Field> FurukawaPartyPart<F>
+where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+{
+
+    fn new() -> Self {
+        Self {
+            triples_to_check: MulTripleVector::new(),
+            pre_processing: None,
+        }
+    }
+
+    pub fn prepare_multiplications(&mut self, party: &mut Party, n_mults: usize) -> MpcResult<()> where F: AddAssign {
         // run the bucket cut-and-choose
         if let Some(ref pre_processing) = self.pre_processing {
             println!("Discarding {} left-over triples", pre_processing.len());
             self.pre_processing = None;
         }
-        self.pre_processing = Some(offline::bucket_cut_and_choose(&mut self.inner, n_mults)?);
+        self.pre_processing = Some(offline::bucket_cut_and_choose(party, n_mults)?);
         Ok(())
     }
     
-    pub fn start_input_phase(&mut self) -> InputPhase<F> {
-        InputPhase::new(self)
-    }
-
-    pub fn inner(&self) -> &Party {
-        &self.inner
-    }
-    
-    #[inline]
-    pub fn public_constant(&self, c: F) -> RssShare<F> {
-        match self.inner.i {
-            0 => RssShare::from(c, F::zero()),
-            1 => RssShare::from(F::zero(), F::zero()),
-            2 => RssShare::from(F::zero(), c),
-            _ => unreachable!()
+    pub fn my_input(&self, party: &mut Party, context: &mut BroadcastContext, input: &[F]) -> MpcResult<Vec<RssShare<F>>>
+    {
+        let a = party.generate_random(input.len());
+        let b = party.open_rss_to(context, &a, party.i)?;
+        let mut b = b.unwrap(); // this is safe since we open to party.i
+        for i in 0..b.len() {
+            b[i] = b[i].clone() + input[i].clone();
         }
+        party.broadcast_round(context, &mut [], &mut [], b.as_slice())?;
+        Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| party.constant(bi) - ai).collect())
     }
 
-    pub fn mul(&mut self, ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<(Vec<F>, Vec<F>)>
+    pub fn other_input(&self, party: &mut Party, context: &mut BroadcastContext, input_party: usize, n_inputs: usize) -> MpcResult<Vec<RssShare<F>>>
+    {
+        assert_ne!(party.i, input_party);
+        let a = party.generate_random(n_inputs);
+        let b = party.open_rss_to(context, &a, input_party)?;
+        debug_assert!(b.is_none());
+        let mut b = vec![F::zero(); n_inputs];
+        match (party.i, input_party) {
+            (0,2) | (1,0) | (2,1) => party.broadcast_round(context, &mut [], &mut b, &[])?,
+            (0,1) | (1,2) | (2,0) => party.broadcast_round(context, &mut b, &mut [], &[])?,
+            _ => unreachable!(),
+        }
+        Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| party.constant(bi) - ai).collect())
+    }
+
+    pub fn input_round(&self, party: &mut Party, context: &mut BroadcastContext, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>
+    {
+        let party_index = party.i;
+
+        let in1 = if party_index == 0 {
+            self.my_input(party, context, my_input)
+        }else{
+            self.other_input(party, context, 0, my_input.len())
+        }?;
+
+        let in2 = if party_index == 1 {
+            self.my_input(party, context, my_input)
+        }else{
+            self.other_input(party, context, 1, my_input.len())
+        }?;
+
+        let in3 = if party_index == 2 {
+            self.my_input(party, context, my_input)
+        }else{
+            self.other_input(party, context, 2, my_input.len())
+        }?;
+        Ok((in1, in2, in3))
+    }
+
+    pub fn mul(&mut self, party: &mut Party, ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<(Vec<F>, Vec<F>)>
     where F: Copy
     {
         debug_assert_eq!(ai.len(), aii.len());
         debug_assert_eq!(ai.len(), bi.len());
         debug_assert_eq!(ai.len(), bii.len());
     
-        let ci: Vec<_> = izip!(self.inner.generate_alpha(ai.len()), ai, aii, bi, bii)
+        let ci: Vec<_> = izip!(party.generate_alpha(ai.len()), ai, aii, bi, bii)
             .map(|(alpha_j, ai_j, aii_j, bi_j, bii_j)| {
                 alpha_j + *ai_j * *bi_j + *ai_j * *bii_j + *aii_j * *bi_j
             })
             .collect();
-        self.inner.io().send_field::<F>(Direction::Previous, ci.iter());
-        let rcv_cii = self.inner.io().receive_field(Direction::Next, ci.len());
+        party.io().send_field::<F>(Direction::Previous, ci.iter());
+        let rcv_cii = party.io().receive_field(Direction::Next, ci.len());
         // note down the observed multiplication triple
         // first the ones we already have
         self.triples_to_check.ai.extend_from_slice(ai);
@@ -151,11 +208,11 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         // then wait for the last one
         let cii = rcv_cii.rcv()?;
         self.triples_to_check.cii.extend(&cii);
-        self.inner.io().wait_for_completion();
+        party.io().wait_for_completion();
         Ok((ci, cii))
     }
 
-    pub fn verify_multiplications(&mut self) -> MpcResult<()> {
+    pub fn verify_multiplications(&mut self, party: &mut Party) -> MpcResult<()> {
         // check all recorded multiplications
         println!("post-sacrifice: checking {} multiplications", self.triples_to_check.len());
         if self.triples_to_check.len() > 0 {
@@ -165,7 +222,7 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
             }
             
             let leftover = prep.len() - self.triples_to_check.len();
-            let err = offline::sacrifice(&mut self.inner, self.triples_to_check.len(), 1, &self.triples_to_check.ai, &self.triples_to_check.aii, &self.triples_to_check.bi, &self.triples_to_check.bii, &self.triples_to_check.ci, &self.triples_to_check.cii, &mut prep.ai[leftover..], &mut prep.aii[leftover..], &mut prep.bi[leftover..], &mut prep.bii[leftover..], &mut prep.ci[leftover..], &mut prep.cii[leftover..]);
+            let err = offline::sacrifice(party, self.triples_to_check.len(), 1, &self.triples_to_check.ai, &self.triples_to_check.aii, &self.triples_to_check.bi, &self.triples_to_check.bii, &self.triples_to_check.ci, &self.triples_to_check.cii, &mut prep.ai[leftover..], &mut prep.aii[leftover..], &mut prep.bi[leftover..], &mut prep.bii[leftover..], &mut prep.ci[leftover..], &mut prep.cii[leftover..]);
             // purge the sacrificed triples
             if leftover > 0 {
                 prep.shrink(leftover);
@@ -177,164 +234,115 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         }else{
             Ok(())
         }
-        
     }
 
-    pub fn output_phase<T, OF: FnOnce(&mut OutputPhase<F>) -> MpcResult<T>>(&mut self, block: OF) -> MpcResult<T> where F: AddAssign {
-        self.verify_multiplications()?;
+    pub fn output_to(&self, party: &mut Party, context: &mut BroadcastContext, to_party: usize, shares: &[RssShare<F>]) -> MpcResult<Option<Vec<F>>> {
+        party.open_rss_to(context, shares, to_party)
+    }
 
-        // now the output phase can begin
-        let mut phase = OutputPhase::new(self);
-        let res = block(&mut phase)?;
-        phase.end_output_phase()?;
-        Ok(res)
+    pub fn output(&self, party: &mut Party, context: &mut BroadcastContext, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
+        party.open_rss(context, si, sii)
+    }
+
+    pub fn output_to_each(&mut self, party: &mut Party, context: &mut BroadcastContext, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+        let mut my_output = Vec::with_capacity(0);
+        if to_p1.len() > 0 {
+            if party.i == 0 {
+                my_output = self.output_to(party, context, 0, to_p1)?.unwrap_or(my_output);
+            }else{
+                self.output_to(party, context, 0, to_p1)?;
+            }
+        }
+        if to_p2.len() > 0 {
+            if party.i == 1 {
+                my_output = self.output_to(party, context, 1, to_p2)?.unwrap_or(my_output);
+            }else{
+                self.output_to(party, context, 1, to_p2)?;
+            }
+        }
+
+        if to_p3.len() > 0 {
+            if party.i == 2 {
+                my_output = self.output_to(party, context, 2, to_p3)?.unwrap_or(my_output);
+            }else{
+                self.output_to(party, context, 2, to_p3)?;
+            }
+        }
+
+        Ok(my_output)
     }
 
 }
 
-pub struct InputPhase<'a, F: Field + Copy> {
-    party: &'a mut FurukawaParty<F>,
-    context: BroadcastContext
-}
-
-impl<'a, F: Field + Copy> InputPhase<'a, F>
-where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+impl<F: Field> InputPhase<F> for FurukawaParty<F> 
+where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
 {
-    fn new(party: &'a mut FurukawaParty<F>) -> Self {
-        Self {
-            party,
-            context: BroadcastContext::new(),
-        }
-    }
-
-    pub fn my_input(&mut self, input: &[F]) -> MpcResult<Vec<RssShare<F>>> {
-        let a = self.party.inner.generate_random(input.len());
-        let b = self.party.inner.open_rss_to(&mut self.context, &a, self.party.inner.i)?;
-        let mut b = b.unwrap(); // this is safe since we open to party.i
-        for i in 0..b.len() {
-            b[i] = b[i].clone() + input[i].clone();
-        }
-        self.party.inner.broadcast_round(&mut self.context, &mut [], &mut [], b.as_slice())?;
-        Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| self.party.public_constant(bi) - ai).collect())
-    }
-
-    pub fn other_input(&mut self, input_party: usize, n_inputs: usize) -> MpcResult<Vec<RssShare<F>>> {
-        assert_ne!(self.party.inner.i, input_party);
-        let a = self.party.inner.generate_random(n_inputs);
-        let b = self.party.inner.open_rss_to(&mut self.context, &a, input_party)?;
-        debug_assert!(b.is_none());
-        let mut b = vec![F::zero(); n_inputs];
-        match (self.party.inner.i, input_party) {
-            (0,2) | (1,0) | (2,1) => self.party.inner.broadcast_round(&mut self.context, &mut [], &mut b, &[])?,
-            (0,1) | (1,2) | (2,0) => self.party.inner.broadcast_round(&mut self.context, &mut b, &mut [], &[])?,
-            _ => unreachable!(),
-        }
-        Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| self.party.public_constant(bi) - ai).collect())
-    }
-
-    pub fn end_input_phase(self) -> MpcResult<()> {
-        self.party.inner.compare_view(self.context)
+    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+        let context = self.input_context.get_or_insert_with(|| BroadcastContext::new());
+        self.part.input_round(&mut self.inner, context, my_input)
     }
 }
 
-pub struct OutputPhase<'a, F: Field + Copy> {
-    party: &'a mut FurukawaParty<F>,
-    context: BroadcastContext,
-}
-
-impl<'a, F: Field + Copy> OutputPhase<'a, F>
-where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F> {
-
-    fn new(party: &'a mut FurukawaParty<F>) -> Self {
-        Self {
-            party,
-            context: BroadcastContext::new(),
-        }
-    }
-
-    pub fn output_to(&mut self, to_party: usize, si: &[F], sii: &[F]) -> MpcResult<Option<Vec<F>>> {
-        debug_assert_eq!(si.len(), sii.len());
-        let rss: Vec<_> = si.iter().zip(sii).map(|(si,sii)| RssShare::from(si.clone(), sii.clone())).collect();
-        self.party.inner.open_rss_to(&mut self.context, &rss, to_party)
-    }
-
-    pub fn output(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
-        self.party.inner.open_rss(&mut self.context, si, sii)
-    }
-
-    fn end_output_phase(self) -> MpcResult<()> {
-        self.party.inner.compare_view(self.context)
-    }
-}
-
-impl<F: Field> ArithmeticBlackBox<F> for FurukawaParty<F>
-where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
+impl<F: Field> MPCProtocol for FurukawaParty<F>
+where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
 {
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
-
-    fn io(&self) -> &IoLayer {
-        self.inner.io()
+    fn constant<F2: Field>(&self, value: F2) -> RssShare<F2> {
+        self.inner.constant(value)
     }
-
-    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.prepare_multiplications(n_multiplications)
-    }
-
-    fn constant(&self, value: F) -> RssShare<F> {
-        if self.inner.i == 0 {
-            RssShare::from(value, F::zero())
-        }else if self.inner.i == 2 {
-            RssShare::from(F::zero(), value)
-        }else{
-            RssShare::from(F::zero(), F::zero())
-        }
-    }
-
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random<F2: Field>(&mut self, n: usize) -> Vec<RssShare<F2>> 
+    where ChaCha20Rng: FieldRngExt<F2>
+    {
         self.inner.generate_random(n)
     }
-
-    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
-        let party_index = self.inner.i;
-        let mut input_phase = self.start_input_phase();
-
-        let in1 = if party_index == 0 {
-            input_phase.my_input(my_input)
+    fn check_input_phase(&mut self) -> MpcResult<()> {
+        if let Some(context) = self.input_context.take() {
+            self.inner.compare_view(context)
         }else{
-            input_phase.other_input(0, my_input.len())
-        }?;
-
-        let in2 = if party_index == 1 {
-            input_phase.my_input(my_input)
-        }else{
-            input_phase.other_input(1, my_input.len())
-        }?;
-
-        let in3 = if party_index == 2 {
-            input_phase.my_input(my_input)
-        }else{
-            input_phase.other_input(2, my_input.len())
-        }?;
-        input_phase.end_input_phase()?;
-        Ok((in1, in2, in3))
+            Ok(())
+        }
     }
+    fn finalize(&mut self) -> MpcResult<()> {
+        self.part.verify_multiplications(&mut self.inner)?;
+        if let Some(context) = self.output_context.take() {
+            self.inner.compare_view(context)
+        }else{
+            Ok(())
+        }
+    }
+}
 
+impl<F: Field> PreProcessing<F> for FurukawaParty<F> 
+where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
+{
+    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
+        self.part.prepare_multiplications(&mut self.inner, n_multiplications)
+    }
+}
+
+impl<F: Field> ComputePhase<F> for FurukawaParty<F> 
+where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
+{
     fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
-        let (vci, vcii) = self.mul(ai, aii, bi, bii)?;
+        let (vci, vcii) = self.part.mul(&mut self.inner, ai, aii, bi, bii)?;
         ci.copy_from_slice(&vci);
         cii.copy_from_slice(&vcii);
         Ok(())
     }
+}
 
+impl<F: Field> OutputPhase<F> for FurukawaParty<F>
+where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
+{
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
-        self.output_phase(|of| {
-            of.output(si, sii)
-        })
+        self.part.verify_multiplications(&mut self.inner)?;
+        let context = self.output_context.get_or_insert_with(|| BroadcastContext::new());
+        self.part.output(&mut self.inner, context, si, sii)
     }
 
-    fn finalize(&mut self) -> MpcResult<()> {
-        self.verify_multiplications()
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+        self.part.verify_multiplications(&mut self.inner)?;
+        let context = self.output_context.get_or_insert_with(|| BroadcastContext::new());
+        self.part.output_to_each(&mut self.inner, context, to_p1, to_p2, to_p3)
     }
 }
 
@@ -345,7 +353,7 @@ pub mod test {
     use rand::thread_rng;
     use rand_chacha::ChaCha20Rng;
     use sha2::Sha256;
-    use crate::aes::ArithmeticBlackBox;
+    use crate::aes::{InputPhase, MPCProtocol};
     use crate::party::test::TestSetup;
     use crate::share::test::{assert_eq, consistent};
 
