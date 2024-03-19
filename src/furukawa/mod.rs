@@ -14,7 +14,7 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, ComputePhase, ImplVariant, InputPhase, MPCProtocol, OutputPhase, PreProcessing}, network::{task::Direction, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, ComputePhase, ImplVariant, InputPhase, MPCProtocol, OutputPhase, PreProcessing}, conversion::Z64Bool, gcm::gf128::GF128, network::{task::Direction, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, Party}, share::{field::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
@@ -343,6 +343,134 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         self.part.verify_multiplications(&mut self.inner)?;
         let context = self.output_context.get_or_insert_with(|| BroadcastContext::new());
         self.part.output_to_each(&mut self.inner, context, to_p1, to_p2, to_p3)
+    }
+}
+
+pub struct FurukawaGCMParty {
+    inner: Party,
+    input_context: Option<BroadcastContext>,
+    output_context: Option<BroadcastContext>,
+    gf8: FurukawaPartyPart<GF8>,
+    gf128: FurukawaPartyPart<GF128>,
+    z64: FurukawaPartyPart<Z64Bool>,
+}
+
+impl FurukawaGCMParty {
+    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
+        Party::setup(connected).map(|party| Self {
+            inner: party,
+            input_context: None,
+            output_context: None,
+            gf8: FurukawaPartyPart::new(),
+            gf128: FurukawaPartyPart::new(),
+            z64: FurukawaPartyPart::new(),
+        })
+    }
+
+    pub fn inner_mut(&mut self) -> &mut Party {
+        &mut self.inner
+    }
+}
+
+impl PreProcessing<GF8> for FurukawaGCMParty {
+    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
+        self.gf8.prepare_multiplications(&mut self.inner, n_multiplications)
+    }
+}
+
+impl PreProcessing<GF128> for FurukawaGCMParty {
+    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
+        self.gf128.prepare_multiplications(&mut self.inner, n_multiplications)
+    }
+}
+
+// TODO use secure boolean cut-and-choose
+impl PreProcessing<Z64Bool> for FurukawaGCMParty {
+    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
+        if let Some(ref pre_processing) = self.z64.pre_processing {
+            println!("Discarding {} left-over triples", pre_processing.len());
+            self.z64.pre_processing = None;
+        }
+        self.z64.pre_processing = Some(offline::insecure_z64_triples(&mut self.inner, n_multiplications)?);
+        Ok(())
+    }
+}
+
+impl MPCProtocol for FurukawaGCMParty {
+    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>> where ChaCha20Rng: FieldRngExt<F> {
+        self.inner.generate_random(n)
+    }
+    fn constant<F: Field>(&self, value: F) -> RssShare<F> {
+        self.inner.constant(value)
+    }
+    fn check_input_phase(&mut self) -> MpcResult<()> {
+        if let Some(context) = self.input_context.take() {
+            self.inner.compare_view(context)
+        }else{
+            Ok(())
+        }
+    }
+    fn finalize(&mut self) -> MpcResult<()> {
+        self.gf8.verify_multiplications(&mut self.inner)?;
+        self.gf128.verify_multiplications(&mut self.inner)?;
+        self.z64.verify_multiplications(&mut self.inner)?;
+        if let Some(context) = self.output_context.take() {
+            self.inner.compare_view(context)
+        }else{
+            Ok(())
+        }
+    }
+}
+
+impl InputPhase<GF8> for FurukawaGCMParty {
+    fn input_round(&mut self, my_input: &[GF8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+        let context = self.output_context.get_or_insert_with(|| BroadcastContext::new());
+        self.gf8.input_round(&mut self.inner, context, my_input)
+    }
+}
+
+impl ComputePhase<GF8> for FurukawaGCMParty {
+    fn mul(&mut self, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF8], bi: &[GF8], bii: &[GF8]) -> MpcResult<()> {
+        let (vi, vii) = self.gf8.mul(&mut self.inner, ai, aii, bi, bii)?;
+        ci.copy_from_slice(&vi);
+        cii.copy_from_slice(&vii);
+        Ok(())
+    }
+}
+
+impl ComputePhase<GF128> for FurukawaGCMParty {
+    fn mul(&mut self, ci: &mut [GF128], cii: &mut [GF128], ai: &[GF128], aii: &[GF128], bi: &[GF128], bii: &[GF128]) -> MpcResult<()> {
+        let (vi, vii) = self.gf128.mul(&mut self.inner, ai, aii, bi, bii)?;
+        ci.copy_from_slice(&vi);
+        cii.copy_from_slice(&vii);
+        Ok(())
+    }
+}
+
+impl ComputePhase<Z64Bool> for FurukawaGCMParty {
+    fn mul(&mut self, ci: &mut [Z64Bool], cii: &mut [Z64Bool], ai: &[Z64Bool], aii: &[Z64Bool], bi: &[Z64Bool], bii: &[Z64Bool]) -> MpcResult<()> {
+        let (vi, vii) = self.z64.mul(&mut self.inner, ai, aii, bi, bii)?;
+        ci.copy_from_slice(&vi);
+        cii.copy_from_slice(&vii);
+        Ok(())
+    }
+}
+
+impl OutputPhase<GF8> for FurukawaGCMParty {
+    fn output_round(&mut self, si: &[GF8], sii: &[GF8]) -> MpcResult<Vec<GF8>> {
+        self.gf8.verify_multiplications(&mut self.inner)?;
+        self.gf128.verify_multiplications(&mut self.inner)?;
+        self.z64.verify_multiplications(&mut self.inner)?;
+        let context = self.output_context.get_or_insert_with(|| BroadcastContext::new());
+        self.gf8.output(&mut self.inner, context, si, sii)
+    }
+
+    fn output_to(&mut self, to_p1: &[RssShare<GF8>], to_p2: &[RssShare<GF8>], to_p3: &[RssShare<GF8>]) -> MpcResult<Vec<GF8>> {
+        self.gf8.verify_multiplications(&mut self.inner)?;
+        self.gf128.verify_multiplications(&mut self.inner)?;
+        self.z64.verify_multiplications(&mut self.inner)?;
+        let context = self.output_context.get_or_insert_with(|| BroadcastContext::new());
+        self.gf8.output_to_each(&mut self.inner, context, to_p1, to_p2, to_p3)
     }
 }
 

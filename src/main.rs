@@ -6,6 +6,7 @@ mod gcm;
 mod chida;
 mod furukawa;
 mod aes;
+mod conversion;
 
 use std::{path::PathBuf, time::Duration};
 

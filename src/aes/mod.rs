@@ -1,6 +1,6 @@
 use rand_chacha::ChaCha20Rng;
 
-use crate::{chida::ChidaParty, furukawa::FurukawaParty, network::task::Direction, party::{error::MpcResult, Party}, share::{field::GF8, Field, FieldRngExt, RssShare}};
+use crate::{chida::ChidaParty, furukawa::{FurukawaGCMParty, FurukawaParty}, network::task::Direction, party::{error::MpcResult, Party}, share::{field::GF8, Field, FieldRngExt, RssShare}};
 
 pub trait PreProcessing<F: Field> {
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
@@ -426,6 +426,15 @@ impl ComputeInverse<GF8> for ChidaParty {
 }
 
 impl ComputeInverse<GF8> for FurukawaParty<GF8> {
+    fn invert(&mut self, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
+        match variant {
+            ImplVariant::Simple => gf8_inv_layer(self, si, sii),
+            ImplVariant::Optimized => panic!("Use Simple impl variant for malicious security"),
+        }
+    }
+}
+
+impl ComputeInverse<GF8> for FurukawaGCMParty {
     fn invert(&mut self, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
         match variant {
             ImplVariant::Simple => gf8_inv_layer(self, si, sii),

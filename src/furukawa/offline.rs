@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 use rand::Rng;
 
-use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{conversion::Z64Bool, network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 use super::MulTripleVector;
 
@@ -272,11 +272,31 @@ where Sha256: FieldDigestExt<F>
     })
 }
 
+pub fn insecure_z64_triples(party: &mut Party, n: usize) -> MpcResult<MulTripleVector<Z64Bool>> {
+    let mut a = party.generate_random::<Z64Bool>(n);
+    let mut b = party.generate_random::<Z64Bool>(n);
+
+    let alphas = party.generate_alpha::<Z64Bool>(n);
+    let mut ci: Vec<_> = izip!(alphas, a.iter(), b.iter()).map(|(alpha_j, aj, bj)| {
+        alpha_j + aj.si * bj.si + aj.si * bj.sii + aj.sii * bj.si
+    }).collect();
+    // receive cii from P+1
+    let rcv_cii = party.io().receive_field(Direction::Next, n);
+    // send ci to P-1
+    party.io().send_field::<Z64Bool>(Direction::Previous, &ci);
+    let mut cii = rcv_cii.rcv()?;
+    let (ai,aii) = a.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
+    let (bi, bii) = b.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
+    party.io().wait_for_completion();
+
+    Ok(MulTripleVector { ai, aii, bi, bii, ci, cii })
+}
+
 #[cfg(test)]
 pub mod test {
     use itertools::{izip, Itertools};
 
-    use crate::{furukawa::{offline::bucket_cut_and_choose, MulTripleVector}, party::test::simple_localhost_setup, share::{field::GF8, test::consistent, Field, RssShare}};
+    use crate::{furukawa::{offline::{bucket_cut_and_choose, insecure_z64_triples}, MulTripleVector}, gcm::gf128::GF128, party::test::simple_localhost_setup, share::{field::GF8, test::consistent, Field, RssShare}};
 
     fn check_len<F>(triples: &MulTripleVector<F>, len: usize) {
         assert_eq!(triples.ai.len(), len);
@@ -297,6 +317,66 @@ pub mod test {
         // generate N triples with soundness 2^-40
         let ((triples1, triples2, triples3), _) = simple_localhost_setup(|p| {
             bucket_cut_and_choose::<GF8>(p, N).unwrap()
+        });
+
+        check_len(&triples1, N);
+        check_len(&triples2, N);
+        check_len(&triples3, N);
+        // check consistent
+        izip!(into_rss(&triples1.ai, &triples1.aii), into_rss(&triples2.ai, &triples2.aii), into_rss(&triples3.ai, &triples3.aii))
+            .for_each(|(a1, a2, a3)| consistent(&a1, &a2, &a3));
+        izip!(into_rss(&triples1.bi, &triples1.bii), into_rss(&triples2.bi, &triples2.bii), into_rss(&triples3.bi, &triples3.bii))
+            .for_each(|(b1, b2, b3)| consistent(&b1, &b2, &b3));
+        izip!(into_rss(&triples1.ci, &triples1.cii), into_rss(&triples2.ci, &triples2.cii), into_rss(&triples3.ci, &triples3.cii))
+            .for_each(|(c1, c2, c3)| consistent(&c1, &c2, &c3));
+
+
+        // check correct
+        for i in 0..N {
+            let a = triples1.ai[i] + triples2.ai[i] + triples3.ai[i];
+            let b = triples1.bi[i] + triples2.bi[i] + triples3.bi[i];
+            let c = triples1.ci[i] + triples2.ci[i] + triples3.ci[i];
+
+            assert_eq!(a * b, c);
+        }
+    }
+
+    #[test]
+    fn correct_gf128_triples() {
+        const N: usize = 1 << 10; // create 2^10 triples
+        // generate N triples with soundness 2^-40
+        let ((triples1, triples2, triples3), _) = simple_localhost_setup(|p| {
+            bucket_cut_and_choose::<GF128>(p, N).unwrap()
+        });
+
+        check_len(&triples1, N);
+        check_len(&triples2, N);
+        check_len(&triples3, N);
+        // check consistent
+        izip!(into_rss(&triples1.ai, &triples1.aii), into_rss(&triples2.ai, &triples2.aii), into_rss(&triples3.ai, &triples3.aii))
+            .for_each(|(a1, a2, a3)| consistent(&a1, &a2, &a3));
+        izip!(into_rss(&triples1.bi, &triples1.bii), into_rss(&triples2.bi, &triples2.bii), into_rss(&triples3.bi, &triples3.bii))
+            .for_each(|(b1, b2, b3)| consistent(&b1, &b2, &b3));
+        izip!(into_rss(&triples1.ci, &triples1.cii), into_rss(&triples2.ci, &triples2.cii), into_rss(&triples3.ci, &triples3.cii))
+            .for_each(|(c1, c2, c3)| consistent(&c1, &c2, &c3));
+
+
+        // check correct
+        for i in 0..N {
+            let a = triples1.ai[i] + triples2.ai[i] + triples3.ai[i];
+            let b = triples1.bi[i] + triples2.bi[i] + triples3.bi[i];
+            let c = triples1.ci[i] + triples2.ci[i] + triples3.ci[i];
+
+            assert_eq!(a * b, c);
+        }
+    }
+
+    #[test]
+    fn correct_z64_triples() {
+        const N: usize = 1 << 10; // create 2^10 triples
+        // generate N triples insecurely
+        let ((triples1, triples2, triples3), _) = simple_localhost_setup(|p| {
+            insecure_z64_triples(p, N).unwrap()
         });
 
         check_len(&triples1, N);

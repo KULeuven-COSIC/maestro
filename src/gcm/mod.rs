@@ -5,7 +5,7 @@ use itertools::{repeat_n, Itertools};
 use crate::{aes::{self, AesKeyState, ComputeInverse, ComputePhase, ImplVariant, MPCProtocol, OutputPhase, VectorAesState}, chida::ChidaParty, party::error::{MpcError, MpcResult}, share::{field::GF8, Field, RssShare}};
 
 use self::gf128::{GF128, TryFromGF128SliceError};
-mod gf128;
+pub mod gf128;
 
 
 
@@ -29,7 +29,7 @@ fn ghash_key_and_aes_gcm_cnt<Protocol: MPCProtocol + ComputePhase<GF8> + Compute
     }
     debug_assert_eq!(counter_input.len(), 32 + 16 * n_blocks);
     let counter_input = VectorAesState::from_bytes(counter_input);
-    let output_state = aes::aes128_no_keyschedule(party, counter_input, aes_keyschedule, ImplVariant::Optimized)?;
+    let output_state = aes::aes128_no_keyschedule(party, counter_input, aes_keyschedule, ImplVariant::Simple)?;
     Ok(output_state.to_bytes())
 }
 
@@ -98,6 +98,15 @@ pub fn semi_honest_tag_check(party: &mut ChidaParty, expected_tag: &[u8], comput
     }else{
         Err(MpcError::IoError(io::Error::new(io::ErrorKind::InvalidData, "Only expected one value to open")))
     }
+}
+
+pub fn get_required_mult_for_aes128_gcm(ad_len: usize, m_len: usize) -> (usize, usize) {
+    let mul_gf8_ks = aes::get_required_mult_for_keyschedule(ImplVariant::Simple, 1);
+    let m_blocks = if m_len % 16 == 0 { m_len/16} else {m_len/16+1};
+    let ghash_cnt_gf8 = aes::get_required_mult_for_aes128_no_keyschedule(ImplVariant::Simple, m_blocks+2);
+    let ad_blocks = if ad_len % 16 == 0 { ad_len/16 + 1 } else { ad_len/16 + 2 };
+    let ghash_gf128 = m_blocks+ad_blocks;
+    (mul_gf8_ks+ghash_cnt_gf8, ghash_gf128)
 }
 
 pub fn aes128_gcm_encrypt<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8> + ComputePhase<GF128>>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {

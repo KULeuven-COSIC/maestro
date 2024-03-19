@@ -9,7 +9,7 @@ use crate::{aes::{ComputePhase, MPCProtocol, OutputPhase}, party::error::MpcResu
 // a bit-wise xor shared ring element mod 2^64
 // encoded as little endian
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
-struct Z64Bool(u64);
+pub struct Z64Bool(u64);
 
 impl Field for Z64Bool {
     fn is_zero(&self) -> bool {
