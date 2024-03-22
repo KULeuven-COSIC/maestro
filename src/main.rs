@@ -49,12 +49,12 @@ fn main() {
         Commands::ChidaBenchmark { simd, use_simple } => {
             let variant = if use_simple { ImplVariant::Simple } else { ImplVariant::Optimized };
             println!("Using {:?}", variant);
-            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0))).unwrap();
+            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
             println!("Connected!");
             chida::chida_benchmark(connected, simd, variant);
         },
         Commands::MalChidaBenchmark { simd } => {
-            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0))).unwrap();
+            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
             println!("Connected!");
             furukawa::furukawa_benchmark(connected, simd);
         }
