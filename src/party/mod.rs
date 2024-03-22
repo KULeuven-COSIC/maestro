@@ -268,7 +268,7 @@ pub mod test {
             let config = Config::new( addr, ports.clone(), certificates.clone(), pk1, sk1);
             thread::Builder::new().name("party1".to_string()).spawn(move || {
                 // println!("P1 running");
-                let party1 = party1.connect(config).unwrap();
+                let party1 = party1.connect(config, None).unwrap();
                 // println!("P1 connected");
                 let res = f1(party1);
                 res
@@ -280,7 +280,7 @@ pub mod test {
             let config = Config::new(addr, ports.clone(), certificates.clone(), pk2, sk2);
             thread::Builder::new().name("party2".to_string()).spawn(move || {
                 // println!("P2 running");
-                let party2 = party2.connect(config).unwrap();
+                let party2 = party2.connect(config, None).unwrap();
                 // println!("P2 connected");
                 let res = f2(party2);
                 res
@@ -292,7 +292,7 @@ pub mod test {
             let config = Config::new(addr, ports, certificates, pk3, sk3);
             thread::Builder::new().name("party3".to_string()).spawn(move || {
                 // println!("P3 running");
-                let party3 = party3.connect(config).unwrap();
+                let party3 = party3.connect(config, None).unwrap();
                 // println!("P3 connected");
                 let res = f3(party3);
                 res

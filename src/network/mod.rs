@@ -1,6 +1,6 @@
 use std::fs::File;
-use std::io::BufReader;
-use std::time::Duration;
+use std::io::{BufReader, ErrorKind};
+use std::time::{Duration, Instant};
 use std::{io, fs, thread};
 use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -151,12 +151,9 @@ pub struct ConnectedParty {
 }
 
 impl ConnectedParty {
-    pub fn bind_and_connect(i: usize, config: Config, wait: Option<Duration>) -> io::Result<Self> {
+    pub fn bind_and_connect(i: usize, config: Config, timeout: Option<Duration>) -> io::Result<Self> {
         let party = CreatedParty::bind(i, std::net::IpAddr::V4(config.player_addr[i]), config.player_ports[i])?;
-        if let Some(time) = wait {
-            thread::sleep(time);
-        }
-        CreatedParty::connect(party, config)
+        CreatedParty::connect(party, config, timeout)
     }
 }
 
@@ -176,7 +173,7 @@ impl CreatedParty {
             .map(|socket_addr| socket_addr.port())
     }
 
-    pub fn connect(self, config: Config) -> io::Result<ConnectedParty> {
+    pub fn connect(self, config: Config, timeout: Option<Duration>) -> io::Result<ConnectedParty> {
         let (next, prev) = match self.i {
             0 => {
                 // (1)
@@ -185,7 +182,7 @@ impl CreatedParty {
                 // println!("P1-P2 connected");
                 // (2)
                 // println!("P1 connecting to P3");
-                let mut client02 = CommChannel::new_client(&config, 2).unwrap();
+                let mut client02 = CommChannel::new_client(&config, 2, timeout).unwrap();
                 client02.stream.as_mut().unwrap().complete_handshake_blocking()?;
                 // println!("P1-P3 connected");
                 (server01, client02)
@@ -193,7 +190,7 @@ impl CreatedParty {
             1 => {
                 // (1)
                 // println!("P2 connecting to P1");
-                let mut client01 = CommChannel::new_client(&config, 0).unwrap();
+                let mut client01 = CommChannel::new_client(&config, 0, timeout).unwrap();
                 client01.stream.as_mut().unwrap().complete_handshake_blocking()?;
                 // println!("P2-P1 connected");
                 // (3)
@@ -211,7 +208,7 @@ impl CreatedParty {
                 // println!("P3-P1 connected");
                 // (3)
                 // println!("P3 connecting to P2");
-                let mut client12 = CommChannel::new_client(&config, 1).unwrap();
+                let mut client12 = CommChannel::new_client(&config, 1, timeout).unwrap();
                 client12.stream.as_mut().unwrap().complete_handshake_blocking()?;
                 // println!("P3-P2 connected");
                 (server02, client12)
@@ -271,11 +268,32 @@ impl CommChannel {
         Ok(Self::new(to, Stream::Server(StreamOwned::new(conn, sock))))
     }
 
-    pub fn new_client(config: &Config, to: usize) -> io::Result<Self> {
+    pub fn new_client(config: &Config, to: usize, timeout: Option<Duration>) -> io::Result<Self> {
         // println!("Connecting to {}", config.player_ports[to]);
         let addr: std::net::Ipv4Addr = config.player_addr[to];
         let port = config.player_ports[to];
-        let sock = TcpStream::connect((addr, port))?;
+        // try to connect in a loop until timeout is reached (if timeout is None, try forever)
+        let start_time = Instant::now();
+        let sock = {
+            loop {
+                match TcpStream::connect((addr, port)) {
+                    Ok(sock) => break Ok(sock),
+                    Err(io_err) => if io_err.kind() == ErrorKind::ConnectionRefused {
+                        // try again
+                    }else{
+                        break Err(io_err)
+                    }
+                }
+                // check time
+                if let Some(timeout) = timeout {
+                    if start_time.elapsed() >= timeout {
+                        break Err(io::Error::new(ErrorKind::NotConnected, format!("Cannot connect to {}:{} after {}s", addr, port, timeout.as_secs_f32())));
+                    }
+                }
+                // sleep a bit
+                thread::sleep(Duration::from_millis(100));
+            }
+        }?;
         let conn = ClientConnection::new(
             Self::new_client_config(&config.player_certs[to], &config.my_cert, config.my_key.clone_key()).into(), 
             ServerName::IpAddress(rustls::pki_types::IpAddr::V4(addr.into()))
