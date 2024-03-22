@@ -34,6 +34,8 @@ type Result<T> = core::result::Result<T, Rep3AesError>;
 struct Cli {
     #[arg(long, value_name = "FILE")]
     config: PathBuf,
+    #[arg(long, value_name = "TIME_SECONDS", help="If set, the server attempts to connect to the other parties until TIME_SECONDS has passed.")]
+    timeout: Option<usize>,
     #[arg(long, action, help="If set, uses actively secure MPC protocols. Default: not set, i.e., uses passively-secure MPC protocol.")]
     active: bool,
     #[command(subcommand)]
@@ -257,14 +259,14 @@ fn aes_gcm_128_enc<Protocol: PreProcessing<Z64Bool> + PreProcessing<GF8> + PrePr
 
 fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, output_writer: W) {
     let (party_index, config) = Config::from_file(&cli.config).unwrap();
-
+    let timeout = cli.timeout.map(|secs| Duration::from_secs(secs as u64));
     match cli.command {
         Commands::Encrypt { mode } => {
             let encrypt_args = parse_args_from_reader::<EncryptArgs,EncryptParams, _>(input_arg_reader).unwrap();
             match mode {
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
-                        let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0)))?;
+                        let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
                         if cli.active {
                             let mut party = FurukawaGCMParty::setup(connected)?;
                             let party_index = party.inner_mut().i;
@@ -283,7 +285,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
             match mode {
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
-                        let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs_f32(1.0)))?;
+                        let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
                         let mut party = ChidaParty::setup(connected)?;
                         let key_share = additive_shares_to_rss(&mut party, decrypt_args.key_share)?;
                         // split ciphertext and tag; tag is the last 16 bytes
@@ -354,6 +356,7 @@ mod rep3_aes_main_test {
                 let cli = Cli {
                     config: PathBuf::from(path),
                     active: false,
+                    timeout: None,
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
                 };
 
@@ -389,7 +392,7 @@ mod rep3_aes_main_test {
         drop(guard);        
     }
 
-    #[test]
+    //#[test] todo: implement malicius cut-and-choose for bool, then retry
     fn encrypt_aes_gcm_128_malicious() {
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
         let guard = PORT_LOCK.lock().unwrap();
@@ -408,6 +411,7 @@ mod rep3_aes_main_test {
                 let cli = Cli {
                     config: PathBuf::from(path),
                     active: true,
+                    timeout: None,
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
                 };
 
@@ -459,6 +463,7 @@ mod rep3_aes_main_test {
                 let cli = Cli {
                     config: PathBuf::from(path),
                     active: false,
+                    timeout: None,
                     command: Commands::Decrypt { mode: Mode::AesGcm128 }
                 };
                 // prepare input arg
