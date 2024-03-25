@@ -1,7 +1,7 @@
 mod commitment;
-mod correlated_randomness;
+pub mod correlated_randomness;
 mod offline;
-mod broadcast;
+pub mod broadcast;
 pub mod error;
 mod online;
 
@@ -73,12 +73,13 @@ impl Party {
         })
     }
 
-    pub fn setup_semi_honest(mut party: ConnectedParty) -> MpcResult<Self> {
+    pub fn setup_semi_honest(party: ConnectedParty) -> MpcResult<Self> {
         let mut rng = ChaCha20Rng::from_entropy();
-        let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &mut party.comm_next, &mut party.comm_prev).unwrap();
+        let io_layer = IoLayer::spawn_io(party.comm_prev, party.comm_next)?;
+        let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &io_layer).unwrap();
         Ok(Self {
             i: party.i,
-            io: Some(IoLayer::spawn_io(party.comm_prev, party.comm_next)?),
+            io: Some(io_layer),
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
@@ -237,6 +238,10 @@ pub mod test {
         )
     }
 
+    pub trait TestSetup<P> {
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut P) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut P) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut P) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,P)>, JoinHandle<(T2,P)>, JoinHandle<(T3,P)>);
+    }
+
     pub fn localhost_connect<T1: Send + 'static, F1: Send + FnOnce(ConnectedParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(ConnectedParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(ConnectedParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<T1>, JoinHandle<T2>, JoinHandle<T3>) {
         let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
         let party1 = CreatedParty::bind(0, IpAddr::V4(addr[0]), 0).unwrap();
@@ -263,7 +268,7 @@ pub mod test {
             let config = Config::new( addr, ports.clone(), certificates.clone(), pk1, sk1);
             thread::Builder::new().name("party1".to_string()).spawn(move || {
                 // println!("P1 running");
-                let party1 = party1.connect(config).unwrap();
+                let party1 = party1.connect(config, None).unwrap();
                 // println!("P1 connected");
                 let res = f1(party1);
                 res
@@ -275,7 +280,7 @@ pub mod test {
             let config = Config::new(addr, ports.clone(), certificates.clone(), pk2, sk2);
             thread::Builder::new().name("party2".to_string()).spawn(move || {
                 // println!("P2 running");
-                let party2 = party2.connect(config).unwrap();
+                let party2 = party2.connect(config, None).unwrap();
                 // println!("P2 connected");
                 let res = f2(party2);
                 res
@@ -287,7 +292,7 @@ pub mod test {
             let config = Config::new(addr, ports, certificates, pk3, sk3);
             thread::Builder::new().name("party3".to_string()).spawn(move || {
                 // println!("P3 running");
-                let party3 = party3.connect(config).unwrap();
+                let party3 = party3.connect(config, None).unwrap();
                 // println!("P3 connected");
                 let res = f3(party3);
                 res
@@ -323,6 +328,13 @@ pub mod test {
             (res, p)
         };
         localhost_connect(_f1, _f2, _f3)
+    }
+
+    struct PartySetup;
+    impl TestSetup<Party> for PartySetup {
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,Party)>, JoinHandle<(T2,Party)>, JoinHandle<(T3,Party)>) {
+            localhost_setup(f1, f2, f3)
+        }
     }
 
     pub fn simple_localhost_setup<F: Send + Clone + Fn(&mut Party) -> T + 'static, T: Send + 'static>(f: F) -> ((T,T,T), (Party, Party, Party)) {

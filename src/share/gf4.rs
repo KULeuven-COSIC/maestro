@@ -1,4 +1,4 @@
-use std::{fmt::{Debug, Formatter}, ops::{Add, AddAssign, Mul, Neg, Sub}};
+use std::{borrow::Borrow, fmt::{Debug, Formatter}, ops::{Add, AddAssign, Mul, Neg, Sub}};
 
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
@@ -80,8 +80,8 @@ impl Field for GF4 {
         self.0 == 0
     }
 
-    fn as_byte_vec<'a, I: IntoIterator<Item=&'a Self>>(it: I) -> Vec<u8> where Self: 'a {
-        it.into_iter().map(|gf| gf.0).collect()
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8> {
+        it.into_iter().map(|gf| gf.borrow().0).collect()
     }
 
     fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {

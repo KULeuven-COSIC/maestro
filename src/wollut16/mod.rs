@@ -9,6 +9,9 @@ mod online;
 // Party for WOLLUT16
 pub struct WL16Party(Party);
 
+// a random one-hot vector of size 16
+struct RndOhv16(u16);
+
 impl WL16Party {}
 
 pub fn wollut16_benchmark() {}

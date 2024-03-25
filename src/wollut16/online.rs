@@ -49,7 +49,7 @@ fn SS_to_RSS_layer(party: &mut Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: &mut
     x_i.iter_mut().enumerate().for_each(|(j, y_i)| {
         *y_i = xss_i[j] + alphas[j]
     });
-    party.io().send_field(Direction::Previous, x_i.iter());
+    party.io().send_field::<GF4>(Direction::Previous, x_i.iter());
     party.io().receive_field_slice(Direction::Next, x_ii).rcv()?;
     party.io().wait_for_completion();
     Ok(())
