@@ -2,6 +2,7 @@ pub mod gf8;
 mod gf8_tables;
 pub mod gf4;
 pub mod wol;
+pub mod bs_bool16;
 
 use std::borrow::Borrow;
 use std::io;
@@ -71,6 +72,13 @@ impl<F: Field> Mul<F> for RssShare<F> {
             si: self.si * rhs.clone(),
             sii:self.sii * rhs
         }
+    }
+}
+
+impl<F: Field> AddAssign for RssShare<F> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.si += rhs.si;
+        self.sii += rhs.sii;
     }
 }
 

@@ -6,6 +6,8 @@ pub trait ArithmeticBlackBox<F: Field> {
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
     fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>>;
+    /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
+    fn generate_alpha(&mut self, n: usize) -> Vec<F>;
     fn io(&self) -> &IoLayer;
     
     fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;

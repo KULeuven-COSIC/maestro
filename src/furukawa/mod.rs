@@ -295,6 +295,10 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
         self.inner.generate_random(n)
     }
 
+    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+        self.inner.generate_alpha(n)
+    }
+
     fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         let party_index = self.inner.i;
         let mut input_phase = self.start_input_phase();

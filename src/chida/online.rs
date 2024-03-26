@@ -41,6 +41,10 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
         self.0.generate_random(n)
     }
 
+    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+        self.0.generate_alpha(n)
+    }
+
     // all parties input the same number of inputs
     fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         input_round(&mut self.0, my_input)
