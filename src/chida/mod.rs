@@ -12,63 +12,62 @@
 
 use std::time::Instant;
 
-use crate::chida::online::{AesKeyState, VectorAesState};
+use crate::aes::{self};
+
 use crate::network::ConnectedParty;
 use crate::party::error::MpcResult;
 use crate::party::Party;
-use crate::share::RssShare;
-use crate::share::gf8::GF8;
 
-mod online;
-pub use self::online::ImplVariant;
+pub mod online;
 
-///
+#[derive(Clone, Copy, Debug)]
+pub enum ImplVariant {
+    Simple,     // uses the gf8 inversion as in Figure 6
+    Optimized   // uses gf8 inversion as in Algorithm 5
+}
 
 // Party for Chida et al. semi-honest protocol
 pub struct ChidaParty(Party);
 
 impl ChidaParty {
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        Party::setup_semi_honest(connected).map(|party| Self(party))
+        Party::setup(connected).map(|party| Self(party))
     }
 
-    pub fn random_state(&mut self, size: usize) -> VectorAesState {
-        VectorAesState::from_bytes(self.0.generate_random(size * 16))
+    pub fn teardown(&mut self) -> MpcResult<()> {
+        self.0.teardown()
     }
+}
+/// [ChidaParty] paired with an [ImplVariant]
+pub struct ChidaBenchmarkParty {
+    inner: ChidaParty,
+    variant: ImplVariant,
+}
 
-    pub fn aes128_no_keyschedule(&mut self, blocks: VectorAesState, keyschedule: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
-        online::aes128_no_keyschedule(&mut self.0, blocks, keyschedule, variant)
-    }
-
-    pub fn aes128_keyschedule(&mut self, key: Vec<RssShare<GF8>>, variant: ImplVariant) -> MpcResult<Vec<AesKeyState>> {
-        online::aes128_keyschedule(&mut self.0, key, variant)
-    }
-
-    pub fn output(&mut self, blocks: VectorAesState) -> MpcResult<Vec<GF8>> {
-        let shares = blocks.to_bytes();
-        online::output_round(&mut self.0, &shares, &shares, &shares)
+impl ChidaBenchmarkParty {
+    pub fn setup(connected: ConnectedParty, variant: ImplVariant) -> MpcResult<Self> {
+        ChidaParty::setup(connected).map(|party| Self{
+            inner: party,
+            variant
+        })
     }
 }
 
 // simd: how many parallel AES calls
 pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVariant) {
-    let mut party = ChidaParty::setup(connected).unwrap();
-    let input = party.random_state(simd);
+    let mut party = ChidaBenchmarkParty::setup(connected, variant).unwrap();
+    let input = aes::random_state(&mut party.inner, simd);
     // create random key states for benchmarking purposes
-    let ks: Vec<_> = (0..11).map(|_| {
-        let rk = party.0.generate_random(16);
-        AesKeyState::from_rss_vec(rk)
-    })
-    .collect();
+    let ks = aes::random_keyschedule(&mut party.inner);
 
     let start = Instant::now();
-    let output = party.aes128_no_keyschedule(input, &ks, variant).unwrap();
+    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
     let duration = start.elapsed();
-    let _ = party.output(output).unwrap();
-    party.0.teardown().unwrap();
+    let _ = aes::output(&mut party.inner, output).unwrap();
+    party.inner.0.teardown().unwrap();
     
     println!("Finished benchmark");
     
-    println!("Party {}: Chida et al. with SIMD={} took {}s", party.0.i, simd, duration.as_secs_f64());
-    party.0.print_comm_statistics();
+    println!("Party {}: Chida et al. with SIMD={} took {}s", party.inner.0.i, simd, duration.as_secs_f64());
+    party.inner.0.print_comm_statistics();
 }
