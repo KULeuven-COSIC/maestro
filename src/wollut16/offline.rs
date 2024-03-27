@@ -1,8 +1,8 @@
 use itertools::izip;
 
-use crate::{aes::ArithmeticBlackBox, party::error::MpcResult, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}};
+use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}};
 
-use super::RndOhv16;
+use super::{RndOhv16, RndOhvOutput};
 
 fn map_si(rss: &RssShare<BsBool16>) -> &BsBool16 {
     &rss.si
@@ -27,12 +27,6 @@ fn inner_product(elements: &[&[RssShare<BsBool16>]], n: usize, start: RssShare<B
         }
     }
     res
-}
-
-pub struct RndOhvOutput {
-    si: RndOhv16,
-    sii: RndOhv16,
-    random: GF4,
 }
 
 const SELECTOR_IDX_0: [bool; 15] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

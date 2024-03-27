@@ -2,15 +2,15 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::aes::ArithmeticBlackBox;
+use crate::aes::GF8InvBlackBox;
 use crate::network::task::{Direction, IoLayer};
 use crate::party::error::MpcResult;
-use crate::party::Party;
+use crate::party::{ArithmeticBlackBox, Party};
 use crate::share::gf8::GF8;
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
 use super::aes::VectorAesState;
-use super::ChidaParty;
+use super::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
 
 
 impl<F: Field> ArithmeticBlackBox<F> for ChidaParty
@@ -28,13 +28,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
-        if self.0.i == 0 {
-            RssShare::from(value, F::zero())
-        }else if self.0.i == 2 {
-            RssShare::from(F::zero(), value)
-        }else{
-            RssShare::from(F::zero(), F::zero())
-        }
+        self.0.constant(value)
     }
 
     fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
@@ -64,7 +58,155 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
         // nothing to do
         Ok(())
     }
-} 
+}
+
+impl GF8InvBlackBox for ChidaBenchmarkParty {
+    fn constant(&self, value: GF8) -> RssShare<GF8> {
+        self.inner.constant(value)
+    }
+    fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+        match self.variant {
+            ImplVariant::Simple => gf8_inv_layer(&mut self.inner, si, sii),
+            ImplVariant::Optimized => gf8_inv_layer_opt(&mut self.inner, si, sii)
+        }
+    }
+    fn do_preprocessing(&mut self, _n_keys: usize, _n_blocks: usize) -> MpcResult<()> {
+        // no preprocessing needed
+        Ok(())
+    }
+}
+
+impl<F: Field> ArithmeticBlackBox<F> for ChidaBenchmarkParty 
+where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
+{
+    type Rng = ChaCha20Rng;
+    type Digest = Sha256;
+
+    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
+        self.inner.pre_processing(n_multiplications)
+    }
+
+    fn io(&self) -> &IoLayer {
+        self.inner.io()
+    }
+
+    fn constant(&self, value: F) -> RssShare<F> {
+        self.inner.constant(value)
+    }
+
+    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+        self.inner.generate_random(n)
+    }
+
+    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+        self.inner.generate_alpha(n)
+    }
+
+    // all parties input the same number of inputs
+    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+        self.inner.input_round(my_input)
+    }
+
+    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
+        self.inner.mul(ci, cii, ai, aii, bi, bii)
+    }
+
+    fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
+        self.inner.output_round(si, sii)
+    }
+
+    fn finalize(&mut self) -> MpcResult<()> {
+        self.inner.finalize()
+    }
+}
+
+// the straight-forward gf8 inversion using 4 multiplication and only squaring (see Chida et al. "High-Throughput Secure AES Computation" in WAHC'18 [Figure 6])
+pub fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    let n = si.len();
+    // this is not yet the multiplication that chida et al use
+    let x2 = (square_layer(si), square_layer(sii)); //square(&states);
+    // x^3 = x^2 * x
+    let mut x3 = (vec![GF8(0); n], vec![GF8(0); n]); //VectorAesState::new(states.n);
+    party.mul(&mut x3.0, &mut x3.1, si, sii, &x2.0, &x2.1)?;
+
+    let x6 = (square_layer(&x3.0), square_layer(&x3.1));
+    let x12 = (square_layer(&x6.0), square_layer(&x6.1));
+
+    let x12_x12 = (append(&x12.0, &x12.0), append(&x12.1, &x12.1));
+    let x3_x2 = (append(&x3.0, &x2.0), append(&x3.1, &x2.1));
+
+    let mut x15_x14 = (vec![GF8(0); 2*n], vec![GF8(0); 2*n]); // VectorAesState::new(x12_x12.n);
+    // x^15 = x^12 * x^3 and x^14 = x^12 * x^2 in one round
+    party.mul(&mut x15_x14.0, &mut x15_x14.1, &x12_x12.0, &x12_x12.1, &x3_x2.0, &x3_x2.1)?;
+
+    // x^15 square in-place x^240 = (x^15)^16
+    for i in 0..n {
+        x15_x14.0[i] = x15_x14.0[i].square().square().square().square();
+        x15_x14.1[i] = x15_x14.1[i].square().square().square().square();
+    }
+    // x^254 = x^240 * x^14
+    // write directly to output buffers si,sii
+    party.mul(si, sii, &x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..])
+}
+
+fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    let n = si.len();
+    // MULT(x²,x)
+    // receive from P-1
+    let rcv_x3i = party.io().receive_field(Direction::Previous, n);
+
+    let x3ii: Vec<_> = party.generate_random(n)
+    .into_iter().enumerate()
+    .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
+    .collect();
+    // send to P+1
+    party.io().send_field::<GF8>(Direction::Next, &x3ii);
+
+    // MULT(x^12, x^2) and MULT(x^12, x^3)
+    // receive from P-1
+    let rcv_x14x15i = party.io().receive_field(Direction::Previous, 2*n);
+    let mut x14x15ii: Vec<_> = party.generate_random(2*n)
+    .into_iter().map(|alpha| alpha.si + alpha.sii)
+    .collect();
+    let x3i = rcv_x3i.rcv()?;
+    for i in 0..n {
+        x14x15ii[i] += GF8::x4y2(x3i[i] + x3ii[i], si[i] + sii[i]) + GF8::x4y2(x3i[i], si[i]);
+    }
+    for i in 0..n {
+        let tmp = x3i[i] + x3ii[i];
+        x14x15ii[n+i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
+    }
+    // send to P+1
+    party.io().send_field::<GF8>(Direction::Next, &x14x15ii);
+
+    // MULT(x^240, x^14)
+    let x14x15i = rcv_x14x15i.rcv()?;
+    let x254ii: Vec<_> = party.generate_random(n).into_iter().enumerate()
+    .map(|(i, alpha)| alpha.si + alpha.sii + GF8::x16y(x14x15i[n+i] + x14x15ii[n+i], x14x15i[i] + x14x15ii[i]) + GF8::x16y(x14x15i[n+i], x14x15i[i]))
+    .collect();
+    sii.copy_from_slice(&x254ii);
+    // receive from P-1
+    let rcv_si = party.io().receive_field_slice(Direction::Previous, si);
+    // send to P+1
+    party.io().send_field::<GF8>(Direction::Next, sii.iter());
+    
+    rcv_si.rcv()?;
+    party.io().wait_for_completion();
+    Ok(())
+}
+
+#[inline]
+fn square_layer(v: &[GF8]) -> Vec<GF8> {
+    v.iter().map(|x| x.square()).collect()
+}
+
+#[inline]
+fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
+    let mut res = vec![GF8(0); a.len() + b.len()];
+    res[..a.len()].copy_from_slice(a);
+    res[a.len()..].copy_from_slice(b);
+    res
+}
 
 // all parties input the same number of inputs (input.len() AES states)
 pub fn input_round<F: Field>(party: &mut Party, input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> where ChaCha20Rng: FieldRngExt<F> {
@@ -185,7 +327,7 @@ pub fn output_round<F: Field>(party: &mut Party, to_p1: &[RssShare<F>], to_p2: &
     Ok(sum)
 }
 
-fn mul<F: Field>(party: &mut Party, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> 
+pub fn mul<F: Field>(party: &mut Party, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> 
 where ChaCha20Rng: FieldRngExt<F>
 {
     debug_assert_eq!(ci.len(), ai.len());
@@ -213,14 +355,17 @@ pub mod test {
     use std::thread::JoinHandle;
 
     use rand::thread_rng;
+    use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes};
     use crate::chida::online::{input_round, input_round_aes_states, mul, output_round, VectorAesState};
-    use crate::chida::ChidaParty;
+    use crate::chida::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
     use crate::network::ConnectedParty;
     use crate::party::Party;
     use crate::party::test::{localhost_connect, localhost_setup, TestSetup};
     use crate::share::gf8::GF8;
     use crate::share::{FieldRngExt, RssShare};
     use crate::share::test::{assert_eq, consistent, random_secret_shared_vector, secret_share_vector};
+
+    use super::square_layer;
 
     pub fn localhost_setup_chida<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,ChidaParty)>, JoinHandle<(T2,ChidaParty)>, JoinHandle<(T3,ChidaParty)>) {
         fn adapter<T, Fx: FnOnce(&mut ChidaParty)->T>(conn: ConnectedParty, f: Fx) -> (T,ChidaParty) {
@@ -232,10 +377,43 @@ pub mod test {
         localhost_connect(|conn_party| adapter(conn_party, f1), |conn_party| adapter(conn_party, f2), |conn_party| adapter(conn_party, f3))
     }
 
+    pub fn localhost_setup_chida_benchmark<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, variant: ImplVariant) -> (JoinHandle<(T1,ChidaBenchmarkParty)>, JoinHandle<(T2,ChidaBenchmarkParty)>, JoinHandle<(T3,ChidaBenchmarkParty)>) {
+        fn adapter<T, Fx: FnOnce(&mut ChidaBenchmarkParty)->T>(conn: ConnectedParty, f: Fx, variant: ImplVariant) -> (T,ChidaBenchmarkParty) {
+            let mut party = ChidaBenchmarkParty::setup(conn, variant).unwrap();
+            let t = f(&mut party);
+            party.inner.0.teardown().unwrap();
+            (t, party)
+        }
+        localhost_connect(move |conn_party| adapter(conn_party, f1, variant), move |conn_party| adapter(conn_party, f2, variant), move |conn_party| adapter(conn_party, f3, variant))
+    }
+
     pub struct ChidaSetup;
     impl TestSetup<ChidaParty> for ChidaSetup {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,ChidaParty)>, JoinHandle<(T2,ChidaParty)>, JoinHandle<(T3,ChidaParty)>) {
             localhost_setup_chida(f1, f2, f3)
+        }
+    }
+
+    pub struct ChidaSetupSimple;
+    impl TestSetup<ChidaBenchmarkParty> for ChidaSetupSimple {
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,ChidaBenchmarkParty)>, JoinHandle<(T2,ChidaBenchmarkParty)>, JoinHandle<(T3,ChidaBenchmarkParty)>) {
+            localhost_setup_chida_benchmark(f1, f2, f3, ImplVariant::Simple)
+        }
+    }
+
+    pub struct ChidaSetupOpt;
+    impl TestSetup<ChidaBenchmarkParty> for ChidaSetupOpt {
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,ChidaBenchmarkParty)>, JoinHandle<(T2,ChidaBenchmarkParty)>, JoinHandle<(T3,ChidaBenchmarkParty)>) {
+            localhost_setup_chida_benchmark(f1, f2, f3, ImplVariant::Optimized)
+        }
+    }
+
+    #[test]
+    fn square_gf8() {
+        let x = (0..256).map(|i| GF8(i as u8)).collect::<Vec<_>>();
+        let sq = square_layer(&x);
+        for (x,x2) in x.into_iter().zip(sq) {
+            assert_eq!(x*x, x2);
         }
     }
 
@@ -377,5 +555,45 @@ pub mod test {
         check(in1, a1, a2, a3);
         check(in2, b1, b2, b3);
         check(in3, c1, c2, c3);
+    }
+
+    #[test]
+    fn sub_bytes_simple() {
+        test_sub_bytes::<ChidaSetupSimple,_>();
+    }
+
+    #[test]
+    fn sub_bytes_optimized() {
+        test_sub_bytes::<ChidaSetupOpt,_>();
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8_simple() {
+        test_aes128_no_keyschedule_gf8::<ChidaSetupSimple,_>();
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8_optimized() {
+        test_aes128_no_keyschedule_gf8::<ChidaSetupOpt,_>();
+    }
+
+    #[test]
+    fn aes128_keyschedule_gf8_simple() {
+        test_aes128_keyschedule_gf8::<ChidaSetupSimple,_>();
+    }
+
+    #[test]
+    fn aes128_keyschedule_gf8_optimized() {
+        test_aes128_keyschedule_gf8::<ChidaSetupOpt,_>();
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8_simple() {
+        test_inv_aes128_no_keyschedule_gf8::<ChidaSetupSimple,_>();
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8_optimized() {
+        test_inv_aes128_no_keyschedule_gf8::<ChidaSetupOpt,_>();
     }
 }

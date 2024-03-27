@@ -110,7 +110,7 @@ pub mod test {
 
     pub fn assert_eq<F: Field + PartialEq + Debug>(share1: RssShare<F>, share2: RssShare<F>, share3: RssShare<F>, value: F) {
         let actual = share1.si + share2.si + share3.si;
-        assert_eq!(actual, value);
+        assert_eq!(actual, value, "Expected {:?}, got {:?}", value, actual);
     }
 
     pub fn secret_share<F: Field, R: Rng + CryptoRng + FieldRngExt<F>>(rng: &mut R, x: &F) -> (RssShare<F>, RssShare<F>, RssShare<F>)

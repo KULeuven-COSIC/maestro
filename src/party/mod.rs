@@ -12,7 +12,7 @@ use rand_chacha::ChaCha20Rng;
 use crate::network::task::IoLayer;
 use crate::network::ConnectedParty;
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
-use crate::share::{Field, FieldRngExt, RssShare};
+use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
 use self::error::MpcResult;
 
@@ -20,6 +20,23 @@ struct CommStats {
     bytes_received: u64,
     bytes_sent: u64,
     rounds: usize,
+}
+
+pub trait ArithmeticBlackBox<F: Field> {
+    type Digest: FieldDigestExt<F>;
+    type Rng: FieldRngExt<F>;
+
+    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
+    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>>;
+    /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
+    fn generate_alpha(&mut self, n: usize) -> Vec<F>;
+    fn io(&self) -> &IoLayer;
+    
+    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
+    fn constant(&self, value: F) -> RssShare<F>;
+    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()>;
+    fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
+    fn finalize(&mut self) -> MpcResult<()>;
 }
 
 
@@ -120,6 +137,17 @@ impl Party {
         let si = self.random_prev.as_mut().generate(n);
         let sii = self.random_next.as_mut().generate(n);
         si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
+    }
+
+    #[inline]
+    pub fn constant<F: Field>(&self, value: F) -> RssShare<F> {
+        if self.i == 0 {
+            RssShare::from(value, F::zero())
+        }else if self.i == 2 {
+            RssShare::from(F::zero(), value)
+        }else{
+            RssShare::from(F::zero(), F::zero())
+        }
     }
 
     pub fn io(&self) -> &IoLayer {

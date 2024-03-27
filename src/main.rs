@@ -13,7 +13,7 @@ use std::{path::PathBuf, time::Duration};
 use clap::{Parser, Subcommand, ArgAction};
 use network::ConnectedParty;
 
-use crate::aes::ImplVariant;
+use crate::chida::ImplVariant;
 
 #[derive(Parser)]
 struct Cli {

@@ -1,26 +1,13 @@
-use crate::{network::task::{Direction, IoLayer}, party::error::MpcResult, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{gf8::GF8, RssShare}};
 
-pub trait ArithmeticBlackBox<F: Field> {
-    type Digest: FieldDigestExt<F>;
-    type Rng: FieldRngExt<F>;
+pub trait GF8InvBlackBox {
+    /// returns a (2,3) sharing of the public constant `value`
+    fn constant(&self, value: GF8) -> RssShare<GF8>;
+    /// computes inversion of the (2,3) sharing of s (si,sii) in-place
+    fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()>;
 
-    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>>;
-    /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    fn generate_alpha(&mut self, n: usize) -> Vec<F>;
-    fn io(&self) -> &IoLayer;
-    
-    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
-    fn constant(&self, value: F) -> RssShare<F>;
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()>;
-    fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
-    fn finalize(&mut self) -> MpcResult<()>;
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum ImplVariant {
-    Simple,     // uses the gf8 inversion as in Figure 6
-    Optimized   // uses gf8 inversion as in Algorithm 5
+    /// run any required pre-processing phase to prepare for computation of the key schedule with n_keys and n_blocks many AES-128 block calls
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()>;
 }
 
 // contains n AES States in parallel (ie si has length n * 16)
@@ -226,18 +213,6 @@ impl AesKeyState {
     }
 }
 
-pub fn get_required_mult_for_keyschedule(variant: ImplVariant, n_keys: usize) -> usize {
-    match variant {
-        ImplVariant::Simple | ImplVariant::Optimized => 4*10*4 * n_keys // 4 S-boxes per round, 10 rounds, 4 multiplications per S-box
-    }
-}
-
-pub fn get_required_mult_for_aes128_no_keyschedule(variant: ImplVariant, n_blocks: usize) -> usize {
-    match variant {
-        ImplVariant::Simple | ImplVariant::Optimized => 16*10*4 * n_blocks // 16 S-boxes per round, 10 rounds, 4 multiplications per S-box
-    }
-}
-
 pub fn random_state<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, size: usize) -> VectorAesState {
     VectorAesState::from_bytes(party.generate_random(size * 16))
 }
@@ -251,44 +226,44 @@ pub fn random_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protoco
     .collect()
 }
 
-pub fn aes128_no_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, inputs: VectorAesState, round_key: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
+pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(party: &mut Protocol, inputs: VectorAesState, round_key: &Vec<AesKeyState>) -> MpcResult<VectorAesState> {
     debug_assert_eq!(round_key.len(), 11);
     let mut state = inputs;
 
     add_round_key(&mut state, &round_key[0]);
     for r in 1..= 9 {
-        sbox_layer(party, &mut state.si, &mut state.sii, variant)?;
+        sbox_layer(party, &mut state.si, &mut state.sii)?;
         state.shift_rows();
         state.mix_columns();
         add_round_key(&mut state, &round_key[r]);
     }
-    sbox_layer(party, &mut state.si, &mut state.sii, variant)?;
+    sbox_layer(party, &mut state.si, &mut state.sii)?;
     state.shift_rows();
     add_round_key(&mut state, &round_key[10]);
     Ok(state)
 }
 
-pub fn aes128_inv_no_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, inputs: VectorAesState, key_schedule: &Vec<AesKeyState>, variant: ImplVariant) -> MpcResult<VectorAesState> {
+pub fn aes128_inv_no_keyschedule<Protocol: GF8InvBlackBox>(party: &mut Protocol, inputs: VectorAesState, key_schedule: &Vec<AesKeyState>) -> MpcResult<VectorAesState> {
     debug_assert_eq!(key_schedule.len(), 11);
     let mut state = inputs;
 
     add_round_key(&mut state, &key_schedule[10]);
     for r in (1..=9).rev() {
         state.inv_shift_rows();
-        inv_sbox_layer(party, &mut state.si, &mut state.sii, variant)?;
+        inv_sbox_layer(party, &mut state.si, &mut state.sii)?;
         add_round_key(&mut state, &key_schedule[r]);
         state.inv_mix_columns();
     }
     state.inv_shift_rows();
-    inv_sbox_layer(party, &mut state.si, &mut state.sii, variant)?;
+    inv_sbox_layer(party, &mut state.si, &mut state.sii)?;
     add_round_key(&mut state, &key_schedule[0]);
     Ok(state)
 }
 
-fn aes128_keyschedule_round<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, rk: &AesKeyState, rcon: GF8, variant: ImplVariant) -> MpcResult<AesKeyState> {
+fn aes128_keyschedule_round<Protocol: GF8InvBlackBox>(party: &mut Protocol, rk: &AesKeyState, rcon: GF8) -> MpcResult<AesKeyState> {
     let mut rot_i = [rk.si[7], rk.si[11], rk.si[15], rk.si[3]];
     let mut rot_ii = [rk.sii[7], rk.sii[11], rk.sii[15], rk.sii[3]];
-    sbox_layer(party, &mut rot_i, &mut rot_ii, variant)?;
+    sbox_layer(party, &mut rot_i, &mut rot_ii)?;
     
     let mut output = rk.clone();
     for i in 0..4 {
@@ -308,13 +283,13 @@ fn aes128_keyschedule_round<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Proto
     Ok(output)
 }
 
-pub fn aes128_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, key: Vec<RssShare<GF8>>, variant: ImplVariant) -> MpcResult<Vec<AesKeyState>> {
+pub fn aes128_keyschedule<Protocol: GF8InvBlackBox>(party: &mut Protocol, key: Vec<RssShare<GF8>>) -> MpcResult<Vec<AesKeyState>> {
     debug_assert_eq!(key.len(), 16);
     const ROUND_CONSTANTS: [GF8; 10] = [GF8(0x01), GF8(0x02), GF8(0x04), GF8(0x08), GF8(0x10), GF8(0x20), GF8(0x40), GF8(0x80), GF8(0x1b), GF8(0x36)];
     let mut ks = Vec::with_capacity(11);
     ks.push(AesKeyState::from_bytes(key)); // rk0
     for i in 1..=10 {
-        let rki = aes128_keyschedule_round(party, &ks[i-1], ROUND_CONSTANTS[i-1], variant)?;
+        let rki = aes128_keyschedule_round(party, &ks[i-1], ROUND_CONSTANTS[i-1])?;
         ks.push(rki);
     }
     Ok(ks)
@@ -335,12 +310,9 @@ fn add_round_key(states: &mut VectorAesState, round_key: &AesKeyState) {
     }
 }
 
-fn sbox_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
+fn sbox_layer<Protocol: GF8InvBlackBox>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     // first inverse, then affine transform
-    match variant {
-        ImplVariant::Simple => gf8_inv_layer(party, si, sii)?,
-        ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)?
-    };
+    party.gf8_inv(si, sii)?;
         
     // apply affine transform
     let c = party.constant(GF8(0x63));
@@ -353,117 +325,27 @@ fn sbox_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut 
 
 
 
-fn inv_sbox_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8], variant: ImplVariant) -> MpcResult<()> {
+fn inv_sbox_layer<Protocol: GF8InvBlackBox>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     // first inverse affine transform, then gf8 inverse
     // apply inverse affine transform
     let c = party.constant(GF8(0x63));
     for i in 0..si.len() {
-
         si[i] = (si[i] + c.si).inv_aes_sbox_affine_transform();
         sii[i] = (sii[i] + c.sii).inv_aes_sbox_affine_transform();
     }
-    match variant {
-        ImplVariant::Simple => gf8_inv_layer(party, si, sii),
-        ImplVariant::Optimized => gf8_inv_layer_opt(party, si, sii)
-    }
+    party.gf8_inv(si, sii)
 }
 
-#[inline]
-fn square_layer(v: &[GF8]) -> Vec<GF8> {
-    v.iter().map(|x| x.square()).collect()
-}
 
-#[inline]
-fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
-    let mut res = vec![GF8(0); a.len() + b.len()];
-    res[..a.len()].copy_from_slice(a);
-    res[a.len()..].copy_from_slice(b);
-    res
-}
-
-// the straight-forward gf8 inversion using 4 multiplication and only squaring (see Chida et al. "High-Throughput Secure AES Computation" in WAHC'18 [Figure 6])
-fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-    let n = si.len();
-    // this is not yet the multiplication that chida et al use
-    let x2 = (square_layer(si), square_layer(sii)); //square(&states);
-    // x^3 = x^2 * x
-    let mut x3 = (vec![GF8(0); n], vec![GF8(0); n]); //VectorAesState::new(states.n);
-    party.mul(&mut x3.0, &mut x3.1, si, sii, &x2.0, &x2.1)?;
-
-    let x6 = (square_layer(&x3.0), square_layer(&x3.1));
-    let x12 = (square_layer(&x6.0), square_layer(&x6.1));
-
-    let x12_x12 = (append(&x12.0, &x12.0), append(&x12.1, &x12.1));
-    let x3_x2 = (append(&x3.0, &x2.0), append(&x3.1, &x2.1));
-
-    let mut x15_x14 = (vec![GF8(0); 2*n], vec![GF8(0); 2*n]); // VectorAesState::new(x12_x12.n);
-    // x^15 = x^12 * x^3 and x^14 = x^12 * x^2 in one round
-    party.mul(&mut x15_x14.0, &mut x15_x14.1, &x12_x12.0, &x12_x12.1, &x3_x2.0, &x3_x2.1)?;
-
-    // x^15 square in-place x^240 = (x^15)^16
-    for i in 0..n {
-        x15_x14.0[i] = x15_x14.0[i].square().square().square().square();
-        x15_x14.1[i] = x15_x14.1[i].square().square().square().square();
-    }
-    // x^254 = x^240 * x^14
-    // write directly to output buffers si,sii
-    party.mul(si, sii, &x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..])
-}
-
-fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-    let n = si.len();
-    // MULT(x²,x)
-    // receive from P-1
-    let rcv_x3i = party.io().receive_field(Direction::Previous, n);
-
-    let x3ii: Vec<_> = party.generate_random(n)
-    .into_iter().enumerate()
-    .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
-    .collect();
-    // send to P+1
-    party.io().send_field::<GF8>(Direction::Next, &x3ii);
-
-    // MULT(x^12, x^2) and MULT(x^12, x^3)
-    // receive from P-1
-    let rcv_x14x15i = party.io().receive_field(Direction::Previous, 2*n);
-    let mut x14x15ii: Vec<_> = party.generate_random(2*n)
-    .into_iter().map(|alpha| alpha.si + alpha.sii)
-    .collect();
-    let x3i = rcv_x3i.rcv()?;
-    for i in 0..n {
-        x14x15ii[i] += GF8::x4y2(x3i[i] + x3ii[i], si[i] + sii[i]) + GF8::x4y2(x3i[i], si[i]);
-    }
-    for i in 0..n {
-        let tmp = x3i[i] + x3ii[i];
-        x14x15ii[n+i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
-    }
-    // send to P+1
-    party.io().send_field::<GF8>(Direction::Next, &x14x15ii);
-
-    // MULT(x^240, x^14)
-    let x14x15i = rcv_x14x15i.rcv()?;
-    let x254ii: Vec<_> = party.generate_random(n).into_iter().enumerate()
-    .map(|(i, alpha)| alpha.si + alpha.sii + GF8::x16y(x14x15i[n+i] + x14x15ii[n+i], x14x15i[i] + x14x15ii[i]) + GF8::x16y(x14x15i[n+i], x14x15i[i]))
-    .collect();
-    sii.copy_from_slice(&x254ii);
-    // receive from P-1
-    let rcv_si = party.io().receive_field_slice(Direction::Previous, si);
-    // send to P+1
-    party.io().send_field::<GF8>(Direction::Next, sii.iter());
-    
-    rcv_si.rcv()?;
-    party.io().wait_for_completion();
-    Ok(())
-}
 
 #[cfg(test)]
 pub mod test {
 
     use rand::{thread_rng, CryptoRng, Rng};
 
-    use crate::{aes::{aes128_inv_no_keyschedule, aes128_keyschedule, aes128_no_keyschedule, get_required_mult_for_aes128_no_keyschedule, get_required_mult_for_keyschedule, sbox_layer}, chida::{online::test::{localhost_setup_chida, ChidaSetup}, ChidaParty}, furukawa::test::FurukawaSetup, party::test::TestSetup, share::{gf8::GF8, test::{assert_eq, consistent, secret_share}, RssShare}};
+    use crate::{aes::{aes128_inv_no_keyschedule, aes128_keyschedule, aes128_no_keyschedule, sbox_layer}, party::test::TestSetup, share::{gf8::GF8, test::{assert_eq, consistent, secret_share}, RssShare}};
 
-    use super::{square_layer, AesKeyState, ArithmeticBlackBox, ImplVariant, VectorAesState};
+    use super::{AesKeyState, ArithmeticBlackBox, GF8InvBlackBox, VectorAesState};
 
     const AES_SBOX: [u8; 256] = [0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76, 0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0, 0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15, 0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A, 0x07, 0x12, 0x80, 0xE2, 0xEB, 0x27, 0xB2, 0x75, 0x09, 0x83, 0x2C, 0x1A, 0x1B, 0x6E, 0x5A, 0xA0, 0x52, 0x3B, 0xD6, 0xB3, 0x29, 0xE3, 0x2F, 0x84, 0x53, 0xD1, 0x00, 0xED, 0x20, 0xFC, 0xB1, 0x5B, 0x6A, 0xCB, 0xBE, 0x39, 0x4A, 0x4C, 0x58, 0xCF, 0xD0, 0xEF, 0xAA, 0xFB, 0x43, 0x4D, 0x33, 0x85, 0x45, 0xF9, 0x02, 0x7F, 0x50, 0x3C, 0x9F, 0xA8, 0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10, 0xFF, 0xF3, 0xD2, 0xCD, 0x0C, 0x13, 0xEC, 0x5F, 0x97, 0x44, 0x17, 0xC4, 0xA7, 0x7E, 0x3D, 0x64, 0x5D, 0x19, 0x73, 0x60, 0x81, 0x4F, 0xDC, 0x22, 0x2A, 0x90, 0x88, 0x46, 0xEE, 0xB8, 0x14, 0xDE, 0x5E, 0x0B, 0xDB, 0xE0, 0x32, 0x3A, 0x0A, 0x49, 0x06, 0x24, 0x5C, 0xC2, 0xD3, 0xAC, 0x62, 0x91, 0x95, 0xE4, 0x79, 0xE7, 0xC8, 0x37, 0x6D, 0x8D, 0xD5, 0x4E, 0xA9, 0x6C, 0x56, 0xF4, 0xEA, 0x65, 0x7A, 0xAE, 0x08, 0xBA, 0x78, 0x25, 0x2E, 0x1C, 0xA6, 0xB4, 0xC6, 0xE8, 0xDD, 0x74, 0x1F, 0x4B, 0xBD, 0x8B, 0x8A, 0x70, 0x3E, 0xB5, 0x66, 0x48, 0x03, 0xF6, 0x0E, 0x61, 0x35, 0x57, 0xB9, 0x86, 0xC1, 0x1D, 0x9E, 0xE1, 0xF8, 0x98, 0x11, 0x69, 0xD9, 0x8E, 0x94, 0x9B, 0x1E, 0x87, 0xE9, 0xCE, 0x55, 0x28, 0xDF, 0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16];
 
@@ -473,15 +355,6 @@ pub mod test {
         (0..s1.si.len()).map(|i| {
             (RssShare::from(s1.si[i], s1.sii[i]), RssShare::from(s2.si[i], s2.sii[i]), RssShare::from(s3.si[i], s3.sii[i]))
         }).collect()
-    }
-
-    #[test]
-    fn square_gf8() {
-        let x = (0..256).map(|i| GF8(i as u8)).collect::<Vec<_>>();
-        let sq = square_layer(&x);
-        for (x,x2) in x.into_iter().zip(sq) {
-            assert_eq!(x*x, x2);
-        }
     }
     
     #[test]
@@ -511,7 +384,8 @@ pub mod test {
         }
     }
 
-    fn test_sub_bytes(variant: ImplVariant) {
+    pub fn test_sub_bytes<S: TestSetup<P>, P: GF8InvBlackBox>()
+    {
         // check all possible S-box inputs by using 16 AES states in parallel
         let mut rng = thread_rng();
         let inputs: Vec<_> = (0..256).map(|x| secret_share(&mut rng, &GF8(x as u8)))
@@ -536,12 +410,13 @@ pub mod test {
         };
 
         let program = |mut state: VectorAesState| {
-            move |p: &mut ChidaParty| {
-                sbox_layer(p, &mut state.si, &mut state.sii, variant).unwrap();
+            move |p: &mut P| {
+                p.do_preprocessing(0, 2).unwrap();
+                sbox_layer(p, &mut state.si, &mut state.sii).unwrap();
                 state
             }
         };
-        let (h1, h2, h3) = localhost_setup_chida(program(state1), program(state2), program(state3));
+        let (h1, h2, h3) = S::localhost_setup(program(state1), program(state2), program(state3));
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
@@ -559,16 +434,6 @@ pub mod test {
         for (i,(s1, s2, s3)) in shares.into_iter().enumerate() {
             assert_eq(s1, s2, s3, GF8(AES_SBOX[i]));
         }
-    }
-
-    #[test]
-    fn sub_bytes_simple() {
-        test_sub_bytes(ImplVariant::Simple);
-    }
-
-    #[test]
-    fn sub_bytes_optimized() {
-        test_sub_bytes(ImplVariant::Optimized);
     }
 
     pub fn secret_share_aes_key_state<R: Rng + CryptoRng>(rng: &mut R, state: &[GF8]) -> (AesKeyState, AesKeyState, AesKeyState) {
@@ -604,7 +469,7 @@ pub mod test {
         (state1, state2, state3)
     }
 
-    fn test_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: ArithmeticBlackBox<GF8>>(variant: ImplVariant)
+    pub fn test_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>()
     {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
@@ -637,9 +502,8 @@ pub mod test {
 
         let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
             move |p: &mut P| {
-                let n_mults = get_required_mult_for_aes128_no_keyschedule(variant, input.n);
-                p.pre_processing(n_mults).unwrap();
-                let output = aes128_no_keyschedule(p, input, &ks, variant).unwrap();
+                p.do_preprocessing(0, input.n).unwrap();
+                let output = aes128_no_keyschedule(p, input, &ks).unwrap();
                 p.finalize().unwrap();
                 p.io().wait_for_completion();
                 output
@@ -665,21 +529,6 @@ pub mod test {
         }
     }
 
-    #[test]
-    fn aes128_no_keyschedule_gf8_simple_chida() {
-        test_aes128_no_keyschedule_gf8::<ChidaSetup,_>(ImplVariant::Simple);
-    }
-
-    #[test]
-    fn aes128_no_keyschedule_gf8_optimized_chida() {
-        test_aes128_no_keyschedule_gf8::<ChidaSetup, _>(ImplVariant::Optimized);
-    }
-
-    #[test]
-    fn aes128_no_keyschedule_gf8_simple_furukawa() {
-        test_aes128_no_keyschedule_gf8::<FurukawaSetup,_>(ImplVariant::Simple);
-    }
-
     fn transpose<T>(v: impl IntoIterator<Item=(T,T,T)>) -> (Vec<T>, Vec<T>, Vec<T>) {
         let mut v1 = Vec::new();
         let mut v2 = Vec::new();
@@ -692,16 +541,15 @@ pub mod test {
         (v1, v2, v3)
     }
 
-    fn test_aes128_keyschedule_gf8<S: TestSetup<P>, P: ArithmeticBlackBox<GF8>>(variant: ImplVariant) {
+    pub fn test_aes128_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>() {
         let mut rng = thread_rng();
         let key = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
         let (key1, key2, key3) = transpose(key.into_iter().map(|x| secret_share(&mut rng, &GF8(x))));
 
         let program = |key: Vec<RssShare<GF8>>| {
             move |p: &mut P| {
-                let n_mults = get_required_mult_for_keyschedule(variant, 1);
-                p.pre_processing(n_mults).unwrap();
-                let ks = aes128_keyschedule(p, key, variant).unwrap();
+                p.do_preprocessing(1, 0).unwrap();
+                let ks = aes128_keyschedule(p, key).unwrap();
                 p.finalize().unwrap();
                 p.io().wait_for_completion();
                 ks
@@ -755,21 +603,6 @@ pub mod test {
     }
 
     #[test]
-    fn aes128_keyschedule_gf8_simple_chida() {
-        test_aes128_keyschedule_gf8::<ChidaSetup, _>(ImplVariant::Simple);
-    }
-
-    #[test]
-    fn aes128_keyschedule_gf8_optimized_chida() {
-        test_aes128_keyschedule_gf8::<ChidaSetup, _>(ImplVariant::Optimized);
-    }
-
-    #[test]
-    fn aes128_keyschedule_gf8_simple_furukawa() {
-        test_aes128_keyschedule_gf8::<FurukawaSetup, _>(ImplVariant::Simple);
-    }
-
-    #[test]
     fn inv_shift_rows() {
         let mut state = VectorAesState::new(1);
         // fill with sequence
@@ -781,7 +614,7 @@ pub mod test {
         assert_eq!(state.si, copy.si);
     }
 
-    fn test_inv_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: ArithmeticBlackBox<GF8>>(variant: ImplVariant) {
+    pub fn test_inv_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>() {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32]; //[0x32, 0x88, 0x31, 0xe0, 0x43, 0x5a, 0x31, 0x37, 0xf6, 0x30, 0x98, 0x07, 0xa8, 0x8d, 0xa2, 0x34];
         let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
@@ -813,9 +646,8 @@ pub mod test {
 
         let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
             move |p: &mut P| {
-                let n_mults = get_required_mult_for_aes128_no_keyschedule(variant, input.n);
-                p.pre_processing(n_mults).unwrap();
-                let output = aes128_inv_no_keyschedule(p, input, &ks, variant).unwrap();
+                p.do_preprocessing(0, input.n).unwrap();
+                let output = aes128_inv_no_keyschedule(p, input, &ks).unwrap();
                 p.finalize().unwrap();
                 p.io().wait_for_completion();
                 output
@@ -839,20 +671,5 @@ pub mod test {
         for (i,(s1, s2, s3)) in shares.into_iter().enumerate() {
             assert_eq(s1, s2, s3, GF8(expected[i]));
         }
-    }
-
-    #[test]
-    fn inv_aes128_no_keyschedule_gf8_simple_chida() {
-        test_inv_aes128_no_keyschedule_gf8::<ChidaSetup, _>(ImplVariant::Simple);
-    }
-
-    #[test]
-    fn inv_aes128_no_keyschedule_gf8_optimized_chida() {
-        test_inv_aes128_no_keyschedule_gf8::<ChidaSetup, _>(ImplVariant::Optimized);
-    }
-
-    #[test]
-    fn inv_aes128_no_keyschedule_gf8_simple_furukawa() {
-        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup, _>(ImplVariant::Simple);
     }
 }

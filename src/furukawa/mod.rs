@@ -14,7 +14,7 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, ArithmeticBlackBox, ImplVariant}, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
@@ -26,11 +26,10 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     let ks = aes::random_keyschedule(&mut party);
 
     let start = Instant::now();
-    // ImplVariant::Optimized does not work with Furukawa since the custom multiplication (gf8_inv_opt) is not checked in the post-sacrifice step
-    party.pre_processing(aes::get_required_mult_for_aes128_no_keyschedule(ImplVariant::Simple, simd)).unwrap();
+    party.do_preprocessing(0, simd).unwrap();
     let prep_duration = start.elapsed();
     let start = Instant::now();
-    let output = aes128_no_keyschedule(&mut party, inputs, &ks, ImplVariant::Simple).unwrap();
+    let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
     let online_duration = start.elapsed();
     party.finalize().unwrap();
     let post_sacrifice_duration = start.elapsed();
@@ -282,13 +281,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
-        if self.inner.i == 0 {
-            RssShare::from(value, F::zero())
-        }else if self.inner.i == 2 {
-            RssShare::from(F::zero(), value)
-        }else{
-            RssShare::from(F::zero(), F::zero())
-        }
+        self.inner.constant(value)
     }
 
     fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
@@ -342,6 +335,20 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     }
 }
 
+impl GF8InvBlackBox for FurukawaParty<GF8> {
+    fn constant(&self, value: GF8) -> RssShare<GF8> {
+        <Self as ArithmeticBlackBox<GF8>>::constant(&self, value)
+    }
+    fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+        chida::online::gf8_inv_layer(self, si, sii)
+    }
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
+        let n_muls_ks = 4*10*4 * n_keys; // 4 S-boxes per round, 10 rounds, 4 multiplications per S-box
+        let n_muls_blocks = 16*10*4 * n_blocks; // 16 S-boxes per round, 10 rounds, 4 multiplications per S-box
+        self.prepare_multiplications(n_muls_ks + n_muls_blocks)
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use std::thread::JoinHandle;
@@ -349,8 +356,9 @@ pub mod test {
     use rand::thread_rng;
     use rand_chacha::ChaCha20Rng;
     use sha2::Sha256;
-    use crate::aes::ArithmeticBlackBox;
+    use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8};
     use crate::party::test::TestSetup;
+    use crate::party::ArithmeticBlackBox;
     use crate::share::test::{assert_eq, consistent};
 
     use crate::{network::ConnectedParty, party::test::localhost_connect, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
@@ -414,5 +422,20 @@ pub mod test {
         check(x1, x11, x12, x13);
         check(x2, x21, x22, x23);
         check(x3, x31, x32, x33);
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8() {
+        test_aes128_no_keyschedule_gf8::<FurukawaSetup,_>();
+    }
+
+    #[test]
+    fn aes128_keyschedule_gf8() {
+        test_aes128_keyschedule_gf8::<FurukawaSetup,_>();
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8() {
+        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup,_>();
     }
 }

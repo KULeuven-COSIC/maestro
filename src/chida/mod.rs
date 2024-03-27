@@ -12,14 +12,19 @@
 
 use std::time::Instant;
 
-use crate::aes::{self, ImplVariant};
+use crate::aes::{self};
 
 use crate::network::ConnectedParty;
 use crate::party::error::MpcResult;
 use crate::party::Party;
 
 pub mod online;
-///
+
+#[derive(Clone, Copy, Debug)]
+pub enum ImplVariant {
+    Simple,     // uses the gf8 inversion as in Figure 6
+    Optimized   // uses gf8 inversion as in Algorithm 5
+}
 
 // Party for Chida et al. semi-honest protocol
 pub struct ChidaParty(Party);
@@ -28,23 +33,41 @@ impl ChidaParty {
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
         Party::setup(connected).map(|party| Self(party))
     }
+
+    pub fn teardown(&mut self) -> MpcResult<()> {
+        self.0.teardown()
+    }
+}
+/// [ChidaParty] paired with an [ImplVariant]
+pub struct ChidaBenchmarkParty {
+    inner: ChidaParty,
+    variant: ImplVariant,
+}
+
+impl ChidaBenchmarkParty {
+    pub fn setup(connected: ConnectedParty, variant: ImplVariant) -> MpcResult<Self> {
+        ChidaParty::setup(connected).map(|party| Self{
+            inner: party,
+            variant
+        })
+    }
 }
 
 // simd: how many parallel AES calls
 pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVariant) {
-    let mut party = ChidaParty::setup(connected).unwrap();
-    let input = aes::random_state(&mut party, simd);
+    let mut party = ChidaBenchmarkParty::setup(connected, variant).unwrap();
+    let input = aes::random_state(&mut party.inner, simd);
     // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(&mut party);
+    let ks = aes::random_keyschedule(&mut party.inner);
 
     let start = Instant::now();
-    let output = aes::aes128_no_keyschedule(&mut party, input, &ks, variant).unwrap();
+    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
     let duration = start.elapsed();
-    let _ = aes::output(&mut party, output).unwrap();
-    party.0.teardown().unwrap();
+    let _ = aes::output(&mut party.inner, output).unwrap();
+    party.inner.0.teardown().unwrap();
     
     println!("Finished benchmark");
     
-    println!("Party {}: Chida et al. with SIMD={} took {}s", party.0.i, simd, duration.as_secs_f64());
-    party.0.print_comm_statistics();
+    println!("Party {}: Chida et al. with SIMD={} took {}s", party.inner.0.i, simd, duration.as_secs_f64());
+    party.inner.0.print_comm_statistics();
 }
