@@ -34,6 +34,14 @@ impl ChidaParty {
         Party::setup(connected).map(|party| Self(party))
     }
 
+    pub fn party_index(&self) -> usize {
+        self.0.i
+    }
+
+    pub fn print_comm_statistics(&self) {
+        self.0.print_comm_statistics()
+    }
+
     pub fn teardown(&mut self) -> MpcResult<()> {
         self.0.teardown()
     }

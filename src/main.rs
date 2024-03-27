@@ -38,7 +38,17 @@ enum Commands {
     MalChidaBenchmark {
         #[arg(long, help="The number of parallel AES calls to benchmark.")]
         simd: usize,
-    }
+    },
+    /// Benchmarks the LUT-16 variant with semi-honest security
+    LUT16Benchmark {
+        #[arg(long, help="The number of parallel AES calls to benchmark.")]
+        simd: usize,
+    },
+    /// Benchmarks the GF(2^4) circuit variant with semi-honest security
+    GF4CircuitBenchmark {
+        #[arg(long, help="The number of parallel AES calls to benchmark.")]
+        simd: usize,
+    },
 }
 
 fn main() {
@@ -58,6 +68,16 @@ fn main() {
             let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
             println!("Connected!");
             furukawa::furukawa_benchmark(connected, simd);
+        },
+        Commands::LUT16Benchmark { simd } => {
+            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
+            println!("Connected!");
+            wollut16::wollut16_benchmark(connected, simd);
+        },
+        Commands::GF4CircuitBenchmark { simd } => {
+            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
+            println!("Connected!");
+            gf4_circuit::gf4_circuit_benchmark(connected, simd);
         }
     }
 }

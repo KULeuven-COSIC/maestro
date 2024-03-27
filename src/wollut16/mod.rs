@@ -3,7 +3,9 @@
 //!
 
 
-use crate::{chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::GF4, Field}};
+use std::time::Instant;
+
+use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::GF4, Field}};
 
 mod online;
 mod offline;
@@ -55,7 +57,27 @@ impl WL16Party {
     }
 }
 
-pub fn wollut16_benchmark() {}
+pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize) {
+    let mut party = WL16Party::setup(connected).unwrap();
+    let start_prep = Instant::now();
+    party.do_preprocessing(0, simd).unwrap();
+    let prep_duration = start_prep.elapsed();
+
+    let input = aes::random_state(&mut party.inner, simd);
+    // create random key states for benchmarking purposes
+    let ks = aes::random_keyschedule(&mut party.inner);
+
+    let start = Instant::now();
+    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+    let duration = start.elapsed();
+    let _ = aes::output(&mut party.inner, output).unwrap();
+    party.inner.teardown().unwrap();
+    
+    println!("Finished benchmark");
+    
+    println!("Party {}: LUT-16 with SIMD={} took {}s (pre-processing) and {}s (online phase)", party.inner.party_index(), simd, prep_duration.as_secs_f64(), duration.as_secs_f64());
+    party.inner.print_comm_statistics();
+}
 
 impl RndOhv16 {
     pub fn lut(&self, offset: usize, table: &[u8; 16]) -> GF4 {

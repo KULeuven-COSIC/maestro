@@ -1,8 +1,10 @@
+use std::time::Instant;
+
 use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::GF8InvBlackBox, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::GF4, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::GF4, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 
 pub struct GF4CircuitSemihonestParty(ChidaParty);
@@ -11,6 +13,25 @@ impl GF4CircuitSemihonestParty {
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
         ChidaParty::setup(connected).map(|chida_party| Self(chida_party))
     }
+}
+
+pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
+    let mut party = GF4CircuitSemihonestParty::setup(connected).unwrap();
+
+    let input = aes::random_state(&mut party.0, simd);
+    // create random key states for benchmarking purposes
+    let ks = aes::random_keyschedule(&mut party.0);
+
+    let start = Instant::now();
+    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+    let duration = start.elapsed();
+    let _ = aes::output(&mut party.0, output).unwrap();
+    party.0.teardown().unwrap();
+    
+    println!("Finished benchmark");
+    
+    println!("Party {}: GF(2^4) circuit with SIMD={} took {}s", party.0.party_index(), simd, duration.as_secs_f64());
+    party.0.print_comm_statistics();
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty
