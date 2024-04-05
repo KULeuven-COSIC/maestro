@@ -1,14 +1,14 @@
 use std::time::{Duration, Instant};
 
-use bitvec::vec::BitVec;
 
-use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf8::GF8, Field}};
+use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf8::GF8};
 mod online;
 mod offline;
 
 
-/// a random one-hot vector of variable size
-pub struct RndOhv(BitVec);
+/// a random one-hot vector of size 256
+#[derive(Clone, Copy)]
+pub struct RndOhv([u8; 256]);
 
 // Party for LUT-256
 pub struct LUT256Party {
@@ -48,14 +48,21 @@ impl LUT256Party {
 
 impl RndOhv {
 
+    pub fn new() -> Self {
+        Self([0u8; 256])
+    }
+
+    #[inline]
+    pub fn set(&mut self, i: usize, v: bool) {
+        self.0[i] = if v { 0xff } else { 0x00 };
+    }
+
     pub fn lut(&self, offset: usize, table: &[u8]) -> GF8 {
-        let mut res = GF8::zero();
+        let mut res = 0u8;
         for i in 0..table.len() {
-            if self.0[i] {
-                res += GF8(table[i ^ offset]);
-            }
+            res ^= self.0[i] & table[i ^ offset];
         }
-        res
+        GF8(res)
     }
 }
 

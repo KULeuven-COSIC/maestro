@@ -1,6 +1,5 @@
 use std::iter;
 
-use bitvec::vec::BitVec;
 use itertools::{izip, repeat_n, Itertools};
 
 use crate::{lut256::RndOhv, party::{error::MpcResult, ArithmeticBlackBox}, share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}};
@@ -25,8 +24,8 @@ fn generate_ohv256_output<P: ArithmeticBlackBox<BsBool16>>(party: &mut P, bits: 
         RndOhv256Output {
             random_si: rand_rss.si,
             random_sii: rand_rss.sii,
-            si: RndOhv(ohv_si),
-            sii: RndOhv(ohv_sii)
+            si: ohv_si,
+            sii: ohv_sii,
         }
     }).collect())
 }
@@ -78,12 +77,12 @@ fn simple_mul<P: ArithmeticBlackBox<BsBool16>>(party: &mut P, msb: &Vec<RssShare
     Ok(res)
 }
 
-fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(BitVec,BitVec)> {
-    let mut empty_bitvec = BitVec::with_capacity(bs.len());
-    for _ in 0..bs.len() {
-        empty_bitvec.push(false);
-    }
-    let mut res = vec![(empty_bitvec.clone(),empty_bitvec); 16*bs[0].len()];
+fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv,RndOhv)> {
+    // let mut empty_bitvec = BitVec::with_capacity(bs.len());
+    // for _ in 0..bs.len() {
+    //     empty_bitvec.push(false);
+    // }
+    let mut res = vec![(RndOhv::new(),RndOhv::new()); 16*bs[0].len()];
     for i in 0..bs.len() {
         let bit = &bs[i];
         for j in 0..bit.len() {
@@ -122,7 +121,7 @@ mod test {
     use itertools::{izip, repeat_n, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
 
-    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, lut256::offline::{generate_ohv256_output, generate_rndohv256}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf8::GF8, test::{assert_eq, consistent, secret_share_vector}, Field, FieldRngExt, RssShare}};
+    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, lut256::{offline::{generate_ohv256_output, generate_rndohv256}, RndOhv}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf8::GF8, test::{assert_eq, consistent, secret_share_vector}, Field, FieldRngExt, RssShare}};
 
     use super::{generate_ohv, un_bitslice8};
 
@@ -473,6 +472,13 @@ mod test {
         });
     }
 
+    fn reconstruct_rndohv(mut ohv1: RndOhv, ohv2: RndOhv, ohv3: RndOhv) -> [u8; 256] {
+        for i in 0..256 {
+            ohv1.0[i] ^= ohv2.0[i] ^ ohv3.0[i];
+        }
+        ohv1.0
+    }
+
     #[test]
     fn generate_ohv_output256() {
         let input = generate_ohv_input(8, 256);
@@ -500,12 +506,12 @@ mod test {
             // random GF8 reconstructs to expected
             assert_eq!(s1.random_si + s2.random_si + s3.random_si, GF8(expected as u8));
             // reconstructed bitvec has correct bit set
-            let reconstructed = s1.si.0 ^ s2.si.0 ^ s3.si.0;
+            let reconstructed = reconstruct_rndohv(s1.si, s2.si, s3.si);
             for i in 0..256 {
                 if i == expected {
-                    assert_eq!(reconstructed[i], true);
+                    assert_eq!(reconstructed[i], 0xff);
                 }else{
-                    assert_eq!(reconstructed[i], false);
+                    assert_eq!(reconstructed[i], 0x00);
                 }
             }
         });
@@ -535,12 +541,12 @@ mod test {
             // reconstruct random GF8
             let index = s1.random_si + s2.random_si + s3.random_si;
             // reconstructed bitvec has correct bit set
-            let reconstructed = s1.si.0 ^ s2.si.0 ^ s3.si.0;
+            let reconstructed = reconstruct_rndohv(s1.si, s2.si, s3.si);
             for i in 0..=255 {
                 if i == index.0 {
-                    assert_eq!(reconstructed[i as usize], true);
+                    assert_eq!(reconstructed[i as usize], 0xff);
                 }else{
-                    assert_eq!(reconstructed[i as usize], false);
+                    assert_eq!(reconstructed[i as usize], 0x00);
                 }
             }
         });
