@@ -40,7 +40,6 @@ fn generate_ohv<P: ArithmeticBlackBox<BsBool16>>(party: &mut P, mut bits: Vec<Ve
     }else{
         let msb = bits.remove(bits.len()-1);
         let f = generate_ohv(party, bits, n/2)?;
-        // open_and_print(party, &f);
         // Mult
         let e_rest = simple_mul(party, &msb, &f[..=f.len()-2])?;
         let mut sum_e = Vec::with_capacity(msb.len());
@@ -78,23 +77,29 @@ fn simple_mul<P: ArithmeticBlackBox<BsBool16>>(party: &mut P, msb: &Vec<RssShare
 }
 
 fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv,RndOhv)> {
-    // let mut empty_bitvec = BitVec::with_capacity(bs.len());
-    // for _ in 0..bs.len() {
-    //     empty_bitvec.push(false);
-    // }
-    let mut res = vec![(RndOhv::new(),RndOhv::new()); 16*bs[0].len()];
-    for i in 0..bs.len() {
-        let bit = &bs[i];
-        for j in 0..bit.len() {
-            let si = bit[j].si.as_u16();
-            let sii = bit[j].sii.as_u16();
-            for k in 0..16 {
-                res[16*j+k].0.set(i, ((si >> k) & 0x1) == 0x1);
-                res[16*j+k].1.set(i, ((sii >> k) & 0x1) == 0x1);
+    debug_assert_eq!(bs.len(), 256);
+    let mut rnd_ohv_res = vec![([0u8; 256],[0u8; 256]); 16*bs[0].len()];
+    for k in 0..16 {
+        let mut res = vec![(0u16,0u16); 16*bs[0].len()];
+        for i in 0..16 {
+            let bit = &bs[16*k+i];
+            for j in 0..bit.len() {
+                let si = bit[j].si.as_u16();
+                let sii = bit[j].sii.as_u16();
+                for k in 0..16 {
+                    res[16*j+k].0 |= ((si >> k) & 0x1) << i;
+                    res[16*j+k].1 |= ((sii >> k) & 0x1) << i;
+                }
             }
         }
+        rnd_ohv_res.iter_mut().zip(res.into_iter()).for_each(|(dst, (ohv_i, ohv_ii))| {
+            for i in 0..16 {
+                dst.0[16*k+i] = 0xff * ((ohv_i >> i) & 0x1) as u8;
+                dst.1[16*k+i] = 0xff * ((ohv_ii >> i) & 0x1) as u8;
+            }
+        })
     }
-    res
+    rnd_ohv_res.into_iter().map(|(ohv_si, ohv_sii)| (RndOhv::new(ohv_si), RndOhv::new(ohv_sii))).collect()
 }
 
 fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {

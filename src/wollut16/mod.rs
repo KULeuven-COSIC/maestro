@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::GF4, Field}};
+use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf4::GF4};
 
 mod online;
 mod offline;
@@ -17,8 +17,8 @@ pub struct WL16Party {
 }
 
 // a random one-hot vector of size 16
-#[derive(PartialEq,Debug)]
-pub struct RndOhv16(u16);
+#[derive(PartialEq,Debug,Clone, Copy)]
+pub struct RndOhv16([u8; 16]);
 
 /// Output of the random one-hot vector pre-processing.
 /// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (3,3)-sharing of the corresponding `GF4` element that indicates
@@ -80,14 +80,17 @@ pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize) {
 }
 
 impl RndOhv16 {
+
+    pub fn new(table: [u8; 16]) -> Self {
+        Self(table)
+    }
+
     pub fn lut(&self, offset: usize, table: &[u8; 16]) -> GF4 {
-        let mut res = GF4::zero();
+        let mut res = 0u8;
         for i in 0..16_usize {
-            if ((self.0 >> i) & 0x1) == 0x1 {
-                res += GF4::new_unchecked(table[i ^ offset]);
-            }
+            res ^= self.0[i] & table[i ^ offset];
         }
-        res
+        GF4::new_unchecked(res)
     }
 }
 

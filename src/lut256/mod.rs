@@ -48,13 +48,8 @@ impl LUT256Party {
 
 impl RndOhv {
 
-    pub fn new() -> Self {
-        Self([0u8; 256])
-    }
-
-    #[inline]
-    pub fn set(&mut self, i: usize, v: bool) {
-        self.0[i] = if v { 0xff } else { 0x00 };
+    pub fn new(table: [u8; 256]) -> Self {
+        Self(table)
     }
 
     pub fn lut(&self, offset: usize, table: &[u8]) -> GF8 {

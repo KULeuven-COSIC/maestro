@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use itertools::izip;
 
 use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}};
@@ -181,15 +183,16 @@ fn generate_ohv16<P: ArithmeticBlackBox<BsBool16> + ArithmeticBlackBox<GF4>>(par
 
     Ok(izip!(ohv_transposed.into_iter().take(n), rand_transposed.into_iter().take(n), party.generate_alpha(n)).map(|((ohv_si, ohv_sii), rand, alpha)| {
         RndOhvOutput {
-            si: RndOhv16(ohv_si),
-            sii: RndOhv16(ohv_sii),
+            si: ohv_si,
+            sii: ohv_sii,
             random: rand.si + alpha,
         }
     }).collect())
 
 }
 
-fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(u16,u16)> {
+fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16,RndOhv16)> {
+    let now = Instant::now();
     let mut res = vec![(0u16,0u16); 16*bs[0].len()];
     for i in 0..16 {
         let bit = &bs[i];
@@ -202,6 +205,16 @@ fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(u16,u16)> {
             }
         }
     }
+    let res = res.into_iter().map(|(ohv_i, ohv_ii)| {
+        let mut si = [0u8; 16];
+        let mut sii = [0u8; 16];
+        for i in 0..16 {
+            si[i] = 0xff * ((ohv_i >> i) & 0x1) as u8;
+            sii[i] = 0xff * ((ohv_ii >> i) & 0x1) as u8;
+        }
+        (RndOhv16::new(si), RndOhv16::new(sii))
+    }).collect();
+    println!("un_bitslice: {}s", now.elapsed().as_secs_f64());
     res
 }
 
@@ -227,7 +240,7 @@ mod test {
     use itertools::izip;
     use rand::thread_rng;
 
-    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::offline::generate_random_ohv16};
+    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::{offline::generate_random_ohv16, RndOhv16}};
 
     use super::{generate_ohv16, un_bitslice4};
 
@@ -259,6 +272,13 @@ mod test {
             }
             
         }
+    }
+
+    fn reconstruct_ohv16(mut ohv1: RndOhv16, ohv2: RndOhv16, ohv3: RndOhv16) -> [u8; 16] {
+        for i in 0..16 {
+            ohv1.0[i] ^= ohv2.0[i] ^ ohv3.0[i];
+        }
+        ohv1.0
     }
 
     #[test]
@@ -298,10 +318,16 @@ mod test {
             assert_eq!(o2.sii, o3.si);
             assert_eq!(o3.sii, o1.si);
             // check correct
-            let ohv = o1.si.0 ^ o2.si.0 ^ o3.si.0;
+            let ohv = reconstruct_ohv16(o1.si, o2.si, o3.si);
             let index = rand.as_u8() as usize;
             assert!(index < 16);
-            assert_eq!(ohv, 0x1 << index);
+            for i in 0..16 {
+                if i == index {
+                    assert_eq!(ohv[i], 0xff);
+                }else{
+                    assert_eq!(ohv[i], 0x00);
+                }
+            }
         }
     }
 
@@ -328,10 +354,16 @@ mod test {
             assert_eq!(o2.sii, o3.si);
             assert_eq!(o3.sii, o1.si);
             // check correct
-            let ohv = o1.si.0 ^ o2.si.0 ^ o3.si.0;
+            let ohv = reconstruct_ohv16(o1.si, o2.si, o3.si);
             let index = rand.as_u8() as usize;
             assert!(index < 16);
-            assert_eq!(ohv, 0x1 << index);
+            for i in 0..16 {
+                if i == index {
+                    assert_eq!(ohv[i], 0xff);
+                }else{
+                    assert_eq!(ohv[i], 0x00);
+                }
+            }
         }
     }
 }
