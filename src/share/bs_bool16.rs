@@ -9,7 +9,7 @@ use super::{Field, FieldDigestExt, FieldRngExt};
 /// a bit-sliced vector of 16 booleans
 /// or mathematically, this is an element in F_2^16
 /// this means, addition, multiplicaiton is done **element-wise**
-#[derive(Clone,Copy,Default,PartialEq)]
+#[derive(Clone,Copy,Default,PartialEq, Debug)]
 pub struct BsBool16(u16);
 
 impl BsBool16 {

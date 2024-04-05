@@ -5,6 +5,7 @@ pub mod wol;
 pub mod bs_bool16;
 
 use std::borrow::Borrow;
+use std::fmt::Debug;
 use std::io;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
@@ -29,7 +30,7 @@ pub trait FieldVectorCommChannel<F: Field> {
     fn read_vector(&mut self, buffer: &mut [F]) -> io::Result<()>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RssShare<F: Field> {
     pub si: F,
     pub sii: F
@@ -103,9 +104,9 @@ pub mod test {
     use crate::share::gf8::GF8;
 
     pub fn consistent<F: Field + PartialEq + Debug>(share1: &RssShare<F>, share2: &RssShare<F>, share3: &RssShare<F>) {
-        assert_eq!(share1.sii, share2.si);
-        assert_eq!(share2.sii, share3.si);
-        assert_eq!(share3.sii, share1.si);
+        assert_eq!(share1.sii, share2.si, "share1 and share2 are inconsistent: share1={:?}, share2={:?}, share3={:?}", share1, share2, share3);
+        assert_eq!(share2.sii, share3.si, "share2 and share3 are inconsistent: share1={:?}, share2={:?}, share3={:?}", share1, share2, share3);
+        assert_eq!(share3.sii, share1.si, "share1 and share3 are inconsistent: share1={:?}, share2={:?}, share3={:?}", share1, share2, share3);
     }
 
     pub fn assert_eq<F: Field + PartialEq + Debug>(share1: RssShare<F>, share2: RssShare<F>, share3: RssShare<F>, value: F) {

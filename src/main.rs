@@ -8,6 +8,7 @@ mod furukawa;
 mod aes;
 mod wollut16;
 mod gf4_circuit;
+mod lut256;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -49,6 +50,11 @@ enum Commands {
         #[arg(long, help="The number of parallel AES calls to benchmark.")]
         simd: usize,
     },
+    /// Benchmarks the LUT-256 variant with semi-honest security
+    LUT256Benchmark {
+        #[arg(long, help="The number of parallel AES calls to benchmark.")]
+        simd: usize,
+    }
 }
 
 fn main() {
@@ -78,6 +84,11 @@ fn main() {
             let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
             println!("Connected!");
             gf4_circuit::gf4_circuit_benchmark(connected, simd);
+        },
+        Commands::LUT256Benchmark { simd } => {
+            let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
+            println!("Connected!");
+            lut256::lut256_benchmark(connected, simd);
         }
     }
 }
