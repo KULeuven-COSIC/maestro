@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, fmt::{Debug, Formatter}, ops::{Add, AddAssign, Mul, Neg, Sub}};
 
+use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
 
@@ -57,10 +58,12 @@ impl GF4 {
     }
 
     /// Pack to elements of GF4 into a single byte
+    #[inline]
     pub fn pack(ah:GF4,al:GF4) -> u8 {
         (ah.0 << 4) + al.0
     }
 
+    #[inline]
     pub fn unpack(b:u8) -> (GF4,GF4) {
         //here we abuse the fact that new ignores the high bits.
         (GF4::new(b>>4),GF4::new(b))
@@ -68,8 +71,12 @@ impl GF4 {
 } 
 
 impl Field for GF4 {
-    fn size() -> usize {
-        1
+    fn serialized_size(n_elements: usize) -> usize {
+        if n_elements % 2 == 0 {
+            n_elements / 2
+        }else {
+            n_elements / 2 +1
+        }
     }
 
     fn zero() -> Self {
@@ -80,16 +87,51 @@ impl Field for GF4 {
         self.0 == 0
     }
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8> {
-        it.into_iter().map(|gf| gf.borrow().0).collect()
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, _len: usize) -> Vec<u8> {
+        it.into_iter().chunks(2).into_iter().map(|mut gfs| {
+            let el1 = gfs.next().unwrap(); // this cannot be empty
+            let el2 = match gfs.next() {
+                Some(el2) => *el2.borrow(),
+                None => Self::zero(),
+            };
+            Self::pack(*el1.borrow(), el2)
+        }).collect()
     }
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
-        v.into_iter().map(|byte| GF4::new(byte)).collect()
+    fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self> {
+        let mut res = Vec::with_capacity(len);
+        let full = len/2;
+        let mut i = 0;
+        while i < full {
+            let (el1, el2) = Self::unpack(v[i]);
+            res.push(el1);
+            res.push(el2);
+            i+=1;
+        }
+        if full != v.len() {
+            // there is one more GF4
+            let (el1, _) = Self::unpack(v[v.len()-1]);
+            res.push(el1);
+        }
+        res
     }
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
-        v.into_iter().zip(dest).for_each(|(byte, dst)| *dst = GF4::new(byte))
+        let full = dest.len()/2;
+        let mut i = 0;
+        let mut j = 0;
+        while i < full {
+            let (el1, el2) = Self::unpack(v[i]);
+            dest[j] = el1;
+            dest[j+1] = el2;
+            i+=1;
+            j+=2;
+        }
+        if full != v.len() {
+            // there is one more GF4
+            let (el1, _) = Self::unpack(v[v.len()-1]);
+            dest[j] = el1;
+        }
     }
 }
 
@@ -164,6 +206,10 @@ impl<D: Digest> FieldDigestExt<GF4> for D {
 
 #[cfg(test)]
 mod test {
+    use rand::thread_rng;
+
+    use crate::share::{Field, FieldRngExt};
+
     use super::GF4;
 
 
@@ -189,5 +235,23 @@ mod test {
         }
     }
 
+    #[test]
+    fn serialization() {
+        let mut rng = thread_rng();
+        let list_even: Vec<GF4> = rng.generate(500);
+        let list_odd: Vec<GF4> = rng.generate(45);
+
+        assert_eq!(list_even, GF4::from_byte_vec(GF4::as_byte_vec(&list_even, list_even.len()), list_even.len()));
+        assert_eq!(list_odd, GF4::from_byte_vec(GF4::as_byte_vec(&list_odd, list_odd.len()), list_odd.len()));
+
+        let mut slice_even = [GF4::zero(); 500];
+        let mut slice_odd = [GF4::zero(); 45];
+
+        GF4::from_byte_slice(GF4::as_byte_vec(&list_even, list_even.len()), &mut slice_even);
+        assert_eq!(&list_even, &slice_even);
+
+        GF4::from_byte_slice(GF4::as_byte_vec(&list_odd, list_odd.len()), &mut slice_odd);
+        assert_eq!(&list_odd, &slice_odd);
+    }
 
 }

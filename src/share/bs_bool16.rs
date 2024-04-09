@@ -28,8 +28,8 @@ impl BsBool16 {
 }
 
 impl Field for BsBool16 {
-    fn size() -> usize {
-        2
+    fn serialized_size(n_elements: usize) -> usize {
+        2*n_elements
     }
 
     fn zero() -> Self {
@@ -40,11 +40,11 @@ impl Field for BsBool16 {
         self.0 == 0
     }
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8> {
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         it.into_iter().flat_map(|el| [el.borrow().0 as u8, (el.borrow().0 >> 8) as u8]).collect()
     }
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+    fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         debug_assert!(v.len() % 2 == 0);
         v.into_iter().chunks(2).into_iter().map(|mut chunk| {
             let low = chunk.next().unwrap() as u16;

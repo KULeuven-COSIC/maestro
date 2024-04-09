@@ -72,6 +72,7 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     let start = Instant::now();
     let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
     let duration = start.elapsed();
+    let online_comm_stats = party.inner.0.io().reset_comm_stats();
     let _ = aes::output(&mut party.inner, output).unwrap();
     party.inner.0.teardown().unwrap();
     
@@ -84,5 +85,5 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     println!("Pre-Processing:");
     CombinedCommStats::empty().print_comm_statistics(party.inner.party_index());
     println!("Online Phase:");
-    party.inner.0.print_comm_statistics();
+    online_comm_stats.print_comm_statistics(party.inner.party_index());
 }

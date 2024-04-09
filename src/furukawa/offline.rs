@@ -54,7 +54,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
     // receive cii from P+1
     let rcv_cii = party.io().receive_field(Direction::Next, M);
     // send ci to P-1
-    party.io().send_field::<F>(Direction::Previous, &ci);
+    party.io().send_field::<F>(Direction::Previous, &ci, M);
     let mut cii = rcv_cii.rcv()?;
     party.io().wait_for_completion();
     let mul_triples_time = mul_triples_time.elapsed();
@@ -141,7 +141,7 @@ fn open_and_check<F: Field + PartialEq + Copy>(party: &mut Party, a: &[RssShare<
     let aii_bii_cii = a.iter().map(|rss| &rss.sii)
         .chain(b.iter().map(|rss| &rss.sii))
         .chain(cii);
-    party.io().send_field::<F>(Direction::Previous, aii_bii_cii);
+    party.io().send_field::<F>(Direction::Previous, aii_bii_cii, a.len()+b.len()+cii.len());
 
     let aiii_biii_ciii = rcv.rcv()?;
     // check that all are correct
@@ -215,7 +215,7 @@ where Sha256: FieldDigestExt<F>
     };
     
     
-    party.io().send_field::<F>(Direction::Previous, rho_ii.as_ref().iter().chain(sigma_ii.as_ref().iter()));
+    party.io().send_field::<F>(Direction::Previous, rho_ii.as_ref().iter().chain(sigma_ii.as_ref().iter()), rho_ii.len()+sigma_ii.len());
     
     // x + a
     let rho_i = {

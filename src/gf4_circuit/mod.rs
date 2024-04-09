@@ -30,6 +30,7 @@ pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
     let start = Instant::now();
     let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
     let duration = start.elapsed();
+    let online_comm_stats = party.io().reset_comm_stats();
     let _ = aes::output(&mut party.0, output).unwrap();
     party.0.teardown().unwrap();
     
@@ -41,7 +42,7 @@ pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Pre-Processing:");
     CombinedCommStats::empty().print_comm_statistics(party.0.party_index());
     println!("Online Phase:");
-    party.0.print_comm_statistics();
+    online_comm_stats.print_comm_statistics(party.0.party_index());
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty

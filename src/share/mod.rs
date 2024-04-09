@@ -10,17 +10,17 @@ use std::io;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone + Copy + PartialEq + AddAssign { // + AsRef<[u8]>
-    /// Returns the field size in byte
-    fn size() -> usize;
+    /// Returns the size in byte of a serialization of n_elements many field elements
+    fn serialized_size(n_elements: usize) -> usize;
     /// Returns zero value
     fn zero() -> Self;
 
     // Returns if the value is zero
     fn is_zero(&self) -> bool;
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8>;
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, len: usize) -> Vec<u8>;
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self>;
+    fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
 }

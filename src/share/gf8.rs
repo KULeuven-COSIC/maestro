@@ -41,7 +41,9 @@ impl GF8 {
 }
 
 impl Field for GF8 {
-    fn size() -> usize { 1 }
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements
+    }
 
     fn zero() -> Self {
         Self(0u8)
@@ -51,11 +53,11 @@ impl Field for GF8 {
         self.0 == 0
     }
 
-    fn as_byte_vec(it: impl IntoIterator<Item=impl Borrow<Self>>) -> Vec<u8> {
+    fn as_byte_vec(it: impl IntoIterator<Item=impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         it.into_iter().map(|gf| gf.borrow().0).collect()
     }
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+    fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         v.into_iter().map(|byte| GF8(byte)).collect()
     }
 

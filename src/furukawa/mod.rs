@@ -146,7 +146,7 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
                 alpha_j + *ai_j * *bi_j + *ai_j * *bii_j + *aii_j * *bi_j
             })
             .collect();
-        self.inner.io().send_field::<F>(Direction::Previous, ci.iter());
+        self.inner.io().send_field::<F>(Direction::Previous, ci.iter(), ci.len());
         let rcv_cii = self.inner.io().receive_field(Direction::Next, ci.len());
         // note down the observed multiplication triple
         // first the ones we already have

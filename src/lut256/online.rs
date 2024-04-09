@@ -34,7 +34,7 @@ impl GF8InvBlackBox for LUT256Party {
         let rnd_ohv = &self.prep_ohv[self.prep_ohv.len()-si.len()..];
         let rcv_ciii = self.io().receive_field(Direction::Previous, si.len());
         let mut c: Vec<_> = si.iter().zip(rnd_ohv).map(|(v,r)| *v + r.random_si).collect();
-        self.io().send_field::<GF8>(Direction::Next, &c);
+        self.io().send_field::<GF8>(Direction::Next, &c, si.len());
         izip!(c.iter_mut(), sii.iter(), rnd_ohv).for_each(|(c, sii, r)| *c += *sii + r.random_sii);
         
         let ciii = rcv_ciii.rcv()?;

@@ -7,12 +7,13 @@ use crate::network::task::IO_TIMER;
 #[must_use]
 pub struct FieldVectorReceiver<F: Field>{
     inner: oneshot::Receiver<Vec<u8>>,
+    expected_len: usize,
     phantom: PhantomData<F>,
 }
 
 impl<F: Field> FieldVectorReceiver<F> {
-    pub fn new(inner: oneshot::Receiver<Vec<u8>>) -> Self {
-        Self {inner, phantom: PhantomData}
+    pub fn new(inner: oneshot::Receiver<Vec<u8>>, expected_len: usize) -> Self {
+        Self {inner, expected_len, phantom: PhantomData}
     }
 
     pub fn rcv(self) -> Result<Vec<F>, oneshot::RecvError> {
@@ -25,13 +26,13 @@ impl<F: Field> FieldVectorReceiver<F> {
                     let io_end = start.elapsed();
                     IO_TIMER.lock().unwrap().report_time("io", io_end);
                     let serialization_start = Instant::now();
-                    let res = F::from_byte_vec(bytes);
+                    let res = F::from_byte_vec(bytes, self.expected_len);
                     let ser_end = serialization_start.elapsed();
                     IO_TIMER.lock().unwrap().report_time("ser", ser_end);
                     Ok(res)
                 }
                 #[cfg(not(feature = "verbose-timing"))]
-                Ok(F::from_byte_vec(bytes))
+                Ok(F::from_byte_vec(bytes, self.expected_len))
             },
             Err(err) => Err(err)
         }

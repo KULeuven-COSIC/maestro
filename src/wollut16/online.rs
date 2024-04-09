@@ -65,8 +65,8 @@ pub fn LUT_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>,Vec<GF
     let rcv_cii = party.io().receive_field(Direction::Next, v.len());
     let rcv_ciii = party.io().receive_field(Direction::Previous, v.len());
     let ci: Vec<_> = v.iter().zip(rnd_ohv).map(|(v, r)| *v + r.random).collect();
-    party.io().send_field::<GF4>(Direction::Next, &ci);
-    party.io().send_field::<GF4>(Direction::Previous, &ci);
+    party.io().send_field::<GF4>(Direction::Next, &ci, ci.len());
+    party.io().send_field::<GF4>(Direction::Previous, &ci, ci.len());
     
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
@@ -103,7 +103,7 @@ fn SS_to_RSS_layer(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: 
     x_i.iter_mut().enumerate().for_each(|(j, y_i)| {
         *y_i = xss_i[j] + alphas[j]
     });
-    party.io().send_field::<GF4>(Direction::Previous, x_i.iter());
+    party.io().send_field::<GF4>(Direction::Previous, x_i.iter(), x_i.len());
     party.io().receive_field_slice(Direction::Next, x_ii).rcv()?;
     party.io().wait_for_completion();
     Ok(())

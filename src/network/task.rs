@@ -408,11 +408,11 @@ impl IoLayer {
         receiver::SliceReceiver::new(self.receive_raw(direction, dst.len()), dst)
     }
 
-    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>)
+    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize)
     {
         #[cfg(feature = "verbose-timing")]
         let start = Instant::now();
-        let as_bytes = F::as_byte_vec(elements);
+        let as_bytes = F::as_byte_vec(elements, len);
         #[cfg(feature = "verbose-timing")]
         {
             let end = start.elapsed();
@@ -422,11 +422,11 @@ impl IoLayer {
     }
 
     pub fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(self.receive_raw(direction, F::size()*num_elements))
+        receiver::FieldVectorReceiver::new(self.receive_raw(direction, F::serialized_size(num_elements)), num_elements)
     }
 
     pub fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(self.receive_raw(direction, F::size()*dst.len()), dst)
+        receiver::FieldSliceReceiver::new(self.receive_raw(direction, F::serialized_size(dst.len())), dst)
     }
 
     pub fn wait_for_completion(&self) {

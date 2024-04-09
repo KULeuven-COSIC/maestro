@@ -76,6 +76,7 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
     let start = Instant::now();
     let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
     let duration = start.elapsed();
+    let online_comm_stats = party.io().reset_comm_stats();
     let _ = aes::output(&mut party.inner, output).unwrap();
     party.inner.teardown().unwrap();
     
@@ -88,7 +89,7 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Pre-Processing:");
     prep_comm_stats.print_comm_statistics(party.inner.party_index());
     println!("Online Phase:");
-    party.inner.print_comm_statistics();
+    online_comm_stats.print_comm_statistics(party.inner.party_index());
 }
 
 #[cfg(test)]
