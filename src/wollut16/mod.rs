@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf4::GF4};
 
-mod online;
-mod offline;
+pub mod online;
+pub mod offline;
 
 // Party for WOLLUT16
 pub struct WL16Party {
@@ -18,7 +18,7 @@ pub struct WL16Party {
 
 // a random one-hot vector of size 16
 #[derive(PartialEq,Debug,Clone, Copy)]
-pub struct RndOhv16([u8; 16]);
+pub struct RndOhv16(u16);
 
 /// Output of the random one-hot vector pre-processing.
 /// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (3,3)-sharing of the corresponding `GF4` element that indicates
@@ -81,16 +81,32 @@ pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize) {
 
 impl RndOhv16 {
 
-    pub fn new(table: [u8; 16]) -> Self {
+    pub fn new(table: u16) -> Self {
         Self(table)
     }
 
-    pub fn lut(&self, offset: usize, table: &[u8; 16]) -> GF4 {
-        let mut res = 0u8;
-        for i in 0..16_usize {
-            res ^= self.0[i] & table[i ^ offset];
-        }
-        GF4::new_unchecked(res)
+    /// tables contains table[offset ^ i] at position offset
+    /// table[offset ^ i][j] is the j-th bit of the lookup
+    #[inline]
+    pub fn lut(&self, offset: usize, tables: &[[u16; 4]; 16]) -> GF4 {
+        let table = &tables[offset];
+        self.lut_table(table)
+    }
+
+    #[inline]
+    fn lut_table(&self, table: &[u16; 4]) -> GF4 {
+        let b0 = self.0 & table[0];
+        let b1 = self.0 & table[1];
+        let b2 = self.0 & table[2];
+        let b3 = self.0 & table[3];
+        let res = (b0.count_ones() & 0x1) | (b1.count_ones() & 0x1) << 1 | (b2.count_ones() & 0x1) << 2 | (b3.count_ones() & 0x1) << 3;
+        GF4::new_unchecked(res as u8)
+    }
+
+    #[inline]
+    pub fn lut_rss(offset: usize, rnd_ohv_si: &Self, rnd_ohv_sii: &Self, tables: &[[u16; 4]; 16]) -> (GF4, GF4) {
+        let table = &tables[offset];
+        (rnd_ohv_si.lut_table(table), rnd_ohv_sii.lut_table(table))
     }
 }
 

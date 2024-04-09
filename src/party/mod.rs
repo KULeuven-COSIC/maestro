@@ -5,7 +5,10 @@ pub mod broadcast;
 pub mod error;
 mod online;
 
+use std::collections::HashMap;
 use std::io;
+use std::sync::Mutex;
+use std::time::Duration;
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -13,6 +16,8 @@ use crate::network::task::IoLayer;
 use crate::network::ConnectedParty;
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
+#[cfg(feature = "verbose-timing")]
+use {lazy_static::lazy_static, crate::network::task::IO_TIMER};
 
 use self::error::MpcResult;
 
@@ -210,11 +215,53 @@ impl Party {
         println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, stats_next.bytes_sent, stats_next.bytes_received, stats_next.rounds);
         println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, stats_prev.bytes_sent, stats_prev.bytes_received, stats_prev.rounds);
         println!("Total communication: {} bytes send, {} bytes received", stats_next.bytes_sent + stats_prev.bytes_sent, stats_next.bytes_received + stats_prev.bytes_received);
+
+        #[cfg(feature = "verbose-timing")]
+        {
+            println!("Verbose timing data:");
+            let guard = IO_TIMER.lock().unwrap();
+            for (key, dur) in guard.times.iter() {
+                println!("\t{}:\t{}s", key, dur.as_secs_f64());
+            }
+            drop(guard);
+            let guard = PARTY_TIMER.lock().unwrap();
+            for (key, dur) in guard.times.iter() {
+                println!("\t{}:\t{}s", key, dur.as_secs_f64());
+            }
+        }
+    }
+}
+
+#[cfg(feature = "verbose-timing")]
+lazy_static! {
+    pub static ref PARTY_TIMER: Mutex<Timer> = Mutex::new(Timer::new());
+}
+
+#[cfg(feature = "verbose-timing")]
+pub struct Timer {
+    times: HashMap<String, Duration>
+}
+
+#[cfg(feature = "verbose-timing")]
+impl Timer {
+    pub fn new() -> Self {
+        Self {
+            times: HashMap::new(),
+        }
+    }
+
+    pub fn report_time(&mut self, key: &str, duration: Duration) {
+        if !self.times.contains_key(key) {
+            self.times.insert(key.to_string(), Duration::from_secs(0));
+        }
+        if let Some(dur) = self.times.get_mut(key) {
+            *dur += duration;
+        }
     }
 }
 
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use std::fs::File;
     use std::io::BufReader;

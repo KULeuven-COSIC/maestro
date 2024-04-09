@@ -94,7 +94,7 @@ pub trait FieldDigestExt<F: Field> {
     fn update(&mut self, message: &[F]);
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use std::borrow::Borrow;
     use std::fmt::Debug;

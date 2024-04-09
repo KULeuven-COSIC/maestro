@@ -350,7 +350,7 @@ where ChaCha20Rng: FieldRngExt<F>
 
 
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use std::thread::JoinHandle;
 

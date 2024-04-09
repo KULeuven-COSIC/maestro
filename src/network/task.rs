@@ -1,6 +1,9 @@
-use std::{borrow::Borrow, collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, thread::{self, JoinHandle}};
+use std::{borrow::Borrow, collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::{mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, Mutex}, thread::{self, JoinHandle}, time::Instant};
 
 use crate::share::Field;
+
+#[cfg(feature = "verbose-timing")]
+use {lazy_static::lazy_static, crate::party::Timer};
 
 use super::{non_blocking::NonBlockingCommChannel, receiver, CommChannel};
 
@@ -331,6 +334,12 @@ pub struct IoLayer {
     io_thread_handle: JoinHandle<(IoThreadContext, io::Result<()>)>,
 }
 
+
+#[cfg(feature = "verbose-timing")]
+lazy_static! {
+    pub static ref IO_TIMER: Mutex<Timer> = Mutex::new(Timer::new());
+}
+
 impl IoLayer {
     pub fn spawn_io(comm_prev: CommChannel, comm_next: CommChannel) -> io::Result<Self> {
         let (send, rcv) = channel();
@@ -358,7 +367,11 @@ impl IoLayer {
         }
     }
 
-    pub fn receive(&self, direction: Direction, length: usize) -> oneshot::Receiver<Vec<u8>> {
+    pub fn receive(&self, direction: Direction, length: usize) -> receiver::VecReceiver {
+        receiver::VecReceiver::new(self.receive_raw(direction, length))
+    }
+
+    fn receive_raw(&self, direction: Direction, length: usize) -> oneshot::Receiver<Vec<u8>> {
         let (send, recv) = oneshot::channel();
         if length > 0 {
             match self.task_channel.send(Task::Read { direction, length, mailback: send }) {
@@ -373,29 +386,45 @@ impl IoLayer {
     }
 
     pub fn receive_slice<'a>(&self, direction: Direction, dst: &'a mut [u8]) -> receiver::SliceReceiver<'a> {
-        receiver::SliceReceiver::new(self.receive(direction, dst.len()), dst)
+        receiver::SliceReceiver::new(self.receive_raw(direction, dst.len()), dst)
     }
 
     pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>)
     {
+        #[cfg(feature = "verbose-timing")]
+        let start = Instant::now();
         let as_bytes = F::as_byte_vec(elements);
+        #[cfg(feature = "verbose-timing")]
+        {
+            let end = start.elapsed();
+            IO_TIMER.lock().unwrap().report_time("ser", end);
+        }
         self.send(direction, as_bytes)
     }
 
     pub fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(self.receive(direction, F::size()*num_elements))
+        receiver::FieldVectorReceiver::new(self.receive_raw(direction, F::size()*num_elements))
     }
 
     pub fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(self.receive(direction, F::size()*dst.len()), dst)
+        receiver::FieldSliceReceiver::new(self.receive_raw(direction, F::size()*dst.len()), dst)
     }
 
     pub fn wait_for_completion(&self) {
+        #[cfg(feature = "verbose-timing")]
+        let start = Instant::now();
         // first send a Sync task, then block and wait to the IO thread to sync
         match self.task_channel.send(Task::Sync) {
             Ok(()) => {
                 match self.sync_channel.recv() {
-                    Ok(()) => (), // sync is completed, return the function to caller
+                    Ok(()) => {
+                        // sync is completed, return the function to caller
+                        #[cfg(feature = "verbose-timing")]
+                        {
+                            let end = start.elapsed();
+                            IO_TIMER.lock().unwrap().report_time("io", end);
+                        }
+                    }, 
                     Err(_) => panic!("The IO is already closed"),
                 }
             },
@@ -430,10 +459,9 @@ mod test {
     use std::{iter::repeat, thread};
 
     use itertools::Itertools;
-    use oneshot::Receiver;
     use rand::{seq::SliceRandom, thread_rng, CryptoRng, Rng};
 
-    use crate::{network::CommChannel, party::test::localhost_connect};
+    use crate::{network::{receiver::VecReceiver, CommChannel}, party::test::localhost_connect};
 
     use super::{Direction, IoLayer};
 
@@ -680,7 +708,7 @@ mod test {
         let io2 = IoLayer::spawn_io(p2.comm_prev, p2.comm_next).unwrap();
         let io3 = IoLayer::spawn_io(p3.comm_prev, p3.comm_next).unwrap();
 
-        fn send(io: &IoLayer, msg_to_prev: String, msg_to_next: String) -> (Receiver<Vec<u8>>, Receiver<Vec<u8>>) {
+        fn send(io: &IoLayer, msg_to_prev: String, msg_to_next: String) -> (VecReceiver, VecReceiver) {
             assert_eq!(msg_to_prev.len(), msg_to_next.len());
             let rcv_prev = io.receive(Direction::Previous, msg_to_prev.len());
             io.send(Direction::Next, msg_to_next.as_bytes().to_vec());

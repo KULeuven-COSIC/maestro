@@ -166,7 +166,7 @@ impl CreatedParty {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "benchmark-helper"))]
     pub fn port(&self) -> io::Result<u16> {
         self.server_socket
             .local_addr()
