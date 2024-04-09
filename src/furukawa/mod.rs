@@ -21,6 +21,7 @@ mod offline;
 // simd: how many parallel AES calls
 pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     let mut party = FurukawaParty::setup(connected).unwrap();
+    let setup_comm_stats = party.io().reset_comm_stats();
     let inputs = aes::random_state(&mut party, simd);
     // create random key states for benchmarking purposes
     let ks = aes::random_keyschedule(&mut party);
@@ -28,6 +29,8 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     let start = Instant::now();
     party.do_preprocessing(0, simd).unwrap();
     let prep_duration = start.elapsed();
+    let prep_comm_stats = party.io().reset_comm_stats();
+
     let start = Instant::now();
     let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
     let online_duration = start.elapsed();
@@ -39,6 +42,11 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Finished benchmark");
     
     println!("Party {}: Furukawa et al. with SIMD={} took {}s (pre-processing), {}s (online), {}s (post-sacrifice), {}s (total)", party.inner.i, simd, prep_duration.as_secs_f64(), online_duration.as_secs_f64(), post_sacrifice_duration.as_secs_f64(), (prep_duration+online_duration+post_sacrifice_duration).as_secs_f64());
+    println!("Setup:");
+    setup_comm_stats.print_comm_statistics(party.inner.i);
+    println!("Pre-Processing:");
+    prep_comm_stats.print_comm_statistics(party.inner.i);
+    println!("Online Phase:");
     party.inner.print_comm_statistics();
 }
 

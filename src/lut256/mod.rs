@@ -63,9 +63,11 @@ impl RndOhv {
 
 pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
     let mut party = LUT256Party::setup(connected).unwrap();
+    let setup_comm_stats = party.io().reset_comm_stats();
     let start_prep = Instant::now();
     party.do_preprocessing(0, simd).unwrap();
     let prep_duration = start_prep.elapsed();
+    let prep_comm_stats = party.io().reset_comm_stats();
 
     let input = aes::random_state(&mut party.inner, simd);
     // create random key states for benchmarking purposes
@@ -81,6 +83,11 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
     
     println!("Party {}: LUT-256 with SIMD={} took {}s (pre-processing) and {}s (online phase)", party.inner.party_index(), simd, prep_duration.as_secs_f64(), duration.as_secs_f64());
     println!("LUT time: {}s", party.lut_time.as_secs_f64());
+    println!("Setup:");
+    setup_comm_stats.print_comm_statistics(party.inner.party_index());
+    println!("Pre-Processing:");
+    prep_comm_stats.print_comm_statistics(party.inner.party_index());
+    println!("Online Phase:");
     party.inner.print_comm_statistics();
 }
 

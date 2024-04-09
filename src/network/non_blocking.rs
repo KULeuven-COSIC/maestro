@@ -1,6 +1,8 @@
 use std::{io::{self, Read, Write}, net::TcpStream};
 use rustls::{ClientConnection, ServerConnection};
 
+use crate::party::CommStats;
+
 use super::{CommChannel, Stream};
 
 
@@ -72,6 +74,16 @@ impl NonBlockingCommChannel {
             bytes_received: self.bytes_received,
             rounds: self.rounds 
         })
+    }
+
+    pub fn get_comm_stats(&self) -> CommStats {
+        CommStats::new(self.bytes_received, self.bytes_sent, self.rounds)
+    }
+
+    pub fn reset_comm_stats(&mut self) {
+        self.bytes_received = 0;
+        self.bytes_sent = 0;
+        self.rounds = 0;
     }
 }
 

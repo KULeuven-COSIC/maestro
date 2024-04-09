@@ -16,7 +16,7 @@ use crate::aes::{self};
 
 use crate::network::ConnectedParty;
 use crate::party::error::MpcResult;
-use crate::party::Party;
+use crate::party::{ArithmeticBlackBox, CombinedCommStats, Party};
 
 pub mod online;
 
@@ -64,6 +64,7 @@ impl ChidaBenchmarkParty {
 // simd: how many parallel AES calls
 pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVariant) {
     let mut party = ChidaBenchmarkParty::setup(connected, variant).unwrap();
+    let setup_comm_stats = party.inner.0.io().reset_comm_stats();
     let input = aes::random_state(&mut party.inner, simd);
     // create random key states for benchmarking purposes
     let ks = aes::random_keyschedule(&mut party.inner);
@@ -77,5 +78,11 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     println!("Finished benchmark");
     
     println!("Party {}: Chida et al. with SIMD={} took {}s", party.inner.0.i, simd, duration.as_secs_f64());
+
+    println!("Setup:");
+    setup_comm_stats.print_comm_statistics(party.inner.party_index());
+    println!("Pre-Processing:");
+    CombinedCommStats::empty().print_comm_statistics(party.inner.party_index());
+    println!("Online Phase:");
     party.inner.0.print_comm_statistics();
 }

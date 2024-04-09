@@ -4,7 +4,7 @@ use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::GF4, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::GF4, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 
 pub struct GF4CircuitSemihonestParty(ChidaParty);
@@ -13,10 +13,15 @@ impl GF4CircuitSemihonestParty {
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
         ChidaParty::setup(connected).map(|chida_party| Self(chida_party))
     }
+
+    fn io(&self) -> &IoLayer {
+        <ChidaParty as ArithmeticBlackBox<GF4>>::io(&self.0)
+    }
 }
 
 pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
     let mut party = GF4CircuitSemihonestParty::setup(connected).unwrap();
+    let setup_comm_stats = party.io().reset_comm_stats();
 
     let input = aes::random_state(&mut party.0, simd);
     // create random key states for benchmarking purposes
@@ -31,6 +36,11 @@ pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Finished benchmark");
     
     println!("Party {}: GF(2^4) circuit with SIMD={} took {}s", party.0.party_index(), simd, duration.as_secs_f64());
+    println!("Setup:");
+    setup_comm_stats.print_comm_statistics(party.0.party_index());
+    println!("Pre-Processing:");
+    CombinedCommStats::empty().print_comm_statistics(party.0.party_index());
+    println!("Online Phase:");
     party.0.print_comm_statistics();
 }
 

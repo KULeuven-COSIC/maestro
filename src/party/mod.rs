@@ -21,10 +21,58 @@ use {lazy_static::lazy_static, crate::network::task::IO_TIMER};
 
 use self::error::MpcResult;
 
-struct CommStats {
+#[derive(Clone, Copy)]
+pub struct CommStats {
     bytes_received: u64,
     bytes_sent: u64,
     rounds: usize,
+}
+
+impl CommStats {
+    pub fn empty() -> Self {
+        Self {
+            bytes_received: 0,
+            bytes_sent: 0,
+            rounds: 0,
+        }
+    }
+
+    pub fn new(bytes_received: u64, bytes_sent: u64, rounds: usize) -> Self {
+        Self {
+            bytes_received,
+            bytes_sent,
+            rounds
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.bytes_received = 0;
+        self.bytes_sent = 0;
+        self.rounds = 0;
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CombinedCommStats {
+    pub prev: CommStats,
+    pub next: CommStats,
+}
+
+impl CombinedCommStats {
+    pub fn empty() -> Self {
+        Self {
+            prev: CommStats::empty(),
+            next: CommStats::empty(),
+        }
+    }
+
+    pub fn print_comm_statistics(&self, i: usize) {
+        let p_next = ((i+1) % 3) + 1;
+        let p_prev = ((3 + i-1) % 3) + 1;
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, self.next.bytes_sent, self.next.bytes_received, self.next.rounds);
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds);
+        println!("Total communication: {} bytes send, {} bytes received", self.next.bytes_sent + self.prev.bytes_sent, self.next.bytes_received + self.prev.bytes_received);
+    }
 }
 
 pub trait ArithmeticBlackBox<F: Field> {
@@ -52,8 +100,7 @@ pub struct Party {
     // pub comm_next: CommChannel,
     // /// Channel to player i-1
     // pub comm_prev: CommChannel,
-    stats_next: Option<CommStats>,
-    stats_prev: Option<CommStats>,
+    stats: CombinedCommStats,
     random_next: SharedRng,
     random_prev: SharedRng,
     random_local: ChaCha20Rng,
@@ -90,8 +137,7 @@ impl Party {
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
-            stats_next: None,
-            stats_prev: None,
+            stats: CombinedCommStats::empty(),
         })
     }
 
@@ -105,8 +151,7 @@ impl Party {
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
-            stats_next: None,
-            stats_prev: None,
+           stats: CombinedCommStats::empty(),
         })
     }
 
@@ -196,8 +241,8 @@ impl Party {
                 bytes_sent: comm_prev.get_bytes_sent(),
                 rounds: comm_prev.get_rounds(),
             };
-            self.stats_next = Some(stats_next);
-            self.stats_prev = Some(stats_prev);
+            self.stats.prev = stats_prev;
+            self.stats.next = stats_next;
             io::Result::Ok(())
         }).transpose()?
         .unwrap_or(());
@@ -207,14 +252,7 @@ impl Party {
     pub fn print_comm_statistics(&self) {
         assert!(self.io.is_none(), "Call teardown() first");
 
-        let stats_next = self.stats_next.as_ref().unwrap();
-        let stats_prev = self.stats_prev.as_ref().unwrap();
-
-        let p_next = ((self.i+1) % 3) + 1;
-        let p_prev = ((3 + self.i-1) % 3) + 1;
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, stats_next.bytes_sent, stats_next.bytes_received, stats_next.rounds);
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, stats_prev.bytes_sent, stats_prev.bytes_received, stats_prev.rounds);
-        println!("Total communication: {} bytes send, {} bytes received", stats_next.bytes_sent + stats_prev.bytes_sent, stats_next.bytes_received + stats_prev.bytes_received);
+        self.stats.print_comm_statistics(self.i);
 
         #[cfg(feature = "verbose-timing")]
         {
