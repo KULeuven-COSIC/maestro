@@ -66,11 +66,38 @@ fn append(a: &[GF4], b: &[GF4]) -> Vec<GF4> {
 }
 
 /// Share conversion protocol <<x>> to [[x]]
-fn SS_to_RSS_layer(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: &mut [GF4]) -> MpcResult<()> {
+/// 
+/// The function assumes that the length of all vectors is even. 
+/// This allows to pack two field elements into one byte.
+fn ss_to_rss_layer_even_len_vec(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: &mut [GF4]) -> MpcResult<()> {
     debug_assert_eq!(xss_i.len(), x_i.len());
     debug_assert_eq!(xss_i.len(), x_ii.len());
+    // Shares of zero
     let alphas:Vec<GF4> = party.inner.generate_alpha(xss_i.len());
-    //
+    // 
+    x_i.iter_mut().enumerate().for_each(|(j, y_i)| {
+        *y_i = xss_i[j] + alphas[j]
+    });
+    let out_bytes = x_i.chunks(2).map(|c| GF4::pack(c[0], c[1])).collect_vec();
+    party.io().send(Direction::Previous, out_bytes);
+    let mut in_bytes = vec![0u8; x_i.len()/2];
+    party.io().receive_slice(Direction::Next,&mut in_bytes).rcv()?;
+    party.io().wait_for_completion();
+    for (i,b) in in_bytes.iter().enumerate() {
+        let (v0,v1) = GF4::unpack(*b);
+        x_ii[2*i] = v0;
+        x_ii[2*i+1] = v1;
+    }
+    Ok(())
+}
+
+/// Share conversion protocol <<x>> to [[x]]
+fn _ss_to_rss_layer(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: &mut [GF4]) -> MpcResult<()> {
+    debug_assert_eq!(xss_i.len(), x_i.len());
+    debug_assert_eq!(xss_i.len(), x_ii.len());
+    // Shares of zero
+    let alphas:Vec<GF4> = party.inner.generate_alpha(xss_i.len());
+    // 
     x_i.iter_mut().enumerate().for_each(|(j, y_i)| {
         *y_i = xss_i[j] + alphas[j]
     });
@@ -79,6 +106,8 @@ fn SS_to_RSS_layer(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: 
     party.io().wait_for_completion();
     Ok(())
 }
+
+
 
 /**
 This function implements multiplicative inversion as in `Protocol 2`.
@@ -115,7 +144,7 @@ fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     // Step 7: Generate replicated sharing of a_h' and a_l'
     let mut a_h_a_l_i = vec![GF4::zero(); 2*n];
     let mut a_h_a_l_ii = vec![GF4::zero(); 2*n];
-    SS_to_RSS_layer(party, &append(&a_h_prime_ss, &a_l_prime_ss), &mut a_h_a_l_i, &mut a_h_a_l_ii)?;
+    ss_to_rss_layer_even_len_vec(party, &append(&a_h_prime_ss, &a_l_prime_ss), &mut a_h_a_l_i, &mut a_h_a_l_ii)?;
     // Step 8: WOL-back-conversion
     si.iter_mut().enumerate().for_each(|(j,s_i)|{
         *s_i = wol_inv_map(&a_h_a_l_i[j],&a_h_a_l_i[j+n])
