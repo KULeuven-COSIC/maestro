@@ -19,3 +19,12 @@ rep3-aes.iml
 
 # Sage
 sage/gf4.sage.py
+
+# Config files
+keys/leuven.*
+keys/london.*
+keys/paris.*
+keys/openssl-config-*
+leuven.toml
+london.toml
+paris.toml

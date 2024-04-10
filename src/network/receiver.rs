@@ -1,8 +1,8 @@
-use std::{marker::PhantomData, time::Instant};
+use std::marker::PhantomData;
 
 use crate::share::Field;
 #[cfg(feature = "verbose-timing")]
-use crate::network::task::IO_TIMER;
+use {std::time::Instant, crate::network::task::IO_TIMER};
 
 #[must_use]
 pub struct FieldVectorReceiver<F: Field>{

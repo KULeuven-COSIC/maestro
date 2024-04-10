@@ -1,10 +1,8 @@
-use std::time::Instant;
-
 use itertools::izip;
 
 use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}, wollut16::{RndOhv16, RndOhvOutput}};
 #[cfg(feature = "verbose-timing")]
-use crate::party::PARTY_TIMER;
+use {std::time::Instant, crate::party::PARTY_TIMER};
 
 fn map_si(rss: &RssShare<BsBool16>) -> &BsBool16 {
     &rss.si
@@ -254,7 +252,7 @@ mod test {
     use itertools::izip;
     use rand::thread_rng;
 
-    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::{offline::generate_random_ohv16, RndOhv16}};
+    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::{offline::generate_random_ohv16}};
 
     use super::{generate_ohv16, un_bitslice4};
 

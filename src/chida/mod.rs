@@ -16,7 +16,7 @@ use crate::aes::{self};
 
 use crate::network::ConnectedParty;
 use crate::party::error::MpcResult;
-use crate::party::{ArithmeticBlackBox, CombinedCommStats, Party};
+use crate::party::{CombinedCommStats, Party};
 
 pub mod online;
 
@@ -38,8 +38,8 @@ impl ChidaParty {
         self.0.i
     }
 
-    pub fn print_comm_statistics(&self) {
-        self.0.print_comm_statistics()
+    pub fn print_statistics(&self) {
+        self.0.print_statistics()
     }
 
     pub fn teardown(&mut self) -> MpcResult<()> {
@@ -86,4 +86,5 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     CombinedCommStats::empty().print_comm_statistics(party.inner.party_index());
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.inner.party_index());
+    party.inner.print_statistics();
 }

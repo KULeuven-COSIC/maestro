@@ -4,7 +4,7 @@ use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::GF4, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 
 
 pub struct GF4CircuitSemihonestParty(ChidaParty);
@@ -43,6 +43,7 @@ pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
     CombinedCommStats::empty().print_comm_statistics(party.0.party_index());
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.0.party_index());
+    party.0.print_statistics();
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty
@@ -98,7 +99,7 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
         Ok(())
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-        gf8_inv_via_gf4_mul(self, si, sii)
+        gf8_inv_via_gf4_mul_opt(self, si, sii)
     }
 }
 
@@ -157,10 +158,67 @@ fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(party: &mut P, si: &mut [GF8]
     Ok(())
 }
 
+fn gf8_inv_via_gf4_mul_opt<P: ArithmeticBlackBox<BsGF4>>(party: &mut P, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    debug_assert_eq!(si.len(), sii.len());
+    
+    // Step 1: WOL-conversion
+    let (ah_i, mut al_i) = wol_bitslice_gf4(si);
+    let (ah_ii, mut al_ii) = wol_bitslice_gf4(sii);
+    
+    let n = ah_i.len();
+
+    // compute v^2 = (e*ah^2 + (ah*al) + al^2)^2
+    let mut vi = vec![BsGF4::default(); n];
+    let mut vii = vec![BsGF4::default(); n];
+    party.mul(&mut vi, &mut vii, &ah_i, &ah_ii, &al_i, &al_ii)?;
+    izip!(vi.iter_mut(), &ah_i, &al_i).for_each(|(dst, ah, al)| {
+        *dst += ah.square_mul_e() + al.square();
+        *dst = dst.square();
+    });
+    izip!(vii.iter_mut(), &ah_ii, &al_ii).for_each(|(dst, ah, al)|  {
+        *dst += ah.square_mul_e() + al.square();
+        *dst = dst.square();
+    });
+
+    // compute v^-1 via v^2 * v^4 * v^8
+    let mut vp4_si = vi.iter().map(|x| x.square()).collect_vec();
+    let mut vp4_sii = vii.iter().map(|x| x.square()).collect_vec();
+    
+    let mut vp6_si = vec![BsGF4::default(); n];
+    let mut vp6_sii = vec![BsGF4::default(); n];
+    party.mul(&mut vp6_si, &mut vp6_sii, &vi, &vii, &vp4_si, &vp4_sii)?;
+
+    vp4_si.iter_mut().for_each(|x| *x = x.square());
+    vp4_sii.iter_mut().for_each(|x| *x = x.square());
+    let vp8_si = vp4_si;
+    let vp8_sii = vp4_sii;
+
+    let mut v_inv_i = vi;
+    let mut v_inv_ii = vii;
+    party.mul(&mut v_inv_i, &mut v_inv_ii, &vp6_si, &vp6_sii, &vp8_si, &vp8_sii)?;
+
+    // compute bh = ah * v_inv and bl = (ah + al) * v_inv
+    let mut bh_bl_i = vec![BsGF4::default(); 2*n];
+    let mut bh_bl_ii = vec![BsGF4::default(); 2*n];
+
+    let v_inv_v_inv_i = append(&v_inv_i, &v_inv_i);
+    let v_inv_v_inv_ii = append(&v_inv_ii, &v_inv_ii);
+    al_i.iter_mut().zip(ah_i.iter()).for_each(|(dst, ah)| *dst += *ah);
+    al_ii.iter_mut().zip(ah_ii.iter()).for_each(|(dst, ah)| *dst += *ah);
+    let ah_al_i = append(&ah_i, &al_i);
+    let ah_al_ii = append(&ah_ii, &al_ii);
+    party.mul(&mut bh_bl_i, &mut bh_bl_ii, &ah_al_i, &ah_al_ii, &v_inv_v_inv_i, &v_inv_v_inv_ii)?;
+
+    un_wol_bitslice_gf4(&bh_bl_i[..n], &bh_bl_i[n..], si);
+    un_wol_bitslice_gf4(&bh_bl_ii[..n], &bh_bl_ii[n..], sii);
+
+    Ok(())
+}
+
 /// Concatenates two vectors
 #[inline]
-fn append(a: &[GF4], b: &[GF4]) -> Vec<GF4> {
-    let mut res = vec![GF4::zero(); a.len() + b.len()];
+fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
+    let mut res = vec![F::zero(); a.len() + b.len()];
     res[..a.len()].copy_from_slice(a);
     res[a.len()..].copy_from_slice(b);
     res

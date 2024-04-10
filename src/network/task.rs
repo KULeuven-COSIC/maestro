@@ -1,9 +1,9 @@
-use std::{borrow::Borrow, collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::{mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, Mutex}, thread::{self, JoinHandle}, time::Instant};
+use std::{borrow::Borrow, collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::{mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, Mutex}, thread::{self, JoinHandle}};
 
-use crate::{party::{CombinedCommStats}, share::Field};
+use crate::{party::CombinedCommStats, share::Field};
 use lazy_static::lazy_static;
 #[cfg(feature = "verbose-timing")]
-use crate::party::Timer;
+use {std::time::Instant, crate::party::Timer};
 
 use super::{non_blocking::NonBlockingCommChannel, receiver, CommChannel};
 

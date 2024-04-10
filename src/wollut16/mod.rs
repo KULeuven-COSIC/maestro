@@ -14,6 +14,7 @@ pub mod offline;
 pub struct WL16Party {
     inner: ChidaParty,
     prep_ohv: Vec<RndOhvOutput>,
+    opt: bool,
 }
 
 // a random one-hot vector of size 16
@@ -38,11 +39,15 @@ impl WL16Party {
             Self {
                 inner: party,
                 prep_ohv: Vec::new(),
+                opt: true,
             }
         })
     }
 
-    pub fn prepare_rand_ohv(&mut self, n: usize) -> MpcResult<()> {
+    pub fn prepare_rand_ohv(&mut self, mut n: usize) -> MpcResult<()> {
+        if self.opt {
+            n = if n % 2 == 0 { n } else { n+1 };
+        }
         let mut new = offline::generate_random_ohv16(&mut self.inner, n)?;
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;
@@ -85,6 +90,7 @@ pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize) {
     prep_comm_stats.print_comm_statistics(party.inner.party_index());
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.inner.party_index());
+    party.inner.print_statistics();
 }
 
 impl RndOhv16 {

@@ -1,5 +1,6 @@
 pub mod gf8;
 mod gf8_tables;
+mod gf4_bs_table;
 pub mod gf4;
 pub mod wol;
 pub mod bs_bool16;

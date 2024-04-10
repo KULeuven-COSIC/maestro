@@ -34,6 +34,7 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     let start = Instant::now();
     let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
     let online_duration = start.elapsed();
+    let online_comm_stats = party.io().reset_comm_stats();
     party.finalize().unwrap();
     let post_sacrifice_duration = start.elapsed();
     let _ = aes::output(&mut party, output).unwrap();
@@ -47,7 +48,8 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Pre-Processing:");
     prep_comm_stats.print_comm_statistics(party.inner.i);
     println!("Online Phase:");
-    party.inner.print_comm_statistics();
+    online_comm_stats.print_comm_statistics(party.inner.i);
+    party.inner.print_statistics();
 }
 
 struct MulTripleVector<F> {

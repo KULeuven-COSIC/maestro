@@ -5,19 +5,16 @@ pub mod broadcast;
 pub mod error;
 mod online;
 
-use std::collections::HashMap;
 use std::io;
-use std::sync::Mutex;
-use std::time::Duration;
-
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use crate::network::task::IoLayer;
 use crate::network::ConnectedParty;
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
+
 #[cfg(feature = "verbose-timing")]
-use {lazy_static::lazy_static, crate::network::task::IO_TIMER};
+use {std::{collections::HashMap, sync::Mutex, time::Duration}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
 
 use self::error::MpcResult;
 
@@ -249,21 +246,22 @@ impl Party {
         Ok(())
     }
 
-    pub fn print_comm_statistics(&self) {
+    pub fn print_statistics(&self) {
         assert!(self.io.is_none(), "Call teardown() first");
-
-        self.stats.print_comm_statistics(self.i);
 
         #[cfg(feature = "verbose-timing")]
         {
             println!("Verbose timing data:");
-            let guard = IO_TIMER.lock().unwrap();
-            for (key, dur) in guard.times.iter() {
-                println!("\t{}:\t{}s", key, dur.as_secs_f64());
-            }
+            let mut guard = IO_TIMER.lock().unwrap();
+            let mut kv: Vec<(String,Duration)> = guard.times.drain().collect();
             drop(guard);
-            let guard = PARTY_TIMER.lock().unwrap();
-            for (key, dur) in guard.times.iter() {
+            let mut guard = PARTY_TIMER.lock().unwrap();
+            kv.extend(guard.times.drain());
+            drop(guard);
+
+            kv.sort_by_key(|(k,_)| k.clone());
+
+            for (key, dur) in kv.iter() {
                 println!("\t{}:\t{}s", key, dur.as_secs_f64());
             }
         }

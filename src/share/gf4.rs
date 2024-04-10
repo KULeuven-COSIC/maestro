@@ -4,7 +4,7 @@ use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
 
-use super::{Field, FieldDigestExt, FieldRngExt};
+use super::{gf4_bs_table, Field, FieldDigestExt, FieldRngExt};
 
 /// An element of GF(2^4) := GF(2)[X] / X^4+x+1 
 /// 
@@ -197,6 +197,104 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF4> for R {
 
 impl<D: Digest> FieldDigestExt<GF4> for D {
     fn update(&mut self, message: &[GF4]) {
+        for x in message {
+            self.update(&[x.0]);
+        }
+    }
+}
+
+/// 2 GF(2^4) elements
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct BsGF4(u8);
+
+impl BsGF4 {
+    pub fn new(el1: GF4, el2: GF4) -> Self {
+        Self(el1.as_u8() << 4 | el2.as_u8())
+    }
+
+    pub fn unpack(self) -> (GF4, GF4) {
+        (GF4::new_unchecked(self.0 >> 4), GF4::new(self.0))
+    }
+
+    pub fn square(self) -> Self {
+        Self(gf4_bs_table::SQUARE_TABLE[self.0 as usize])
+    }
+
+    pub fn square_mul_e(self) -> Self {
+        Self(gf4_bs_table::SQUARE_MUL_E_TABLE[self.0 as usize])
+    }
+}
+
+impl Field for BsGF4 {
+    fn zero() -> Self {
+        Self(0)
+    }
+    fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements
+    }
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, _len: usize) -> Vec<u8> {
+        it.into_iter().map(|el| el.borrow().0).collect()
+    }
+    fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
+        v.into_iter().map(|b| Self(b)).collect()
+    }
+    fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
+        dest.iter_mut().zip(v).for_each(|(dst, b)| *dst = Self(b));
+    }
+}
+
+impl AddAssign for BsGF4 {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0
+    }
+}
+
+impl Neg for BsGF4 {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        self
+    }
+}
+
+impl Mul for BsGF4 {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self(gf4_bs_table::MULT_TABLE[self.0 as usize][rhs.0 as usize])
+    }
+}
+
+impl Sub for BsGF4 {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 ^ rhs.0)
+    }
+}
+
+impl Add for BsGF4 {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 ^ rhs.0)
+    }
+}
+
+impl<R: Rng + CryptoRng> FieldRngExt<BsGF4> for R {
+    fn fill(&mut self, buf: &mut [BsGF4]) {
+        let mut v = vec![0u8; buf.len()];
+        self.fill_bytes(&mut v);
+        buf.iter_mut().zip(v).for_each(|(x, r)| x.0 = r)
+    }
+    fn generate(&mut self, n: usize) -> Vec<BsGF4> {
+        let mut r = vec![0; n];
+        self.fill_bytes(&mut r);
+        r.into_iter().map(|x| BsGF4(x)).collect()
+    }
+}
+
+impl<D: Digest> FieldDigestExt<BsGF4> for D {
+    fn update(&mut self, message: &[BsGF4]) {
         for x in message {
             self.update(&[x.0]);
         }

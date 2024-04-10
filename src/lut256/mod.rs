@@ -90,6 +90,7 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
     prep_comm_stats.print_comm_statistics(party.inner.party_index());
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.inner.party_index());
+    party.inner.print_statistics();
 }
 
 #[cfg(test)]

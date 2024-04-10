@@ -1,8 +1,6 @@
-use std::time::{Duration, Instant};
-
 use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{gf8::GF8, RssShare}};
 #[cfg(feature = "verbose-timing")]
-use crate::party::PARTY_TIMER;
+use {std::time::Instant, crate::party::PARTY_TIMER};
 pub trait GF8InvBlackBox {
     /// returns a (2,3) sharing of the public constant `value`
     fn constant(&self, value: GF8) -> RssShare<GF8>;
