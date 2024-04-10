@@ -42,10 +42,55 @@ def gen_inv_table(F):
     print(", ".join(f'0x0{natural_encoding_to_int(e):x}' for e in square_table), end='')
     print("]")    
 
+def gen_mult2_table(F):
+    pk = F.order()
+    print("MULT_TABLE = [")
+    for x1 in range(pk):
+        for x2 in range(pk):
+            fx1 = natural_encoding(F, x1)
+            fx2 = natural_encoding(F, x2)
+            print('[', end='')
+            v = []
+            for y1 in range(pk):
+                for y2 in range(pk):
+                    fy1 = natural_encoding(F, y1)
+                    fy2 = natural_encoding(F, y2)
+                    z1 = fx1 * fy1
+                    z2 = fx2 * fy2
+                    v.append(f'0x{natural_encoding_to_int(z1):x}{natural_encoding_to_int(z2):x}')
+            print(", ".join(v), end='')
+            print('],')
+    print("]")
+
+def gen_square2_table(F):
+    pk = F.order()
+    print("SQUARE_TABLE = [")
+    v = []
+    for x1 in range(pk):
+        for x2 in range(pk):
+            fx1 = natural_encoding(F, x1)
+            fx2 = natural_encoding(F, x2)
+            v.append(f'0x{natural_encoding_to_int(fx1**2):x}{natural_encoding_to_int(fx2**2):x}')
+    print(', '.join(v), end='')
+    print(']')
+
+def gen_square2_e_table(F):
+    pk = F.order()
+    print("SQUARE_MUL_E_TABLE = [")
+    v = []
+    e = natural_encoding(F,0xE)
+    for x1 in range(pk):
+        for x2 in range(pk):
+            fx1 = natural_encoding(F, x1)
+            fx2 = natural_encoding(F, x2)
+            v.append(f'0x{natural_encoding_to_int(e*fx1**2):x}{natural_encoding_to_int(e*fx2**2):x}')
+    print(', '.join(v), end='')
+    print(']')
+
 x = polygen(GF(2), 'x')
 F = GF(2**4, name=x, modulus=x^4 + x + 1)
 
 #gen_square_table(F)
 #gen_mult_table(F)
 #gen_mult_by_E_table(F)
-gen_inv_table(F)
+gen_square2_e_table(F)
