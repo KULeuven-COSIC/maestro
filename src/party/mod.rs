@@ -1,9 +1,7 @@
 mod commitment;
 pub mod correlated_randomness;
-mod offline;
 pub mod broadcast;
 pub mod error;
-mod online;
 
 use std::io;
 use rand::SeedableRng;
