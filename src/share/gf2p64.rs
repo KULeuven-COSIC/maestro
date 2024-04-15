@@ -1,8 +1,10 @@
 use std::{borrow::Borrow, fmt::{Debug, Formatter}, ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub}};
 
 use itertools::Itertools;
+use rand::{CryptoRng, Rng};
+use sha2::Digest;
 
-use super::Field;
+use super::{Field, FieldDigestExt, FieldRngExt, Invertible};
 
 /// An element of GF(2^64) := GF(2)[X] / X^64+X^4+X^3+X+1
 /// 
@@ -108,19 +110,6 @@ impl GF2p64 {
         let carry = (clmul >> 64) as u64;
         Self::propagate_carries(word, carry)
     }
-
-    /// Multiplicative inverse
-    fn inverse(mut self) -> Self {
-        // Compute x^(2^n - 2)
-        let mut result = Self::ONE;
-        for _ in 1..Self::NBITS {
-            self = self * self;
-            result *= self;
-        }
-        result
-    }
-
-
 }
 
 impl Field for GF2p64 {
@@ -155,6 +144,24 @@ impl Field for GF2p64 {
         })
     }
 
+}
+
+
+impl Invertible for GF2p64 {
+    /// Multiplicative inverse
+    fn inverse(self) -> Self {
+        if self == Self::ZERO {
+            return self
+        }
+        let mut p = self;
+        // Compute x^(2^n - 2)
+        let mut result = Self::ONE;
+        for _ in 1..Self::NBITS {
+            p = p * p;
+            result *= p;
+        }
+        result
+    }
 }
 
 impl Add for GF2p64 {
@@ -227,11 +234,33 @@ impl Debug for GF2p64 {
     }
 }
 
+impl<R: Rng + CryptoRng> FieldRngExt<GF2p64> for R {
+    fn generate(&mut self, n: usize) -> Vec<GF2p64> {
+        let mut r = vec![0; n*GF2p64::NBYTES];
+        self.fill_bytes(&mut r);
+        GF2p64::from_byte_vec(r)
+    }
+
+    fn fill(&mut self, buf: &mut [GF2p64]) {
+        let mut v = vec![0u8; buf.len()*GF2p64::NBYTES];
+        self.fill_bytes(&mut v);
+        GF2p64::from_byte_slice(v, buf)
+    }
+}
+
+impl<D: Digest> FieldDigestExt<GF2p64> for D {
+    fn update(&mut self, message: &[GF2p64]) {
+        for x in message {
+            self.update(&x.0.to_be_bytes());
+        }
+    }
+}
+
 
 
 #[cfg(test)]
 mod test {
-    use crate::share::Field;
+    use crate::share::{Field, Invertible};
 
     use super::GF2p64;
 

@@ -32,6 +32,11 @@ pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
 }
 
+pub trait Invertible: Field {
+    /// Multiplicative Inverse (zero may map to zero)
+    fn inverse(self) -> Self;
+}
+
 pub trait FieldVectorCommChannel<F: Field> {
     fn write_vector(&mut self, vector: &[F]) -> io::Result<()>;
     fn read_vector(&mut self, buffer: &mut [F]) -> io::Result<()>;
