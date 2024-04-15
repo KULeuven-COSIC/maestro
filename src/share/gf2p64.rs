@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt::{Debug, Formatter}, ops::{Add, AddAssign, Mul, Neg, Sub}};
+use std::{borrow::Borrow, fmt::{Debug, Formatter}, ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub}};
 
 use itertools::Itertools;
 
@@ -103,14 +103,21 @@ impl GF2p64 {
     ))]
     fn mul_clmul_u64(&self, other: &Self) -> Self {
         use std::arch::aarch64::vmull_p64;
-
-        let mut word = 0u64;
-        let mut carry = 0u64;
         let clmul: u128 = unsafe { vmull_p64(self.0, other.0) };
         let word = clmul as u64;
         let carry = (clmul >> 64) as u64;
-
         Self::propagate_carries(word, carry)
+    }
+
+    /// Multiplicative inverse
+    fn inverse(mut self) -> Self {
+        // Compute x^(2^n - 2)
+        let mut result = Self::ONE;
+        for _ in 1..Self::NBITS {
+            self = self * self;
+            result *= self;
+        }
+        result
     }
 
 
@@ -125,7 +132,7 @@ impl Field for GF2p64 {
     const ONE: Self = Self(1u64);
 
     fn is_zero(&self) -> bool {
-        todo!()
+        self.0 == 0u64
     }
 
     fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8> {
@@ -201,20 +208,22 @@ impl Mul for GF2p64 {
             )
         ))]
         {
-            let x: Self = unsafe { std::mem::transmute(&self) };
-            let y: Self = unsafe { std::mem::transmute(rhs) };
-            let tmp = Self::mul_clmul_u64(x, y);
-            let result: &Self = unsafe { std::mem::transmute(&tmp) };
-            return * result
+            Self::mul_clmul_u64(&self, &rhs);
         }
        //Fall back 
        self.mul_using_add(&rhs)
     }
 }
 
+impl MulAssign for GF2p64 {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self  = *self * rhs
+    }
+}
+
 impl Debug for GF2p64 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "GF2p64(0x{:016x})", self.0 & 0x0F)
+        write!(f, "GF2p64(0x{:016x})", self.0)
     }
 }
 
@@ -222,26 +231,53 @@ impl Debug for GF2p64 {
 
 #[cfg(test)]
 mod test {
+    use crate::share::Field;
+
     use super::GF2p64;
+
+    fn get_test_values() -> Vec<GF2p64> {
+        vec![GF2p64(0), GF2p64(1), GF2p64(0xffffffffffffffff), GF2p64(0xfffffffffeffffff)]
+    }
+
+    fn get_non_zero_test_values() -> Vec<GF2p64> {
+        vec![GF2p64(1), GF2p64(0xffffffffffffffff), GF2p64(0xfffffffffeffffff)]
+    }
 
     #[test]
     fn test_mul() {
-        let test_elements = vec![GF2p64(0), GF2p64(1), GF2p64(0xffffffffffffffff), GF2p64(0xfffffffffeffffff)];
+        let test_elements = get_test_values();
         for &x in &test_elements {
             for &y in &test_elements {
+                //println!("{0:?} * {1:?} = {2:?} = {3:?}",x,y,x*y,y*x);
                 assert_eq!(x*y, y*x)
             }
         }
+        let zero = GF2p64::ZERO;
+        for &x in &test_elements {
+            assert_eq!(x*zero,zero)
+        }
+        for &x in &test_elements[1..] {
+            assert_eq!(x*GF2p64::ONE, x)
+        }
     }
 
-    /* 
+    #[test]
+    fn test_inverse(){
+        let test_values = get_non_zero_test_values();
+        for x in test_values {
+            let inv_x = x.inverse();
+            assert_eq!(x*inv_x,GF2p64::ONE);
+            assert_eq!(inv_x*x,GF2p64::ONE)
+        }
+    }
+
+    
     #[test]
     fn test_serialization() {
         let v = vec![GF2p64(0x1),GF2p64(0xffffffffffffffff),GF2p64(0x3),GF2p64(0x123456781234578)];
-        let as_bytes = Field::as_byte_vec(v.iter());
-        let v_new = Fieldq::from_byte_vec(as_bytes);
+        let as_bytes = GF2p64::as_byte_vec(v.iter());
+        let v_new = GF2p64::from_byte_vec(as_bytes);
         assert_eq!(v_new, v);
     }
-    */
 
 }

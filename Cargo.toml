@@ -19,3 +19,7 @@ itertools = "0.12.1"
 
 [dev-dependencies]
 # serial_test = "*"
+
+[features]
+default = ["clmul"]
+clmul = []
