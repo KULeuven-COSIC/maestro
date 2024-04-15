@@ -20,7 +20,7 @@ fn local_multiplication(x_i: &[GF4], x_ii: &[GF4], y_i: &[GF4], y_ii: &[GF4]) ->
     }).collect_vec()
 }
 
-/// Computes <<v>> for
+/// Computes <<v>> as in protocol 2
 /// 
 /// This function assumes that all input vectors are of the same length
 #[inline]

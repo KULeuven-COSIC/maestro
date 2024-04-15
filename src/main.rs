@@ -7,6 +7,7 @@ mod chida;
 mod furukawa;
 mod aes;
 mod wollut16;
+mod wollut16_malsec;
 
 use std::{path::PathBuf, time::Duration};
 
