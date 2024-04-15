@@ -215,10 +215,10 @@ impl Mul for GF2p64 {
             )
         ))]
         {
-            Self::mul_clmul_u64(&self, &rhs);
+            return Self::mul_clmul_u64(&self, &rhs);
         }
-       //Fall back 
-       self.mul_using_add(&rhs)
+        //Fall back 
+        self.mul_using_add(&rhs)
     }
 }
 
