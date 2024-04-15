@@ -14,7 +14,7 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
@@ -50,6 +50,37 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.inner.i);
     party.inner.print_statistics();
+}
+
+pub struct MalChidaBenchmark;
+
+impl BenchmarkProtocol for MalChidaBenchmark {
+    fn protocol_name(&self) -> String {
+        "mal-chida".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<BenchmarkResult> {
+        let mut party = FurukawaParty::setup(conn)?;
+        let _setup_comm_stats = party.io().reset_comm_stats();
+        let inputs = aes::random_state(&mut party, simd);
+        // create random key states for benchmarking purposes
+        let ks = aes::random_keyschedule(&mut party);
+
+        let start = Instant::now();
+        party.do_preprocessing(0, simd)?;
+        let prep_duration = start.elapsed();
+        let prep_comm_stats = party.io().reset_comm_stats();
+
+        let start = Instant::now();
+        let output = aes128_no_keyschedule(&mut party, inputs, &ks)?;
+        party.finalize().unwrap();
+        let online_duration = start.elapsed();
+        let online_comm_stats = party.io().reset_comm_stats();
+        // let post_sacrifice_duration = start.elapsed();
+        let _ = aes::output(&mut party, output)?;
+        party.inner.teardown()?;
+        
+        Ok(BenchmarkResult::new(prep_duration, online_duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers()))
+    }
 }
 
 struct MulTripleVector<F> {

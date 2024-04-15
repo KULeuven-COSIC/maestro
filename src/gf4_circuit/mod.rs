@@ -1,10 +1,10 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 
 
 pub struct GF4CircuitSemihonestParty(ChidaParty);
@@ -44,6 +44,31 @@ pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.0.party_index());
     party.0.print_statistics();
+}
+
+pub struct GF4CircuitBenchmark;
+
+impl BenchmarkProtocol for GF4CircuitBenchmark {
+    fn protocol_name(&self) -> String {
+        "gf4-circuit".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<BenchmarkResult> {
+        let mut party = GF4CircuitSemihonestParty::setup(conn)?;
+        let _setup_comm_stats = party.io().reset_comm_stats();
+
+        let input = aes::random_state(&mut party.0, simd);
+        // create random key states for benchmarking purposes
+        let ks = aes::random_keyschedule(&mut party.0);
+
+        let start = Instant::now();
+        let output = aes::aes128_no_keyschedule(&mut party, input, &ks)?;
+        let duration = start.elapsed();
+        let online_comm_stats = party.io().reset_comm_stats();
+        let _ = aes::output(&mut party.0, output)?;
+        party.0.teardown()?;
+        
+        Ok(BenchmarkResult::new(Duration::from_secs(0), duration, CombinedCommStats::empty(), online_comm_stats, party.0.get_additional_timers()))
+    }
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty

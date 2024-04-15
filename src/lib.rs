@@ -9,3 +9,4 @@ pub mod aes;
 pub mod wollut16;
 pub mod gf4_circuit;
 pub mod lut256;
+pub mod benchmark;

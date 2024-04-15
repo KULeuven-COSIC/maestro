@@ -3,7 +3,7 @@ pub mod correlated_randomness;
 pub mod broadcast;
 pub mod error;
 
-use std::io;
+use std::io::{self, Write};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use crate::network::task::IoLayer;
@@ -12,8 +12,8 @@ use crate::party::correlated_randomness::{GlobalRng, SharedRng};
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
 #[cfg(feature = "verbose-timing")]
-use {std::{collections::HashMap, sync::Mutex, time::Duration}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
-
+use {std::{collections::HashMap, sync::Mutex}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
+use std::time::Duration;
 use self::error::MpcResult;
 
 #[derive(Clone, Copy)]
@@ -67,6 +67,11 @@ impl CombinedCommStats {
         println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, self.next.bytes_sent, self.next.bytes_received, self.next.rounds);
         println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds);
         println!("Total communication: {} bytes send, {} bytes received", self.next.bytes_sent + self.prev.bytes_sent, self.next.bytes_received + self.prev.bytes_received);
+    }
+
+    pub fn write_to_csv<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        write!(writer, "{},{},{},{},{},{}", self.next.bytes_sent, self.next.bytes_received, self.next.rounds, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds)?;
+        Ok(())
     }
 }
 
@@ -246,7 +251,17 @@ impl Party {
 
     pub fn print_statistics(&self) {
         assert!(self.io.is_none(), "Call teardown() first");
+        let kv = self.get_additional_timers();
+        #[cfg(feature = "verbose-timing")]
+        {
+            for (key, dur) in kv.iter() {
+                println!("\t{}:\t{}s", key, dur.as_secs_f64());
+            }
+        }
+    }
 
+    pub fn get_additional_timers(&self) -> Vec<(String, Duration)> {
+        assert!(self.io.is_none(), "Call teardown() first");
         #[cfg(feature = "verbose-timing")]
         {
             println!("Verbose timing data:");
@@ -258,11 +273,10 @@ impl Party {
             drop(guard);
 
             kv.sort_by_key(|(k,_)| k.clone());
-
-            for (key, dur) in kv.iter() {
-                println!("\t{}:\t{}s", key, dur.as_secs_f64());
-            }
+            return kv;
         }
+        #[cfg(not(feature = "verbose-timing"))]
+        return Vec::new();
     }
 }
 

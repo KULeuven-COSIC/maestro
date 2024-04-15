@@ -332,6 +332,12 @@ impl CommChannel {
     }
 }
 
+impl Clone for Config {
+    fn clone(&self) -> Self {
+        Self { player_addr: self.player_addr.clone(), player_ports: self.player_ports.clone(), my_cert: self.my_cert.clone(), my_key: self.my_key.clone_key(), player_certs: self.player_certs.clone() }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{thread, net::{TcpListener, TcpStream}, io::{Read, Write}, time::Instant};

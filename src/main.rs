@@ -9,11 +9,17 @@ mod aes;
 mod wollut16;
 mod gf4_circuit;
 mod lut256;
+mod benchmark;
 
 use std::{path::PathBuf, time::Duration};
 
-use clap::{Parser, Subcommand, ArgAction};
+use benchmark::BenchmarkProtocol;
+use chida::ChidaBenchmark;
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use crate::{furukawa::MalChidaBenchmark, gf4_circuit::GF4CircuitBenchmark, lut256::LUT256Benchmark, wollut16::LUT16Benchmark};
+use itertools::Itertools;
 use network::ConnectedParty;
+use party::error::MpcResult;
 
 use crate::chida::ImplVariant;
 
@@ -23,6 +29,11 @@ struct Cli {
     config: PathBuf,
     #[command(subcommand)]
     command: Commands
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, Hash)]
+pub enum ProtocolVariant {
+    Chida, MalChida, Lut16, GF4Circuit, Lut256
 }
 
 #[derive(Subcommand)]
@@ -54,6 +65,19 @@ enum Commands {
     LUT256Benchmark {
         #[arg(long, help="The number of parallel AES calls to benchmark.")]
         simd: usize,
+    },
+    /// Benchmarks one or more protocols with runtime and communication data written to CSV file
+    Benchmark {
+        #[arg(long, help="The number of parallel AES calls to benchmark.")]
+        simd: usize,
+        #[arg(long, help="The number repetitions of the protocol execution")]
+        rep: usize,
+        #[arg(long, help="Maximum number of re-tries before failing", default_value="10")]
+        max_retry: usize,
+        #[arg(long, help="Path to write benchmark result data as CSV. Default: result.csv", default_value="result.csv")]
+        csv: PathBuf,
+        #[arg(value_enum)]
+        target: Vec<ProtocolVariant>
     }
 }
 
@@ -89,6 +113,44 @@ fn main() {
             let connected = ConnectedParty::bind_and_connect(party_index, config, Some(Duration::from_secs(60))).unwrap();
             println!("Connected!");
             lut256::lut256_benchmark(connected, simd);
+        },
+        Commands::Benchmark { simd, rep, max_retry, csv, target } => {
+            // check non-empty and distinct targets
+            if target.is_empty() {
+                let all_targets: Vec<_> = ProtocolVariant::value_variants().iter().map(|prot| prot.to_possible_value().unwrap().get_name().to_string()).collect();
+                println!("List of targets is empty: choose any number of targets: {:?}", all_targets);
+                return;
+            }
+            if !target.iter().all_unique() {
+                println!("Duplicate targets in argument {:?}", target);
+                return;
+            }
+            let mut boxed: Vec<Box<dyn BenchmarkProtocol>> = Vec::new();
+            for v in target {
+                boxed.push(Box::new(v));
+            }
+            benchmark::benchmark_protocols(party_index, &config, rep, max_retry, simd, boxed, csv).unwrap()
         }
+    }
+}
+
+impl ProtocolVariant {
+    fn get_protocol(&self) -> &dyn BenchmarkProtocol {
+        match self {
+            ProtocolVariant::Chida => &ChidaBenchmark,
+            ProtocolVariant::MalChida => &MalChidaBenchmark,
+            ProtocolVariant::GF4Circuit => &GF4CircuitBenchmark,
+            ProtocolVariant::Lut16 => &LUT16Benchmark,
+            ProtocolVariant::Lut256 => &LUT256Benchmark,
+        }
+    }
+}
+
+impl BenchmarkProtocol for ProtocolVariant {
+    fn protocol_name(&self) -> String {
+        self.get_protocol().protocol_name()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<benchmark::BenchmarkResult> {
+        self.get_protocol().run(conn, simd)
     }
 }

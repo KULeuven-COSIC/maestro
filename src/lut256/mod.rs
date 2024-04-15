@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 
-use crate::{aes::{self, GF8InvBlackBox}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf8::GF8};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf8::GF8};
 mod online;
 mod offline;
 
@@ -91,6 +91,35 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.inner.party_index());
     party.inner.print_statistics();
+}
+
+pub struct LUT256Benchmark;
+
+impl BenchmarkProtocol for LUT256Benchmark {
+    fn protocol_name(&self) -> String {
+        "lut256".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<BenchmarkResult> {
+        let mut party = LUT256Party::setup(conn)?;
+        let _setup_comm_stats = party.io().reset_comm_stats();
+        let start_prep = Instant::now();
+        party.do_preprocessing(0, simd)?;
+        let prep_duration = start_prep.elapsed();
+        let prep_comm_stats = party.io().reset_comm_stats();
+
+        let input = aes::random_state(&mut party.inner, simd);
+        // create random key states for benchmarking purposes
+        let ks = aes::random_keyschedule(&mut party.inner);
+
+        let start = Instant::now();
+        let output = aes::aes128_no_keyschedule(&mut party, input, &ks)?;
+        let duration = start.elapsed();
+        let online_comm_stats = party.io().reset_comm_stats();
+        let _ = aes::output(&mut party.inner, output)?;
+        party.inner.teardown()?;
+        
+        Ok(BenchmarkResult::new(prep_duration, duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers()))
+    }
 }
 
 #[cfg(test)]
