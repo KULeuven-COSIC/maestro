@@ -41,11 +41,11 @@ impl GF8 {
 }
 
 impl Field for GF8 {
-    fn size() -> usize { 1 }
+    const NBYTES: usize = 1;
 
-    fn zero() -> Self {
-        Self(0u8)
-    }
+    const ZERO: Self = Self(0u8);
+
+    const ONE: Self = Self(1u8);
 
     fn is_zero(&self) -> bool {
         self.0 == 0

@@ -383,11 +383,11 @@ impl IoLayer {
     }
 
     pub fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(self.receive(direction, F::size()*num_elements))
+        receiver::FieldVectorReceiver::new(self.receive(direction, F::NBYTES*num_elements))
     }
 
     pub fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(self.receive(direction, F::size()*dst.len()), dst)
+        receiver::FieldSliceReceiver::new(self.receive(direction, F::NBYTES*dst.len()), dst)
     }
 
     pub fn wait_for_completion(&self) {

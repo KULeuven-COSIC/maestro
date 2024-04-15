@@ -68,13 +68,12 @@ impl GF4 {
 } 
 
 impl Field for GF4 {
-    fn size() -> usize {
-        1
-    }
 
-    fn zero() -> Self {
-        Self(0u8)
-    }
+    const NBYTES: usize =  1;
+
+    const ZERO: GF4 = Self(0);
+
+    const ONE: GF4 = Self(1);
 
     fn is_zero(&self) -> bool {
         self.0 == 0
@@ -91,6 +90,7 @@ impl Field for GF4 {
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
         v.into_iter().zip(dest).for_each(|(byte, dst)| *dst = GF4::new(byte))
     }
+
 }
 
 impl Add for GF4 {

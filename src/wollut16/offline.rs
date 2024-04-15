@@ -157,8 +157,8 @@ fn generate_ohv16<P: ArithmeticBlackBox<BsBool16> + ArithmeticBlackBox<GF4>>(par
 
     let elements = [&r0, &r1, r01, &r2, r02, r12, r012, &r3, r03, r13, r013, r23, r023, r123, r0123];
 
-    let zero = party.constant(BsBool16::zero());
-    let one = party.constant(BsBool16::one());
+    let zero = party.constant(BsBool16::ZERO);
+    let one = party.constant(BsBool16::ONE);
     let ohv_0 = inner_product(&elements, n16, one, &SELECTOR_IDX_0);
     let ohv_1 = inner_product(&elements, n16, zero, &SELECTOR_IDX_1);
     let ohv_2 = inner_product(&elements, n16, zero, &SELECTOR_IDX_2);

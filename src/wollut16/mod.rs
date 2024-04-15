@@ -59,7 +59,7 @@ pub fn wollut16_benchmark() {}
 
 impl RndOhv16 {
     pub fn lut(&self, offset: usize, table: &[u8; 16]) -> GF4 {
-        let mut res = GF4::zero();
+        let mut res = GF4::ZERO;
         for i in 0..16_usize {
             if ((self.0 >> i) & 0x1) == 0x1 {
                 res += GF4::new_unchecked(table[i ^ offset]);

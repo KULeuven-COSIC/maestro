@@ -142,11 +142,11 @@ impl Party {
     #[inline]
     pub fn constant<F: Field>(&self, value: F) -> RssShare<F> {
         if self.i == 0 {
-            RssShare::from(value, F::zero())
+            RssShare::from(value, F::ZERO)
         }else if self.i == 2 {
-            RssShare::from(F::zero(), value)
+            RssShare::from(F::ZERO, value)
         }else{
-            RssShare::from(F::zero(), F::zero())
+            RssShare::from(F::ZERO, F::ZERO)
         }
     }
 

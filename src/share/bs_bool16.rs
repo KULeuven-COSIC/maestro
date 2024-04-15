@@ -18,23 +18,19 @@ impl BsBool16 {
         Self(bits)
     }
 
-    pub fn one() -> Self {
-        Self(0xffff)
-    }
-
     pub fn as_u16(&self) -> u16 {
         self.0
     } 
 }
 
 impl Field for BsBool16 {
-    fn size() -> usize {
-        2
-    }
 
-    fn zero() -> Self {
-        Self(0)
-    }
+    const NBYTES: usize = 2;
+
+    const ZERO: Self = Self(0x0000); 
+
+    /// Each component is one
+    const ONE: Self = Self(0xffff);
 
     fn is_zero(&self) -> bool {
         self.0 == 0
@@ -112,7 +108,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<BsBool16> for R {
     }
 
     fn generate(&mut self, n: usize) -> Vec<BsBool16> {
-        let mut v = vec![BsBool16::zero(); n];
+        let mut v = vec![BsBool16::ZERO; n];
         for i in 0..n/2 {
             let rng = self.next_u32();
             v[2*i].0 = rng as u16;

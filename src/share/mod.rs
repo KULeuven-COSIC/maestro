@@ -3,16 +3,24 @@ mod gf8_tables;
 pub mod gf4;
 pub mod wol;
 pub mod bs_bool16;
+pub mod gf2p64;
 
 use std::borrow::Borrow;
 use std::io;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone + Copy + PartialEq + AddAssign { // + AsRef<[u8]>
-    /// Returns the field size in byte
-    fn size() -> usize;
-    /// Returns zero value
-    fn zero() -> Self;
+    /// The field size in byte
+    const NBYTES: usize;
+
+    /// The field size in bits
+    const NBITS: usize = 8 * Self::NBYTES;
+
+    /// Zero
+    const ZERO: Self;
+    
+    /// One
+    const ONE: Self;
 
     // Returns if the value is zero
     fn is_zero(&self) -> bool;

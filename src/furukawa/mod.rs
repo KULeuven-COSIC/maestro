@@ -119,9 +119,9 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
     #[inline]
     pub fn public_constant(&self, c: F) -> RssShare<F> {
         match self.inner.i {
-            0 => RssShare::from(c, F::zero()),
-            1 => RssShare::from(F::zero(), F::zero()),
-            2 => RssShare::from(F::zero(), c),
+            0 => RssShare::from(c, F::ZERO),
+            1 => RssShare::from(F::ZERO, F::ZERO),
+            2 => RssShare::from(F::ZERO, c),
             _ => unreachable!()
         }
     }
@@ -222,7 +222,7 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         let a = self.party.inner.generate_random(n_inputs);
         let b = self.party.inner.open_rss_to(&mut self.context, &a, input_party)?;
         debug_assert!(b.is_none());
-        let mut b = vec![F::zero(); n_inputs];
+        let mut b = vec![F::ZERO; n_inputs];
         match (self.party.inner.i, input_party) {
             (0,2) | (1,0) | (2,1) => self.party.inner.broadcast_round(&mut self.context, &mut [], &mut b, &[])?,
             (0,1) | (1,2) | (2,0) => self.party.inner.broadcast_round(&mut self.context, &mut b, &mut [], &[])?,

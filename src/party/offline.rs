@@ -22,8 +22,8 @@ pub fn create_correct_mul_triples<F: Field + Copy>(party: &mut Party, n: usize, 
     Sha256: FieldDigestExt<F>
 {
     let (total_n, repetitions) = {
-        let repetitions = soundness / (8*F::size());
-        if soundness % (8*F::size()) != 0 {
+        let repetitions = soundness / F::NBITS;
+        if soundness % F::NBITS != 0 {
             (n * (2+repetitions), 1+repetitions)
         }else { (n*(1+repetitions), repetitions) }
     };
@@ -45,7 +45,7 @@ pub fn create_correct_mul_triples<F: Field + Copy>(party: &mut Party, n: usize, 
 
     debug_assert_eq!(alpha.len(), total_n);
 
-    let mut c_i = vec![F::zero(); total_n];
+    let mut c_i = vec![F::ZERO; total_n];
     for i in 0..total_n {
         c_i[i] = (a_i[i] * b_i[i]) + (a_i[i] * b_ii[i]) + (a_ii[i] * b_i[i]) + alpha[i];
     }
@@ -61,10 +61,10 @@ pub fn create_correct_mul_triples<F: Field + Copy>(party: &mut Party, n: usize, 
     let mut rnd = GlobalRng::setup_global(party)?;
     let ts = rnd.as_mut().generate(repetitions);
 
-    let mut rho_i = vec![F::zero(); repetitions * n];
-    let mut rho_ii = vec![F::zero(); repetitions * n];
-    let mut sigma_i = vec![F::zero(); repetitions * n];
-    let mut sigma_ii = vec![F::zero(); repetitions * n];
+    let mut rho_i = vec![F::ZERO; repetitions * n];
+    let mut rho_ii = vec![F::ZERO; repetitions * n];
+    let mut sigma_i = vec![F::ZERO; repetitions * n];
+    let mut sigma_ii = vec![F::ZERO; repetitions * n];
 
     let mut rho_index = 0;
     let mut a_index = 0;
@@ -94,8 +94,8 @@ pub fn create_correct_mul_triples<F: Field + Copy>(party: &mut Party, n: usize, 
 
     let mut rho_index = 0;
     let mut a_index = 0;
-    let mut zero_i = vec![F::zero(); repetitions * n];
-    let mut zero_ii = vec![F::zero(); repetitions * n];
+    let mut zero_i = vec![F::ZERO; repetitions * n];
+    let mut zero_ii = vec![F::ZERO; repetitions * n];
     for _i in 0..n {
         for rep in 0..repetitions {
             // t * c - h - sigma * f - rho * g - sigma * rho

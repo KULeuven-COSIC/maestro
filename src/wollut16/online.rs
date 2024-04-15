@@ -59,7 +59,7 @@ fn LUT_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>,Vec<GF4>)>
 /// Concatenates two vectors
 #[inline]
 fn append(a: &[GF4], b: &[GF4]) -> Vec<GF4> {
-    let mut res = vec![GF4::zero(); a.len() + b.len()];
+    let mut res = vec![GF4::ZERO; a.len() + b.len()];
     res[..a.len()].copy_from_slice(a);
     res[a.len()..].copy_from_slice(b);
     res
@@ -142,8 +142,8 @@ fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     let a_h_prime_ss = local_multiplication(&ah_i, &ah_ii,&v_inv_i, &v_inv_ii);
     let a_l_prime_ss = local_multiplication(&ah_plus_al_i, &ah_plus_al_ii,&v_inv_i, &v_inv_ii);
     // Step 7: Generate replicated sharing of a_h' and a_l'
-    let mut a_h_a_l_i = vec![GF4::zero(); 2*n];
-    let mut a_h_a_l_ii = vec![GF4::zero(); 2*n];
+    let mut a_h_a_l_i = vec![GF4::ZERO; 2*n];
+    let mut a_h_a_l_ii = vec![GF4::ZERO; 2*n];
     ss_to_rss_layer_even_len_vec(party, &append(&a_h_prime_ss, &a_l_prime_ss), &mut a_h_a_l_i, &mut a_h_a_l_ii)?;
     // Step 8: WOL-back-conversion
     si.iter_mut().enumerate().for_each(|(j,s_i)|{
