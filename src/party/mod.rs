@@ -213,21 +213,21 @@ impl Party {
             match self.i {
                 0 => {
                     // 01
-                    comm_next.teardown();
+                    comm_next.teardown()?;
                     // 02
-                    comm_prev.teardown();
+                    comm_prev.teardown()?;
                 }
                 1 => {
                     // 01
-                    comm_prev.teardown();
+                    comm_prev.teardown()?;
                     // 12
-                    comm_next.teardown();
+                    comm_next.teardown()?;
                 }
                 2 => {
                     // 02
-                    comm_next.teardown();
+                    comm_next.teardown()?;
                     // 12
-                    comm_prev.teardown();
+                    comm_prev.teardown()?;
                 }
                 _ => unreachable!()
             };
