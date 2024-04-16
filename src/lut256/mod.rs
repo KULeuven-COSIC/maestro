@@ -102,11 +102,12 @@ impl BenchmarkProtocol for LUT256Benchmark {
     fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
         let mut party = LUT256Party::setup(conn).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
+        println!("After setup");
         let start_prep = Instant::now();
         party.do_preprocessing(0, simd).unwrap();
         let prep_duration = start_prep.elapsed();
         let prep_comm_stats = party.io().reset_comm_stats();
-
+        println!("After pre-processing");
         let input = aes::random_state(&mut party.inner, simd);
         // create random key states for benchmarking purposes
         let ks = aes::random_keyschedule(&mut party.inner);
@@ -114,9 +115,12 @@ impl BenchmarkProtocol for LUT256Benchmark {
         let start = Instant::now();
         let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
         let duration = start.elapsed();
+        println!("After online");
         let online_comm_stats = party.io().reset_comm_stats();
         let _ = aes::output(&mut party.inner, output).unwrap();
+        println!("After output");
         party.inner.teardown().unwrap();
+        println!("After teardown");
         
         BenchmarkResult::new(prep_duration, duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
     }

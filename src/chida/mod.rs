@@ -106,13 +106,17 @@ impl BenchmarkProtocol for ChidaBenchmark {
         let input = aes::random_state(&mut party.inner, simd);
         // create random key states for benchmarking purposes
         let ks = aes::random_keyschedule(&mut party.inner);
+        println!("After setup");
 
         let start = Instant::now();
         let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
         let duration = start.elapsed();
+        println!("After online");
         let online_comm_stats = party.inner.0.io().reset_comm_stats();
         let _ = aes::output(&mut party.inner, output).unwrap();
+        println!("After output");
         party.inner.0.teardown().unwrap();
+        println!("After teardown");
         
         BenchmarkResult::new(Duration::from_secs(0), duration, CombinedCommStats::empty(), online_comm_stats, party.inner.0.get_additional_timers())
     }

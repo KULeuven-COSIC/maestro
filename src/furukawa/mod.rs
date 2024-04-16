@@ -65,19 +65,26 @@ impl BenchmarkProtocol for MalChidaBenchmark {
         // create random key states for benchmarking purposes
         let ks = aes::random_keyschedule(&mut party);
 
+        println!("After setup");
+
         let start = Instant::now();
         party.do_preprocessing(0, simd).unwrap();
         let prep_duration = start.elapsed();
         let prep_comm_stats = party.io().reset_comm_stats();
 
+        println!("After pre-processing");
+
         let start = Instant::now();
         let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
         party.finalize().unwrap();
         let online_duration = start.elapsed();
+        println!("After online");
         let online_comm_stats = party.io().reset_comm_stats();
         // let post_sacrifice_duration = start.elapsed();
         let _ = aes::output(&mut party, output).unwrap();
+        println!("After output");
         party.inner.teardown().unwrap();
+        println!("After teardown");
         
         BenchmarkResult::new(prep_duration, online_duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
     }
