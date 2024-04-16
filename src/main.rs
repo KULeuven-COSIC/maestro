@@ -19,7 +19,6 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use crate::{furukawa::MalChidaBenchmark, gf4_circuit::GF4CircuitBenchmark, lut256::LUT256Benchmark, wollut16::LUT16Benchmark};
 use itertools::Itertools;
 use network::ConnectedParty;
-use party::error::MpcResult;
 
 use crate::chida::ImplVariant;
 

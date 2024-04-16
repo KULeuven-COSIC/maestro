@@ -158,7 +158,7 @@ impl IoThreadContext {
                                     Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
                                     Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
                                 }
-                                if self.write_queue.is_empty() && self.read_queue.is_empty() {
+                                if self.write_queue.is_empty() && self.read_queue.is_empty() && !self.comm_prev.stream.wants_write() && !self.comm_next.stream.wants_write() {
                                     self.state = State::WaitingForTasks; // the added task was small enough to be completed right away
                                 }
                             }
@@ -170,7 +170,7 @@ impl IoThreadContext {
                     }
                 },
                 State::Working { sync_requested, close_requested, write_comm_stats_requested } => {
-                    if self.read_queue.is_empty() && self.write_queue.is_empty() {
+                    if self.read_queue.is_empty() && self.write_queue.is_empty() && !self.comm_prev.stream.wants_write() && !self.comm_next.stream.wants_write() {
                         self.state = if sync_requested {
                             State::Sync { close_requested, write_comm_stats: write_comm_stats_requested }
                         }else if close_requested {
@@ -192,6 +192,12 @@ impl IoThreadContext {
                         }
                         if !self.read_queue.is_empty_for(Direction::Next) {
                             Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
+                        }
+                        if self.comm_prev.stream.wants_write() {
+                            Self::non_blocking_write_tls(&mut self.comm_prev)?;
+                        }
+                        if self.comm_next.stream.wants_write() {
+                            Self::non_blocking_write_tls(&mut self.comm_next)?;
                         }
 
                         // let's see if new tasks are available
@@ -304,8 +310,7 @@ impl IoThreadContext {
                         }
                         Err(io_err)
                     }
-                }
-                
+                }  
             },
             None => Ok(()), // no read task, nothing to do
         }
@@ -339,6 +344,19 @@ impl IoThreadContext {
                 
             },
             None => Ok(()), // no write task, nothing to do
+        }
+    }
+
+    fn non_blocking_write_tls(channel: &mut NonBlockingCommChannel) -> io::Result<()> {
+        match channel.stream.write_tls() {
+            Ok(_) => Ok(()), // here we can ignore the reported number of written bytes since they have been counted before in [Self::non_blocking_write]
+            Err(io_err) => {
+                // a few error types are expected, and are not an error
+                if io_err.kind() == ErrorKind::WouldBlock || io_err.kind() == ErrorKind::Interrupted {
+                    return Ok(()); // all is well, we try again later
+                }
+                Err(io_err)
+            }
         }
     }
 }

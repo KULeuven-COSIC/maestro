@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs::File, io::{self, BufWriter, Write}, path::PathBuf, thread, time::Duration};
 
-use crate::{network::{Config, ConnectedParty}, party::{error::MpcResult, CombinedCommStats}};
+use crate::{network::{Config, ConnectedParty}, party::CombinedCommStats};
 
 pub struct BenchmarkResult {
     prep_time: Duration,
