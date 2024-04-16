@@ -58,28 +58,28 @@ impl BenchmarkProtocol for MalChidaBenchmark {
     fn protocol_name(&self) -> String {
         "mal-chida".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<BenchmarkResult> {
-        let mut party = FurukawaParty::setup(conn)?;
+    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
+        let mut party = FurukawaParty::setup(conn).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
         let inputs = aes::random_state(&mut party, simd);
         // create random key states for benchmarking purposes
         let ks = aes::random_keyschedule(&mut party);
 
         let start = Instant::now();
-        party.do_preprocessing(0, simd)?;
+        party.do_preprocessing(0, simd).unwrap();
         let prep_duration = start.elapsed();
         let prep_comm_stats = party.io().reset_comm_stats();
 
         let start = Instant::now();
-        let output = aes128_no_keyschedule(&mut party, inputs, &ks)?;
+        let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
         party.finalize().unwrap();
         let online_duration = start.elapsed();
         let online_comm_stats = party.io().reset_comm_stats();
         // let post_sacrifice_duration = start.elapsed();
-        let _ = aes::output(&mut party, output)?;
-        party.inner.teardown()?;
+        let _ = aes::output(&mut party, output).unwrap();
+        party.inner.teardown().unwrap();
         
-        Ok(BenchmarkResult::new(prep_duration, online_duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers()))
+        BenchmarkResult::new(prep_duration, online_duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
     }
 }
 

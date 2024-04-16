@@ -52,8 +52,8 @@ impl BenchmarkProtocol for GF4CircuitBenchmark {
     fn protocol_name(&self) -> String {
         "gf4-circuit".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<BenchmarkResult> {
-        let mut party = GF4CircuitSemihonestParty::setup(conn)?;
+    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
+        let mut party = GF4CircuitSemihonestParty::setup(conn).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
 
         let input = aes::random_state(&mut party.0, simd);
@@ -61,13 +61,13 @@ impl BenchmarkProtocol for GF4CircuitBenchmark {
         let ks = aes::random_keyschedule(&mut party.0);
 
         let start = Instant::now();
-        let output = aes::aes128_no_keyschedule(&mut party, input, &ks)?;
+        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
         let duration = start.elapsed();
         let online_comm_stats = party.io().reset_comm_stats();
-        let _ = aes::output(&mut party.0, output)?;
-        party.0.teardown()?;
+        let _ = aes::output(&mut party.0, output).unwrap();
+        party.0.teardown().unwrap();
         
-        Ok(BenchmarkResult::new(Duration::from_secs(0), duration, CombinedCommStats::empty(), online_comm_stats, party.0.get_additional_timers()))
+        BenchmarkResult::new(Duration::from_secs(0), duration, CombinedCommStats::empty(), online_comm_stats, party.0.get_additional_timers())
     }
 }
 
