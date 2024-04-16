@@ -154,7 +154,7 @@ impl IoThreadContext {
                                 if !self.read_queue.is_empty() {
                                     Self::non_blocking_read(&mut self.comm, &mut self.read_queue, my_direction)?;
                                 }
-                                if self.write_queue.is_empty() && self.read_queue.is_empty() && !self.comm_prev.stream.wants_write() && !self.comm_next.stream.wants_write() {
+                                if self.write_queue.is_empty() && self.read_queue.is_empty() && !self.comm.stream.wants_write() {
                                     self.state = State::WaitingForTasks; // the added task was small enough to be completed right away
                                 }
                             }
@@ -166,7 +166,7 @@ impl IoThreadContext {
                     }
                 },
                 State::Working { sync_requested, close_requested, write_comm_stats_requested } => {
-                    if self.read_queue.is_empty() && self.write_queue.is_empty() && !self.comm_prev.stream.wants_write() && !self.comm_next.stream.wants_write() {
+                    if self.read_queue.is_empty() && self.write_queue.is_empty() && !self.comm.stream.wants_write() {
                         self.state = if sync_requested {
                             State::Sync { close_requested, write_comm_stats: write_comm_stats_requested }
                         }else if close_requested {
@@ -183,11 +183,8 @@ impl IoThreadContext {
                         if !self.read_queue.is_empty_for(my_direction) {
                             Self::non_blocking_read(&mut self.comm, &mut self.read_queue, my_direction)?;
                         }
-                        if self.comm_prev.stream.wants_write() {
-                            Self::non_blocking_write_tls(&mut self.comm_prev)?;
-                        }
-                        if self.comm_next.stream.wants_write() {
-                            Self::non_blocking_write_tls(&mut self.comm_next)?;
+                        if self.comm.stream.wants_write() {
+                            Self::non_blocking_write_tls(&mut self.comm)?;
                         }
 
                         // let's see if new tasks are available
