@@ -19,7 +19,6 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use crate::{furukawa::MalChidaBenchmark, gf4_circuit::GF4CircuitBenchmark, lut256::LUT256Benchmark, wollut16::LUT16Benchmark};
 use itertools::Itertools;
 use network::ConnectedParty;
-use party::error::MpcResult;
 
 use crate::chida::ImplVariant;
 
@@ -72,8 +71,6 @@ enum Commands {
         simd: usize,
         #[arg(long, help="The number repetitions of the protocol execution")]
         rep: usize,
-        #[arg(long, help="Maximum number of re-tries before failing", default_value="10")]
-        max_retry: usize,
         #[arg(long, help="Path to write benchmark result data as CSV. Default: result.csv", default_value="result.csv")]
         csv: PathBuf,
         #[arg(value_enum)]
@@ -114,7 +111,7 @@ fn main() {
             println!("Connected!");
             lut256::lut256_benchmark(connected, simd);
         },
-        Commands::Benchmark { simd, rep, max_retry, csv, target } => {
+        Commands::Benchmark { simd, rep, csv, target } => {
             // check non-empty and distinct targets
             if target.is_empty() {
                 let all_targets: Vec<_> = ProtocolVariant::value_variants().iter().map(|prot| prot.to_possible_value().unwrap().get_name().to_string()).collect();
@@ -129,7 +126,7 @@ fn main() {
             for v in target {
                 boxed.push(Box::new(v));
             }
-            benchmark::benchmark_protocols(party_index, &config, rep, max_retry, simd, boxed, csv).unwrap()
+            benchmark::benchmark_protocols(party_index, &config, rep, simd, boxed, csv).unwrap();
         }
     }
 }
@@ -150,7 +147,7 @@ impl BenchmarkProtocol for ProtocolVariant {
     fn protocol_name(&self) -> String {
         self.get_protocol().protocol_name()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<benchmark::BenchmarkResult> {
+    fn run(&self, conn: ConnectedParty, simd: usize) -> benchmark::BenchmarkResult {
         self.get_protocol().run(conn, simd)
     }
 }

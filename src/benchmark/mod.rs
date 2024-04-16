@@ -1,6 +1,6 @@
-use std::{collections::HashMap, fs::{self, File}, io::{self, BufWriter, Write}, path::PathBuf, thread, time::Duration};
+use std::{collections::HashMap, fs::File, io::{self, BufWriter, Write}, path::PathBuf, thread, time::Duration};
 
-use crate::{network::{Config, ConnectedParty}, party::{error::{MpcError, MpcResult}, CombinedCommStats}};
+use crate::{network::{Config, ConnectedParty}, party::CombinedCommStats};
 
 pub struct BenchmarkResult {
     prep_time: Duration,
@@ -12,7 +12,7 @@ pub struct BenchmarkResult {
 
 pub trait BenchmarkProtocol {
     fn protocol_name(&self) -> String;
-    fn run(&self, conn: ConnectedParty, simd: usize) -> MpcResult<BenchmarkResult>;
+    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult;
 }
 
 pub struct AggregatedBenchmarkResult {
@@ -27,11 +27,12 @@ pub struct AggregatedBenchmarkResult {
 
 const WAIT_BETWEEN_SEC: u64 = 2;
 
-fn benchmark(party_index: usize, config: &Config, iterations: usize, max_retries: usize, simd: usize, protocol: &Box<dyn BenchmarkProtocol>) -> AggregatedBenchmarkResult {
+fn benchmark(party_index: usize, config: &Config, iterations: usize, simd: usize, protocol: &Box<dyn BenchmarkProtocol>) -> AggregatedBenchmarkResult {
     let mut agg = AggregatedBenchmarkResult::new();
     for i in 0..iterations {
         println!("Iteration {}", i+1);
-        let res = benchmark_with_max_retries(party_index, config, max_retries, simd, protocol);
+        let conn = ConnectedParty::bind_and_connect(party_index, config.clone(), Some(Duration::from_secs(60))).unwrap();
+        let res = protocol.run(conn, simd);
         agg.update(res);
         thread::sleep(Duration::from_secs(WAIT_BETWEEN_SEC));
     }
@@ -39,11 +40,11 @@ fn benchmark(party_index: usize, config: &Config, iterations: usize, max_retries
     agg
 }
 
-pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usize, max_retries: usize, simd: usize, protocols: Vec<Box<dyn BenchmarkProtocol>>, output: PathBuf) -> io::Result<()> {
+pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usize, simd: usize, protocols: Vec<Box<dyn BenchmarkProtocol>>, output: PathBuf) -> io::Result<()> {
     let mut results = Vec::new();
     for prot in &protocols {
         println!("Benchmarking {}", prot.protocol_name());
-        let agg = benchmark(party_index, config, iterations, max_retries, simd, &prot);
+        let agg = benchmark(party_index, config, iterations, simd, &prot);
         results.push(agg);
         println!("Finished benchmark for {}", prot.protocol_name());
     }
@@ -56,22 +57,6 @@ pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usiz
         agg.write_to_csv(&mut writer, &prot.protocol_name(), &simd.to_string())?;
     }
     Ok(())
-}
-
-fn benchmark_with_max_retries(party_index: usize, config: &Config, max_retries: usize, simd: usize, protocol: &Box<dyn BenchmarkProtocol>) -> BenchmarkResult {
-    for i in 0..max_retries {
-        let conn = ConnectedParty::bind_and_connect(party_index, config.clone(), Some(Duration::from_secs(60))).unwrap();
-        let err = match protocol.run(conn, simd) {
-            Ok(res) => return res,
-            Err(err) => err,
-        };
-        if i == max_retries-1 {
-            println!("Reached max retries. Last error:");
-            Result::<(),MpcError>::Err(err).unwrap();
-        }
-        thread::sleep(Duration::from_secs(WAIT_BETWEEN_SEC));
-    }
-    unreachable!()
 }
 
 impl BenchmarkResult {
