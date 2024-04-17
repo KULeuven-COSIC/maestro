@@ -1,14 +1,15 @@
-use crate::{chida::ChidaParty, share::Field, wollut16::RndOhvOutput};
+use crate::{chida::ChidaParty, party::{broadcast::BroadcastContext, Party}, share::Field, wollut16::RndOhvOutput};
 
 mod online;
 mod offline;
 
 // Party for WOLLUT16 with active security
 pub struct WL16ASParty<F: Field + Copy> {
-    inner: ChidaParty,
+    inner: Party,
     prep_ohv: Vec<RndOhvOutput>,
     // Multiplication triples that need checking at the end
-    triples_to_check: MulTripleVector<F>, 
+    triples_to_check: MulTripleVector<F>,
+    broadcast_context: BroadcastContext,
 }
 
 struct MulTripleVector<F> {

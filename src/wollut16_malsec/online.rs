@@ -1,7 +1,9 @@
+use std::slice;
+
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{network::task::Direction, party::{error::MpcResult, ArithmeticBlackBox}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{network::task::Direction, party::{broadcast::Broadcast, error::MpcResult, ArithmeticBlackBox}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 use super::WL16ASParty;
 
@@ -28,19 +30,23 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
     // Generate RSS sharing of random value
     let x_prime = party.inner.generate_random(1)[0];
     let z_prime = weak_mult(party, &[x_prime],&[*y]).unwrap()[0];
-    let t = coin_flip(party);
-    let rho = reconstruct(party, *x + x_prime*t);
-    Ok(reconstruct(party, *z + z_prime*t - *y*rho).is_zero())
+    let t = coin_flip(party)?;
+    let rho = reconstruct(party, *x + x_prime*t)?;
+    reconstruct(party, *z + z_prime*t - *y*rho).map(|x| x.is_zero())
 }
 
-fn reconstruct<F: Field + Copy>(party: &mut WL16ASParty<F>, rho: RssShare<F>) -> F {
-    todo!() // semi-honest + hashing
+fn reconstruct<F: Field + Copy>(party: &mut WL16ASParty<F>, rho: RssShare<F>) -> MpcResult<F>
+where Sha256: FieldDigestExt<F>
+{
+    // todo!() // semi-honest + hashing
+    party.inner.open_rss(&mut party.broadcast_context, slice::from_ref(&rho.si), slice::from_ref(&rho.sii))
+        .map(|v| v[0])
 }
 
 /// Coin flip protocol returns a random value in F
 /// 
 /// Generates a sharing of a random value that is then reconstructed globally.
-fn coin_flip<F: Field + Copy>(party: &mut WL16ASParty<F>) -> F 
+fn coin_flip<F: Field + Copy>(party: &mut WL16ASParty<F>) -> MpcResult<F> 
 where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
 {
     let r: RssShare<F> = party.inner.generate_random(1)[0];
