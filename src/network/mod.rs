@@ -13,6 +13,8 @@ mod non_blocking;
 mod receiver;
 pub mod task;
 
+pub use receiver::{FieldVectorReceiver, FieldSliceReceiver};
+
 pub struct Config {
     player_addr: Vec<Ipv4Addr>,
     player_ports: Vec<u16>,

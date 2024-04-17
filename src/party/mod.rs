@@ -4,13 +4,14 @@ pub mod broadcast;
 pub mod error;
 mod thread_party;
 
+use std::borrow::Borrow;
 use std::io::{self, Write};
 use std::thread;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use crate::network::task::IoLayer;
-use crate::network::ConnectedParty;
+use crate::network::task::{Direction, IoLayer};
+use crate::network::{self, ConnectedParty};
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
@@ -96,6 +97,19 @@ pub trait ArithmeticBlackBox<F: Field> {
     fn finalize(&mut self) -> MpcResult<()>;
 }
 
+pub trait Party {
+    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>> where ChaCha20Rng: FieldRngExt<F>;
+    /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
+    fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F> where ChaCha20Rng: FieldRngExt<F>;
+    fn constant<F: Field>(&self, value: F) -> RssShare<F>;
+
+    // I/O operations
+    fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize);
+    fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> network::FieldVectorReceiver<F>;
+    fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> network::FieldSliceReceiver<'a, F>;
+    fn wait_for_completion(&self);
+}
+
 pub struct MainParty {
     pub i: usize,
     io: Option<IoLayer>,
@@ -175,51 +189,6 @@ impl MainParty {
             stats: CombinedCommStats::empty(),
             thread_pool: n_worker_threads.map(|n_workers| Self::build_thread_pool(n_workers)),
         })
-    }
-
-    pub fn generate_zero<F: Field>(&mut self, global_rng: &mut GlobalRng, n: usize) -> Vec<RssShare<F>>
-    where ChaCha20Rng: FieldRngExt<F>
-    {
-        let shares = global_rng.as_mut().generate(2*n);
-        let mut zero_share = Vec::with_capacity(n);
-        for r in shares.chunks_exact(2) {
-            let share = match self.i {
-                0 => RssShare::from(-r[0].clone() - r[1].clone(), r[0].clone()),
-                1 => RssShare::from(r[0].clone(), r[1].clone()),
-                2 => RssShare::from(r[1].clone(), -r[0].clone() - r[1].clone()),
-                _ => unreachable!()
-            };
-            zero_share.push(share);
-        }
-        zero_share
-    }
-
-    /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    pub fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
-    where ChaCha20Rng: FieldRngExt<F>
-    {
-        self.random_next.as_mut().generate(n).into_iter().zip(
-            self.random_prev.as_mut().generate(n).into_iter()
-        ).map(|(next, prev)| next - prev).collect()
-    }
-
-    pub fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
-    where ChaCha20Rng: FieldRngExt<F>
-    {
-        let si = self.random_prev.as_mut().generate(n);
-        let sii = self.random_next.as_mut().generate(n);
-        si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
-    }
-
-    #[inline]
-    pub fn constant<F: Field>(&self, value: F) -> RssShare<F> {
-        if self.i == 0 {
-            RssShare::from(value, F::zero())
-        }else if self.i == 2 {
-            RssShare::from(F::zero(), value)
-        }else{
-            RssShare::from(F::zero(), F::zero())
-        }
     }
 
     pub fn io(&self) -> &IoLayer {
@@ -312,6 +281,53 @@ impl MainParty {
             vec.push(ThreadParty::new(i, start, end, random_next, random_prev, random_local, io))
         }
         vec
+    }
+}
+
+impl Party for MainParty {
+    /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
+    fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
+    where ChaCha20Rng: FieldRngExt<F>
+    {
+        self.random_next.as_mut().generate(n).into_iter().zip(
+            self.random_prev.as_mut().generate(n).into_iter()
+        ).map(|(next, prev)| next - prev).collect()
+    }
+
+    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    where ChaCha20Rng: FieldRngExt<F>
+    {
+        let si = self.random_prev.as_mut().generate(n);
+        let sii = self.random_next.as_mut().generate(n);
+        si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
+    }
+
+    #[inline]
+    fn constant<F: Field>(&self, value: F) -> RssShare<F> {
+        if self.i == 0 {
+            RssShare::from(value, F::zero())
+        }else if self.i == 2 {
+            RssShare::from(F::zero(), value)
+        }else{
+            RssShare::from(F::zero(), F::zero())
+        }
+    }
+
+    // I/O
+    fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize) {
+        self.io().send_field(direction, elements, len)
+    }
+
+    fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> network::FieldVectorReceiver<F> {
+        self.io().receive_field(direction, num_elements)
+    }
+
+    fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> network::FieldSliceReceiver<'a, F> {
+        self.io().receive_field_slice(direction, dst)
+    }
+
+    fn wait_for_completion(&self) {
+        self.io().wait_for_completion()
     }
 }
 
@@ -571,19 +587,5 @@ pub mod test {
         p1.join().unwrap();
         p2.join().unwrap();
         p3.join().unwrap();
-    }
-
-    #[test]
-    fn correct_zeros_gf8() {
-        const N: usize = 100;
-        let ((z1, z2, z3), _) = simple_localhost_setup(|p| {
-            let mut global_rng = GlobalRng::setup_global(p).unwrap();
-            p.generate_zero(&mut global_rng, N)
-        });
-
-        for (z1, (z2, z3)) in z1.into_iter().zip(z2.into_iter().zip(z3)) {
-            consistent(&z1, &z2, &z3);
-            assert_eq(z1, z2, z3, GF8(0));
-        }
     }
 }

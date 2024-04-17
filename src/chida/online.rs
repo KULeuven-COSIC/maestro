@@ -5,7 +5,7 @@ use sha2::Sha256;
 use crate::aes::GF8InvBlackBox;
 use crate::network::task::{Direction, IoLayer};
 use crate::party::error::MpcResult;
-use crate::party::{ArithmeticBlackBox, MainParty};
+use crate::party::{ArithmeticBlackBox, MainParty, Party};
 use crate::share::gf8::GF8;
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 

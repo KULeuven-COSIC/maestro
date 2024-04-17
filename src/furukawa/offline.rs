@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 use rand::Rng;
 
-use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, MainParty}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, MainParty, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 use super::MulTripleVector;
 
