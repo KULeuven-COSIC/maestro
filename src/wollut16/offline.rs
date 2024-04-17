@@ -200,11 +200,11 @@ fn generate_ohv16<P: ArithmeticBlackBox<BsBool16> + ArithmeticBlackBox<GF4>>(par
     #[cfg(feature = "verbose-timing")]
     PARTY_TIMER.lock().unwrap().report_time("prep_transpose_rand", transpose_rand.elapsed());
 
-    let res = izip!(ohv_transposed.into_iter().take(n), rand_transposed.into_iter().take(n), party.generate_alpha(n)).map(|((ohv_si, ohv_sii), rand, alpha)| {
+    let res = izip!(ohv_transposed.into_iter().take(n), rand_transposed.into_iter().take(n)).map(|((ohv_si, ohv_sii), rand)| {
         RndOhvOutput {
             si: ohv_si,
             sii: ohv_sii,
-            random: rand.si + alpha,
+            random: rand.si,
         }
     }).collect();
 
