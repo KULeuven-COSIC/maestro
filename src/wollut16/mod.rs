@@ -55,8 +55,6 @@ impl WL16Party {
     }
 }
 
-pub fn wollut16_benchmark() {}
-
 impl RndOhv16 {
     pub fn lut(&self, offset: usize, table: &[u8; 16]) -> GF4 {
         let mut res = GF4::ZERO;
