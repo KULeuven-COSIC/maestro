@@ -34,8 +34,8 @@ pub struct RndOhvOutput {
 }
 
 impl WL16Party {
-    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        ChidaParty::setup(connected).map(|party| {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads).map(|party| {
             Self {
                 inner: party,
                 prep_ohv: Vec::new(),
@@ -62,8 +62,8 @@ impl WL16Party {
     }
 }
 
-pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize) {
-    let mut party = WL16Party::setup(connected).unwrap();
+pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
+    let mut party = WL16Party::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
     let start_prep = Instant::now();
     party.do_preprocessing(0, simd).unwrap();
@@ -99,8 +99,8 @@ impl BenchmarkProtocol for LUT16Benchmark {
     fn protocol_name(&self) -> String {
         "lut16".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
-        let mut party = WL16Party::setup(conn).unwrap();
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        let mut party = WL16Party::setup(conn, n_worker_threads).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
         println!("After setup");
         let start_prep = Instant::now();
@@ -169,7 +169,7 @@ mod test {
 
     pub fn localhost_setup_wl16<T1: Send + 'static, F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,WL16Party)>, JoinHandle<(T2,WL16Party)>, JoinHandle<(T3,WL16Party)>) {
         fn adapter<T, Fx: FnOnce(&mut WL16Party)->T>(conn: ConnectedParty, f: Fx) -> (T,WL16Party) {
-            let mut party = WL16Party::setup(conn).unwrap();
+            let mut party = WL16Party::setup(conn, None).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

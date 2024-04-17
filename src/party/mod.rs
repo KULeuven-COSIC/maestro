@@ -2,10 +2,13 @@ mod commitment;
 pub mod correlated_randomness;
 pub mod broadcast;
 pub mod error;
+mod thread_party;
 
 use std::io::{self, Write};
+use std::thread;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use crate::network::task::IoLayer;
 use crate::network::ConnectedParty;
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
@@ -15,6 +18,7 @@ use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 use {std::{collections::HashMap, sync::Mutex}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
 use std::time::Duration;
 use self::error::MpcResult;
+use self::thread_party::ThreadParty;
 
 #[derive(Clone, Copy)]
 pub struct CommStats {
@@ -92,8 +96,7 @@ pub trait ArithmeticBlackBox<F: Field> {
     fn finalize(&mut self) -> MpcResult<()>;
 }
 
-
-pub struct Party {
+pub struct MainParty {
     pub i: usize,
     io: Option<IoLayer>,
     // /// Channel to player i+1
@@ -104,11 +107,11 @@ pub struct Party {
     random_next: SharedRng,
     random_prev: SharedRng,
     random_local: ChaCha20Rng,
-
+    thread_pool: Option<ThreadPool>
 }
 
-impl Party {
-    pub fn setup(mut party: ConnectedParty) -> MpcResult<Self> {
+impl MainParty {
+    pub fn setup(mut party: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
 
         let mut rng = ChaCha20Rng::from_entropy();
 
@@ -138,10 +141,28 @@ impl Party {
             random_prev: rand_prev,
             random_local: rng,
             stats: CombinedCommStats::empty(),
+            thread_pool: n_worker_threads.map(|n_workers| Self::build_thread_pool(n_workers)),
         })
     }
 
-    pub fn setup_semi_honest(party: ConnectedParty) -> MpcResult<Self> {
+    fn build_thread_pool(n_worker_threads: usize) -> ThreadPool {
+        let mut builder = ThreadPoolBuilder::new();
+        builder = builder.use_current_thread();
+        if n_worker_threads == 0 {
+            // spawn as many threads as there are cores (minus one since main thread is already included)
+            let n_cores = thread::available_parallelism().unwrap().get()-1;
+            if n_cores > 0 {
+                builder = builder.num_threads(n_cores);
+            }
+        }else if n_worker_threads != 1 {
+            // spawn n_workder_threads -1 (since main thread is already included)
+            builder = builder.num_threads(n_worker_threads -1);
+        }
+        builder = builder.thread_name(|i| format!("worker-{}", i));
+        builder.build().unwrap()
+    }
+
+    pub fn setup_semi_honest(party: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         let mut rng = ChaCha20Rng::from_entropy();
         let io_layer = IoLayer::spawn_io(party.comm_prev, party.comm_next)?;
         let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &io_layer).unwrap();
@@ -151,7 +172,8 @@ impl Party {
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
-           stats: CombinedCommStats::empty(),
+            stats: CombinedCommStats::empty(),
+            thread_pool: n_worker_threads.map(|n_workers| Self::build_thread_pool(n_workers)),
         })
     }
 
@@ -278,6 +300,19 @@ impl Party {
         #[cfg(not(feature = "verbose-timing"))]
         return Vec::new();
     }
+
+    pub fn create_thread_parties(&mut self, ranges: Vec<(usize,usize)>) -> Vec<ThreadParty> {
+        let mut vec = Vec::with_capacity(ranges.len());
+        for (start, end) in ranges {
+            let random_local = ChaCha20Rng::from_rng(&mut self.random_local).unwrap();
+            let random_next = SharedRng::seeded_from(&mut self.random_next);
+            let random_prev = SharedRng::seeded_from(&mut self.random_prev);
+            let io = self.io.as_ref().expect("I/O closed");
+            let i = self.i;
+            vec.push(ThreadParty::new(i, start, end, random_next, random_prev, random_local, io))
+        }
+        vec
+    }
 }
 
 #[cfg(feature = "verbose-timing")]
@@ -323,7 +358,7 @@ pub mod test {
     use crate::network::task::Direction;
     use crate::network::{Config, ConnectedParty, CreatedParty};
     use crate::party::correlated_randomness::{GlobalRng, SharedRng};
-    use crate::party::Party;
+    use crate::party::MainParty;
     use crate::share::gf8::GF8;
     use crate::share::test::{assert_eq, consistent};
 
@@ -425,10 +460,10 @@ pub mod test {
         (party1, party2, party3)
     }
 
-    pub fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,Party)>, JoinHandle<(T2,Party)>, JoinHandle<(T3,Party)>) {
+    pub fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut MainParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut MainParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut MainParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,MainParty)>, JoinHandle<(T2,MainParty)>, JoinHandle<(T3,MainParty)>) {
         let _f1 = |p: ConnectedParty| {
             // println!("P1: Before Setup");
-            let mut p = Party::setup(p).unwrap();
+            let mut p = MainParty::setup(p, None).unwrap();
             // println!("P1: After Setup");
             let res = f1(&mut p);
             p.teardown().unwrap();
@@ -436,7 +471,7 @@ pub mod test {
         };
         let _f2 = |p: ConnectedParty| {
             // println!("P2: Before Setup");
-            let mut p = Party::setup(p).unwrap();
+            let mut p = MainParty::setup(p, None).unwrap();
             // println!("P2: After Setup");
             let res = f2(&mut p);
             p.teardown().unwrap();
@@ -444,7 +479,7 @@ pub mod test {
         };
         let _f3 = |p: ConnectedParty| {
             // println!("P3: Before Setup");
-            let mut p = Party::setup(p).unwrap();
+            let mut p = MainParty::setup(p, None).unwrap();
             // println!("P3: After Setup");
             let res = f3(&mut p);
             p.teardown().unwrap();
@@ -454,13 +489,13 @@ pub mod test {
     }
 
     struct PartySetup;
-    impl TestSetup<Party> for PartySetup {
-        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,Party)>, JoinHandle<(T2,Party)>, JoinHandle<(T3,Party)>) {
+    impl TestSetup<MainParty> for PartySetup {
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut MainParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut MainParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut MainParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,MainParty)>, JoinHandle<(T2,MainParty)>, JoinHandle<(T3,MainParty)>) {
             localhost_setup(f1, f2, f3)
         }
     }
 
-    pub fn simple_localhost_setup<F: Send + Clone + Fn(&mut Party) -> T + 'static, T: Send + 'static>(f: F) -> ((T,T,T), (Party, Party, Party)) {
+    pub fn simple_localhost_setup<F: Send + Clone + Fn(&mut MainParty) -> T + 'static, T: Send + 'static>(f: F) -> ((T,T,T), (MainParty, MainParty, MainParty)) {
         let (h1, h2, h3) = localhost_setup(f.clone(), f.clone(), f);
         let (t1, p1) = h1.join().unwrap();
         let (t2, p2) = h2.join().unwrap();
@@ -525,7 +560,7 @@ pub mod test {
 
     #[test]
     fn correct_party_teardown() {
-        fn send_receive_teardown(p: &mut Party) {
+        fn send_receive_teardown(p: &mut MainParty) {
             let mut buf = vec![0u8;16];
             p.io().send(Direction::Next, buf.clone());
             let rcv_buf = p.io().receive_slice(Direction::Previous, &mut buf);

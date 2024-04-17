@@ -1,7 +1,7 @@
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use crate::network::task::{Direction, IoLayer};
 use crate::network::CommChannel;
-use crate::party::{commitment, Party};
+use crate::party::{commitment, MainParty};
 use rand_chacha::ChaCha20Rng;
 use crate::party::broadcast::{Broadcast, BroadcastContext};
 use crate::party::error::{MpcError, MpcResult};
@@ -73,10 +73,14 @@ impl SharedRng {
 
         Ok((Self(ChaCha20Rng::from_seed(seed)), Self(ChaCha20Rng::from_seed(seed_next))))
     }
+
+    pub fn seeded_from(other: &mut Self) -> Self {
+        Self(ChaCha20Rng::from_rng(&mut other.0).unwrap())
+    }
 }
 
 impl GlobalRng {
-    pub fn setup_global(party: &mut Party) -> MpcResult<Self> {
+    pub fn setup_global(party: &mut MainParty) -> MpcResult<Self> {
         // create random seed part
         let mut seed = [0u8; CR_SEC_PARAM];
         party.random_local.fill_bytes(&mut seed);

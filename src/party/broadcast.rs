@@ -5,7 +5,7 @@ use sha2::{Sha256, Digest};
 use sha2::digest::FixedOutput;
 use crate::network::task::Direction;
 use crate::party::error::{MpcError, MpcResult};
-use crate::party::Party;
+use crate::party::MainParty;
 use crate::share::{Field, FieldDigestExt, RssShare};
 
 pub struct BroadcastContext{
@@ -47,7 +47,7 @@ impl BroadcastContext {
     }
 }
 
-impl Broadcast for Party {
+impl Broadcast for MainParty {
     fn broadcast_round_bytes(&mut self, context: &mut BroadcastContext, buffer_next: &mut [u8], buffer_prev: &mut[u8], message: &[u8]) -> MpcResult<()> {
         // first send to P+1
         self.io().send(Direction::Next, message.to_vec());
@@ -178,7 +178,7 @@ mod test {
     use crate::network::task::Direction;
     use crate::party::broadcast::{Broadcast, BroadcastContext};
     use crate::party::error::MpcError;
-    use crate::party::Party;
+    use crate::party::MainParty;
     use crate::party::test::localhost_setup;
     use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
     use crate::share::gf8::GF8;
@@ -193,7 +193,7 @@ mod test {
         let x3 = rng.generate(N);
 
         let program = |msg: Vec<GF8>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let mut prev_buf = vec![GF8(0); N];
                 let mut next_buf = vec![GF8(0); N];
@@ -240,7 +240,7 @@ mod test {
         let x2 = rng.generate(N);
         let x3 = rng.generate(N);
         let program = |msg: Vec<GF8>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let mut prev_buf = vec![GF8(0); N];
                 let mut next_buf = vec![GF8(0); N];
@@ -263,7 +263,7 @@ mod test {
             let x2 = rng.generate(N);
             let x3 = rng.generate(N);
             let program = |msg: Vec<GF8>| {
-                move |p: &mut Party| {
+                move |p: &mut MainParty| {
                     if p.i == cheater {
                         let mut context = BroadcastContext::new();
                         let mut prev_buf = vec![GF8(0); N];
@@ -319,7 +319,7 @@ mod test {
         }
 
         let compute = |share: Vec<RssShare<GF8>>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let xi: Vec<_> = share.iter().map(|s|s.si.clone()).collect();
                 let xii: Vec<_> = share.iter().map(|s|s.sii.clone()).collect();
@@ -355,7 +355,7 @@ mod test {
         }
 
         let program = |x: Vec<RssShare<GF8>>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let open1 = p.open_rss_to(&mut context, &x[0..N], 0).unwrap();
                 let open2 = p.open_rss_to(&mut context, &x[N..2*N], 1).unwrap();

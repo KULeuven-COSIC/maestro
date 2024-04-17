@@ -10,8 +10,8 @@ use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, Benchmar
 pub struct GF4CircuitSemihonestParty(ChidaParty);
 
 impl GF4CircuitSemihonestParty {
-    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        ChidaParty::setup(connected).map(|chida_party| Self(chida_party))
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads).map(|chida_party| Self(chida_party))
     }
 
     fn io(&self) -> &IoLayer {
@@ -19,8 +19,8 @@ impl GF4CircuitSemihonestParty {
     }
 }
 
-pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize) {
-    let mut party = GF4CircuitSemihonestParty::setup(connected).unwrap();
+pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
+    let mut party = GF4CircuitSemihonestParty::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
 
     let input = aes::random_state(&mut party.0, simd);
@@ -52,8 +52,8 @@ impl BenchmarkProtocol for GF4CircuitBenchmark {
     fn protocol_name(&self) -> String {
         "gf4-circuit".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
-        let mut party = GF4CircuitSemihonestParty::setup(conn).unwrap();
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
         println!("After setup");
 
@@ -264,7 +264,7 @@ mod test {
 
     pub fn localhost_setup_gf4_circuit_semi_honest<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,GF4CircuitSemihonestParty)>, JoinHandle<(T2,GF4CircuitSemihonestParty)>, JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
         fn adapter<T, Fx: FnOnce(&mut GF4CircuitSemihonestParty)->T>(conn: ConnectedParty, f: Fx) -> (T,GF4CircuitSemihonestParty) {
-            let mut party = GF4CircuitSemihonestParty::setup(conn).unwrap();
+            let mut party = GF4CircuitSemihonestParty::setup(conn, None).unwrap();
             let t = f(&mut party);
             party.0.teardown().unwrap();
             (t, party)

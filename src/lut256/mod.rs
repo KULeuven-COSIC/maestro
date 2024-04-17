@@ -31,8 +31,8 @@ pub struct RndOhv256Output {
 }
 
 impl LUT256Party {
-    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        ChidaParty::setup(connected).map(|party| {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads).map(|party| {
             Self {
                 inner: party,
                 prep_ohv: Vec::new(),
@@ -61,8 +61,8 @@ impl RndOhv {
     }
 }
 
-pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
-    let mut party = LUT256Party::setup(connected).unwrap();
+pub fn lut256_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
+    let mut party = LUT256Party::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
     let start_prep = Instant::now();
     party.do_preprocessing(0, simd).unwrap();
@@ -99,8 +99,8 @@ impl BenchmarkProtocol for LUT256Benchmark {
     fn protocol_name(&self) -> String {
         "lut256".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
-        let mut party = LUT256Party::setup(conn).unwrap();
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        let mut party = LUT256Party::setup(conn, n_worker_threads).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
         println!("After setup");
         let start_prep = Instant::now();
@@ -137,7 +137,7 @@ mod test {
 
     pub fn localhost_setup_lut256<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
         fn adapter<T, Fx: FnOnce(&mut LUT256Party)->T>(conn: ConnectedParty, f: Fx) -> (T,LUT256Party) {
-            let mut party = LUT256Party::setup(conn).unwrap();
+            let mut party = LUT256Party::setup(conn, None).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

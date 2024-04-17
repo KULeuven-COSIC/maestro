@@ -5,7 +5,7 @@ use sha2::Sha256;
 use crate::aes::GF8InvBlackBox;
 use crate::network::task::{Direction, IoLayer};
 use crate::party::error::MpcResult;
-use crate::party::{ArithmeticBlackBox, Party};
+use crate::party::{ArithmeticBlackBox, MainParty};
 use crate::share::gf8::GF8;
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
@@ -209,7 +209,7 @@ fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
 }
 
 // all parties input the same number of inputs (input.len() AES states)
-pub fn input_round<F: Field>(party: &mut Party, input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> where ChaCha20Rng: FieldRngExt<F> {
+pub fn input_round<F: Field>(party: &mut MainParty, input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> where ChaCha20Rng: FieldRngExt<F> {
     let n = input.len();
     // create 3n random elements
     let random = party.generate_random(3*n);
@@ -248,7 +248,7 @@ pub fn input_round<F: Field>(party: &mut Party, input: &[F]) -> MpcResult<(Vec<R
 }
 
 // all parties input the same number of inputs (input.len() AES states)
-pub fn input_round_aes_states(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcResult<(VectorAesState, VectorAesState, VectorAesState)> {
+pub fn input_round_aes_states(party: &mut MainParty, input: Vec<Vec<GF8>>) -> MpcResult<(VectorAesState, VectorAesState, VectorAesState)> {
     let n = input.len();
     // create 3n*16 random elements
     let random = party.generate_random(3*16*n);
@@ -296,7 +296,7 @@ pub fn input_round_aes_states(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcRes
     Ok((in1, in2, in3))
 }
 
-pub fn output_round<F: Field>(party: &mut Party, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+pub fn output_round<F: Field>(party: &mut MainParty, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
     let (my, siii) = match party.i {
         0 => {
             // send my share to P2
@@ -327,7 +327,7 @@ pub fn output_round<F: Field>(party: &mut Party, to_p1: &[RssShare<F>], to_p2: &
     Ok(sum)
 }
 
-pub fn mul<F: Field>(party: &mut Party, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> 
+pub fn mul<F: Field>(party: &mut MainParty, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> 
 where ChaCha20Rng: FieldRngExt<F>
 {
     debug_assert_eq!(ci.len(), ai.len());
@@ -359,7 +359,7 @@ pub mod test {
     use crate::chida::online::{input_round, input_round_aes_states, mul, output_round, VectorAesState};
     use crate::chida::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
     use crate::network::ConnectedParty;
-    use crate::party::Party;
+    use crate::party::MainParty;
     use crate::party::test::{localhost_connect, localhost_setup, TestSetup};
     use crate::share::gf8::GF8;
     use crate::share::{FieldRngExt, RssShare};
@@ -369,7 +369,7 @@ pub mod test {
 
     pub fn localhost_setup_chida<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,ChidaParty)>, JoinHandle<(T2,ChidaParty)>, JoinHandle<(T3,ChidaParty)>) {
         fn adapter<T, Fx: FnOnce(&mut ChidaParty)->T>(conn: ConnectedParty, f: Fx) -> (T,ChidaParty) {
-            let mut party = ChidaParty::setup(conn).unwrap();
+            let mut party = ChidaParty::setup(conn, None).unwrap();
             let t = f(&mut party);
             party.0.teardown().unwrap();
             (t, party)
@@ -379,7 +379,7 @@ pub mod test {
 
     pub fn localhost_setup_chida_benchmark<T1: Send + 'static, F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, variant: ImplVariant) -> (JoinHandle<(T1,ChidaBenchmarkParty)>, JoinHandle<(T2,ChidaBenchmarkParty)>, JoinHandle<(T3,ChidaBenchmarkParty)>) {
         fn adapter<T, Fx: FnOnce(&mut ChidaBenchmarkParty)->T>(conn: ConnectedParty, f: Fx, variant: ImplVariant) -> (T,ChidaBenchmarkParty) {
-            let mut party = ChidaBenchmarkParty::setup(conn, variant).unwrap();
+            let mut party = ChidaBenchmarkParty::setup(conn, variant, None).unwrap();
             let t = f(&mut party);
             party.inner.0.teardown().unwrap();
             (t, party)
@@ -424,7 +424,7 @@ pub mod test {
         let (b, b1, b2, b3) = random_secret_shared_vector(N);
 
         let program = |a: Vec<RssShare<GF8>>, b: Vec<RssShare<GF8>>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut ci = vec![GF8(0); a.len()];
                 let mut cii = vec![GF8(0); a.len()];
                 let (ai, aii): (Vec<_>, Vec<_>) = a.into_iter().map(|r|(r.si, r.sii)).unzip();
@@ -464,7 +464,7 @@ pub mod test {
         let (c1, c2, c3) = secret_share_vector(&mut rng, o3.iter());
 
         let program = |a: Vec<RssShare<GF8>>, b: Vec<RssShare<GF8>>, c: Vec<RssShare<GF8>>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 output_round(p, &a, &b, &c).unwrap()
             }
         };
@@ -486,7 +486,7 @@ pub mod test {
         let in2 = rng.generate(16*N);
         let in3 = rng.generate(16*N);
         let program = |my_input: Vec<GF8>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut v = Vec::with_capacity(N);
                 for i in 0..N {
                     let mut block = Vec::with_capacity(16);
@@ -531,7 +531,7 @@ pub mod test {
         let in2 = rng.generate(N);
         let in3 = rng.generate(N);
         let program = |my_input: Vec<GF8>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let (a,b,c) = input_round(p, &my_input).unwrap();
                 (a,b,c)
             }

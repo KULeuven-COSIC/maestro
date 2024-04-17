@@ -14,13 +14,13 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
 // simd: how many parallel AES calls
-pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
-    let mut party = FurukawaParty::setup(connected).unwrap();
+pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
+    let mut party = FurukawaParty::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
     let inputs = aes::random_state(&mut party, simd);
     // create random key states for benchmarking purposes
@@ -58,8 +58,8 @@ impl BenchmarkProtocol for MalChidaBenchmark {
     fn protocol_name(&self) -> String {
         "mal-chida".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
-        let mut party = FurukawaParty::setup(conn).unwrap();
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        let mut party = FurukawaParty::setup(conn, n_worker_threads).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
         let inputs = aes::random_state(&mut party, simd);
         // create random key states for benchmarking purposes
@@ -129,7 +129,7 @@ impl<F> MulTripleVector<F> {
 }
 
 pub struct FurukawaParty<F: Field + Copy> {
-    inner: Party,
+    inner: MainParty,
     triples_to_check: MulTripleVector<F>,
     pre_processing: Option<MulTripleVector<F>>,
 }
@@ -138,8 +138,8 @@ impl<F: Field + Copy> FurukawaParty<F>
 where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
 {
 
-    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        Party::setup(connected).map(|party| Self {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             triples_to_check: MulTripleVector::new(),
             pre_processing: None,
@@ -160,7 +160,7 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         InputPhase::new(self)
     }
 
-    pub fn inner(&self) -> &Party {
+    pub fn inner(&self) -> &MainParty {
         &self.inner
     }
     
@@ -419,7 +419,7 @@ pub mod test {
         fn adapter<F: Field + Copy, T, Fx: FnOnce(&mut FurukawaParty<F>)->T>(conn: ConnectedParty, f: Fx) -> (T,FurukawaParty<F>)
         where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         {
-            let mut party = FurukawaParty::setup(conn).unwrap();
+            let mut party = FurukawaParty::setup(conn, None).unwrap();
             let t = f(&mut party);
             party.finalize().unwrap();
             party.inner.teardown().unwrap();

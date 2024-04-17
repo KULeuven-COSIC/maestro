@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 use rand::Rng;
 
-use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, MainParty}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 use super::MulTripleVector;
 
@@ -19,7 +19,7 @@ const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];
 /// Note that unless `n` is a power of 2 larger or equal to 2^10, this function will generate more triples but only return exactly `n`.
 /// Depending on `next_power_of_two(n)`, different bucket sizes are chosen internally.
 #[allow(non_snake_case)]
-pub fn bucket_cut_and_choose<F: Field + PartialEq + Copy + AddAssign>(party: &mut Party, n: usize) -> MpcResult<MulTripleVector<F>> 
+pub fn bucket_cut_and_choose<F: Field + PartialEq + Copy + AddAssign>(party: &mut MainParty, n: usize) -> MpcResult<MulTripleVector<F>> 
 where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
 {
     // choose params
@@ -132,7 +132,7 @@ fn shuffle<R: RngCore + CryptoRng, F: Field>(rng: &mut R, a: &mut [RssShare<F>],
     shuffle_from_random_tape(&tape, cii);
 }
 
-fn open_and_check<F: Field + PartialEq + Copy>(party: &mut Party, a: &[RssShare<F>], b: &[RssShare<F>], ci: &[F], cii: &[F]) -> MpcResult<bool> {
+fn open_and_check<F: Field + PartialEq + Copy>(party: &mut MainParty, a: &[RssShare<F>], b: &[RssShare<F>], ci: &[F], cii: &[F]) -> MpcResult<bool> {
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(a.len(), ci.len());
     debug_assert_eq!(a.len(), cii.len());
@@ -167,7 +167,7 @@ fn open_and_check<F: Field + PartialEq + Copy>(party: &mut Party, a: &[RssShare<
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
 /// 
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
-pub fn sacrifice<F: Field + Copy + AddAssign>(party: &mut Party, n: usize, sacrifice_bucket_size: usize, 
+pub fn sacrifice<F: Field + Copy + AddAssign>(party: &mut MainParty, n: usize, sacrifice_bucket_size: usize, 
     ai_to_check: &[F], aii_to_check: &[F], bi_to_check: &[F], bii_to_check: &[F], ci_to_check: &[F], cii_to_check: &[F],
     ai_to_sacrifice: &mut [F], aii_to_sacrifice: &mut [F], bi_to_sacrifice: &mut [F], bii_to_sacrifice: &mut [F], ci_to_sacrifice: &mut [F], cii_to_sacrifice: &mut [F],
 ) -> MpcResult<()>
