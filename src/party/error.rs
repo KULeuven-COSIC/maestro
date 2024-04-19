@@ -13,7 +13,6 @@ pub enum MpcError {
     RecvError,
 }
 
-
 impl Display for MpcError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {

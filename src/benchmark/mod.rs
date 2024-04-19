@@ -1,6 +1,16 @@
-use std::{collections::HashMap, fs::File, io::{self, BufWriter, Write}, path::PathBuf, thread, time::Duration};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, BufWriter, Write},
+    path::PathBuf,
+    thread,
+    time::Duration,
+};
 
-use crate::{network::{Config, ConnectedParty}, party::CombinedCommStats};
+use crate::{
+    network::{Config, ConnectedParty},
+    party::CombinedCommStats,
+};
 
 pub struct BenchmarkResult {
     prep_time: Duration,
@@ -22,16 +32,27 @@ pub struct AggregatedBenchmarkResult {
     online_comm_stats: CombinedCommStats,
     additional_timers: HashMap<String, Vec<Duration>>,
     prep_time_avg_s: f64,
-    online_time_avg_s: f64
+    online_time_avg_s: f64,
 }
 
 const WAIT_BETWEEN_SEC: u64 = 2;
 
-fn benchmark(party_index: usize, config: &Config, iterations: usize, simd: usize, protocol: &Box<dyn BenchmarkProtocol>) -> AggregatedBenchmarkResult {
+fn benchmark(
+    party_index: usize,
+    config: &Config,
+    iterations: usize,
+    simd: usize,
+    protocol: &Box<dyn BenchmarkProtocol>,
+) -> AggregatedBenchmarkResult {
     let mut agg = AggregatedBenchmarkResult::new();
     for i in 0..iterations {
-        println!("Iteration {}", i+1);
-        let conn = ConnectedParty::bind_and_connect(party_index, config.clone(), Some(Duration::from_secs(60))).unwrap();
+        println!("Iteration {}", i + 1);
+        let conn = ConnectedParty::bind_and_connect(
+            party_index,
+            config.clone(),
+            Some(Duration::from_secs(60)),
+        )
+        .unwrap();
         let res = protocol.run(conn, simd);
         agg.update(res);
         thread::sleep(Duration::from_secs(WAIT_BETWEEN_SEC));
@@ -40,7 +61,14 @@ fn benchmark(party_index: usize, config: &Config, iterations: usize, simd: usize
     agg
 }
 
-pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usize, simd: usize, protocols: Vec<Box<dyn BenchmarkProtocol>>, output: PathBuf) -> io::Result<()> {
+pub fn benchmark_protocols(
+    party_index: usize,
+    config: &Config,
+    iterations: usize,
+    simd: usize,
+    protocols: Vec<Box<dyn BenchmarkProtocol>>,
+    output: PathBuf,
+) -> io::Result<()> {
     let mut results = Vec::new();
     for prot in &protocols {
         println!("Benchmarking {}", prot.protocol_name());
@@ -49,7 +77,10 @@ pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usiz
         println!("Finished benchmark for {}", prot.protocol_name());
     }
 
-    println!("Writing CSV-formatted benchmark results to {}", output.to_str().unwrap());
+    println!(
+        "Writing CSV-formatted benchmark results to {}",
+        output.to_str().unwrap()
+    );
     // header
     let mut writer = BufWriter::new(File::create(output)?);
     writeln!(&mut writer, "protocol,simd,pre-processing-time,online-time,pre-processing-bytes-sent-to-next,pre-processing-bytes-received-from-next,pre-processing-bytes-rounds-next,pre-processing-bytes-sent-to-prev,pre-processing-bytes-received-from-prev,pre-processing-bytes-rounds-prev, online-sent-to-next,online-bytes-received-from-next,online-bytes-rounds-next,online-bytes-sent-to-prev,online-bytes-received-from-prev,online-bytes-rounds-prev")?;
@@ -60,9 +91,21 @@ pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usiz
 }
 
 impl BenchmarkResult {
-    pub fn new(prep_time: Duration, online_time: Duration, prep_comm_stats: CombinedCommStats, online_comm_stats: CombinedCommStats, additional_timers: Vec<(String, Duration)>) -> Self {
+    pub fn new(
+        prep_time: Duration,
+        online_time: Duration,
+        prep_comm_stats: CombinedCommStats,
+        online_comm_stats: CombinedCommStats,
+        additional_timers: Vec<(String, Duration)>,
+    ) -> Self {
         let additional_timers: HashMap<String, Duration> = additional_timers.into_iter().collect();
-        Self { prep_time, online_time, prep_comm_stats, online_comm_stats, additional_timers }
+        Self {
+            prep_time,
+            online_time,
+            prep_comm_stats,
+            online_comm_stats,
+            additional_timers,
+        }
     }
 }
 
@@ -90,13 +133,17 @@ impl AggregatedBenchmarkResult {
         self.online_comm_stats = result.online_comm_stats;
 
         if self.additional_timers.is_empty() {
-            for (k,v) in result.additional_timers.drain() {
+            for (k, v) in result.additional_timers.drain() {
                 self.additional_timers.insert(k, vec![v]);
             }
-        }else{
+        } else {
             // merge
-            assert_eq!(self.additional_timers.len(), result.additional_timers.len(), "BenchmarkResult does have different keys");
-            result.additional_timers.drain().for_each(|(k,v)| {
+            assert_eq!(
+                self.additional_timers.len(),
+                result.additional_timers.len(),
+                "BenchmarkResult does have different keys"
+            );
+            result.additional_timers.drain().for_each(|(k, v)| {
                 self.additional_timers.get_mut(&k).unwrap().push(v);
             });
         }
@@ -116,7 +163,12 @@ impl AggregatedBenchmarkResult {
     pub fn write_to_csv<W: Write>(&self, writer: &mut W, name: &str, simd: &str) -> io::Result<()> {
         for i in 0..self.n_iterations() {
             write!(writer, "\"{}\",{},", name, simd)?;
-            write!(writer, "{},{},", self.prep_times[i].as_secs_f64(), self.online_times[i].as_secs_f64())?;
+            write!(
+                writer,
+                "{},{},",
+                self.prep_times[i].as_secs_f64(),
+                self.online_times[i].as_secs_f64()
+            )?;
             self.prep_comm_stats.write_to_csv(writer)?;
             write!(writer, ",")?;
             self.online_comm_stats.write_to_csv(writer)?;

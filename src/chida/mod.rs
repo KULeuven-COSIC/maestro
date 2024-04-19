@@ -1,13 +1,13 @@
 //! This module implements the semi-honest oblivious AES protocol by Chida et al., "High-Throughput Secure AES Computation" in WAHC'18 (https://doi.org/10.1145/3267973.3267977).
-//! 
+//!
 //! The implementation has two variants, [ImplVariant::Simple] and [ImplVariant::Optimized].
 //! These variants differ in the implementation of the `sub_bytes` step of the AES round function. Both variants send the same number of bytes to each party and require the same number of communication rounds.
-//! 
+//!
 //! The [ImplVariant::Simple] implements the GF(2^8) inversion protocol given in Figure 6 using multiplication from Araki et al.[^note].
-//! 
+//!
 //! The [ImplVariant::Optimized] implements the proposed multiplication protocol from Chida et al. including the optimized field operations via local table lookups.
 //! Thus, the [ImplVariant::Optimized] should improve local computation but does not improve communication complexity.
-//! 
+//!
 //! [^note]: Araki et al. "High-Throughput Semi-Honest Secure Three-Party Computation with an Honest Majority" in CCS'16 (https://eprint.iacr.org/2016/768)
 
 use std::time::{Duration, Instant};
@@ -23,8 +23,8 @@ pub mod online;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ImplVariant {
-    Simple,     // uses the gf8 inversion as in Figure 6
-    Optimized   // uses gf8 inversion as in Algorithm 5
+    Simple,    // uses the gf8 inversion as in Figure 6
+    Optimized, // uses gf8 inversion as in Algorithm 5
 }
 
 // Party for Chida et al. semi-honest protocol
@@ -59,9 +59,9 @@ pub struct ChidaBenchmarkParty {
 
 impl ChidaBenchmarkParty {
     pub fn setup(connected: ConnectedParty, variant: ImplVariant) -> MpcResult<Self> {
-        ChidaParty::setup(connected).map(|party| Self{
+        ChidaParty::setup(connected).map(|party| Self {
             inner: party,
-            variant
+            variant,
         })
     }
 }
@@ -80,10 +80,15 @@ pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVari
     let online_comm_stats = party.inner.0.io().reset_comm_stats();
     let _ = aes::output(&mut party.inner, output).unwrap();
     party.inner.0.teardown().unwrap();
-    
+
     println!("Finished benchmark");
-    
-    println!("Party {}: Chida et al. with SIMD={} took {}s", party.inner.0.i, simd, duration.as_secs_f64());
+
+    println!(
+        "Party {}: Chida et al. with SIMD={} took {}s",
+        party.inner.0.i,
+        simd,
+        duration.as_secs_f64()
+    );
 
     println!("Setup:");
     setup_comm_stats.print_comm_statistics(party.inner.party_index());
@@ -117,7 +122,13 @@ impl BenchmarkProtocol for ChidaBenchmark {
         println!("After output");
         party.inner.0.teardown().unwrap();
         println!("After teardown");
-        
-        BenchmarkResult::new(Duration::from_secs(0), duration, CombinedCommStats::empty(), online_comm_stats, party.inner.0.get_additional_timers())
+
+        BenchmarkResult::new(
+            Duration::from_secs(0),
+            duration,
+            CombinedCommStats::empty(),
+            online_comm_stats,
+            party.inner.0.get_additional_timers(),
+        )
     }
 }

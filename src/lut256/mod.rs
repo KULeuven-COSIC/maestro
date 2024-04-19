@@ -1,10 +1,15 @@
 use std::time::{Duration, Instant};
 
-
-use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf8::GF8};
-mod online;
+use crate::{
+    aes::{self, GF8InvBlackBox},
+    benchmark::{BenchmarkProtocol, BenchmarkResult},
+    chida::ChidaParty,
+    network::{task::IoLayer, ConnectedParty},
+    party::{error::MpcResult, ArithmeticBlackBox},
+    share::gf8::GF8,
+};
 mod offline;
-
+mod online;
 
 /// a random one-hot vector of size 256
 #[derive(Clone, Copy)]
@@ -32,12 +37,10 @@ pub struct RndOhv256Output {
 
 impl LUT256Party {
     pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        ChidaParty::setup(connected).map(|party| {
-            Self {
-                inner: party,
-                prep_ohv: Vec::new(),
-                lut_time: Duration::from_secs(0),
-            }
+        ChidaParty::setup(connected).map(|party| Self {
+            inner: party,
+            prep_ohv: Vec::new(),
+            lut_time: Duration::from_secs(0),
         })
     }
 
@@ -47,7 +50,6 @@ impl LUT256Party {
 }
 
 impl RndOhv {
-
     pub fn new(table: [u8; 256]) -> Self {
         Self(table)
     }
@@ -79,10 +81,16 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize) {
     let online_comm_stats = party.io().reset_comm_stats();
     let _ = aes::output(&mut party.inner, output).unwrap();
     party.inner.teardown().unwrap();
-    
+
     println!("Finished benchmark");
-    
-    println!("Party {}: LUT-256 with SIMD={} took {}s (pre-processing) and {}s (online phase)", party.inner.party_index(), simd, prep_duration.as_secs_f64(), duration.as_secs_f64());
+
+    println!(
+        "Party {}: LUT-256 with SIMD={} took {}s (pre-processing) and {}s (online phase)",
+        party.inner.party_index(),
+        simd,
+        prep_duration.as_secs_f64(),
+        duration.as_secs_f64()
+    );
     println!("LUT time: {}s", party.lut_time.as_secs_f64());
     println!("Setup:");
     setup_comm_stats.print_comm_statistics(party.inner.party_index());
@@ -121,8 +129,14 @@ impl BenchmarkProtocol for LUT256Benchmark {
         println!("After output");
         party.inner.teardown().unwrap();
         println!("After teardown");
-        
-        BenchmarkResult::new(prep_duration, duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
+
+        BenchmarkResult::new(
+            prep_duration,
+            duration,
+            prep_comm_stats,
+            online_comm_stats,
+            party.inner.get_additional_timers(),
+        )
     }
 }
 
@@ -130,25 +144,64 @@ impl BenchmarkProtocol for LUT256Benchmark {
 mod test {
     use std::thread::JoinHandle;
 
-
-    use crate::{network::ConnectedParty, party::test::{localhost_connect, TestSetup}};
+    use crate::{
+        network::ConnectedParty,
+        party::test::{localhost_connect, TestSetup},
+    };
 
     use super::LUT256Party;
 
-    pub fn localhost_setup_lut256<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
-        fn adapter<T, Fx: FnOnce(&mut LUT256Party)->T>(conn: ConnectedParty, f: Fx) -> (T,LUT256Party) {
+    pub fn localhost_setup_lut256<
+        T1: Send + 'static,
+        F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static,
+        T2: Send + 'static,
+        F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static,
+        T3: Send + 'static,
+        F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static,
+    >(
+        f1: F1,
+        f2: F2,
+        f3: F3,
+    ) -> (
+        JoinHandle<(T1, LUT256Party)>,
+        JoinHandle<(T2, LUT256Party)>,
+        JoinHandle<(T3, LUT256Party)>,
+    ) {
+        fn adapter<T, Fx: FnOnce(&mut LUT256Party) -> T>(
+            conn: ConnectedParty,
+            f: Fx,
+        ) -> (T, LUT256Party) {
             let mut party = LUT256Party::setup(conn).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();
             (t, party)
         }
-        localhost_connect(|conn_party| adapter(conn_party, f1), |conn_party| adapter(conn_party, f2), |conn_party| adapter(conn_party, f3))
+        localhost_connect(
+            |conn_party| adapter(conn_party, f1),
+            |conn_party| adapter(conn_party, f2),
+            |conn_party| adapter(conn_party, f3),
+        )
     }
 
     pub struct LUT256Setup;
     impl TestSetup<LUT256Party> for LUT256Setup {
-        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
+        fn localhost_setup<
+            T1: Send + 'static,
+            F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static,
+            T2: Send + 'static,
+            F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static,
+            T3: Send + 'static,
+            F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static,
+        >(
+            f1: F1,
+            f2: F2,
+            f3: F3,
+        ) -> (
+            JoinHandle<(T1, LUT256Party)>,
+            JoinHandle<(T2, LUT256Party)>,
+            JoinHandle<(T3, LUT256Party)>,
+        ) {
             localhost_setup_lut256(f1, f2, f3)
         }
     }
