@@ -65,7 +65,7 @@ const GF4_BITSLICED_LUT: [[u16; 4]; 16] = [
 ];
 
 /// Placeholder for the LUT protocol
-pub fn LUT_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<GF4>)> {
+pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<GF4>)> {
     if party.prep_ohv.len() < v.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
     }
@@ -231,7 +231,7 @@ fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     let lut_layer_time = Instant::now();
 
     // Step 5: Compute replicated sharing of v inverse
-    let (v_inv_i, v_inv_ii) = LUT_layer(party, &v)?;
+    let (v_inv_i, v_inv_ii) = lut_layer(party, &v)?;
     #[cfg(feature = "verbose-timing")]
     PARTY_TIMER
         .lock()
@@ -602,7 +602,7 @@ mod test {
         },
     };
 
-    use super::{gf8_inv_layer, LUT_layer};
+    use super::{gf8_inv_layer, lut_layer};
 
     fn secret_share_additive<R: Rng + CryptoRng, F: Field>(
         rng: &mut R,
@@ -627,7 +627,7 @@ mod test {
         let program = |v: Vec<GF4>| {
             move |p: &mut WL16Party| {
                 p.prepare_rand_ohv(v.len()).unwrap();
-                let (si, sii) = LUT_layer(p, &v).unwrap();
+                let (si, sii) = lut_layer(p, &v).unwrap();
                 si.into_iter()
                     .zip(sii)
                     .map(|(si, sii)| RssShare::from(si, sii))

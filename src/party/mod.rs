@@ -306,9 +306,9 @@ impl Party {
 
     pub fn print_statistics(&self) {
         assert!(self.io.is_none(), "Call teardown() first");
-        let kv = self.get_additional_timers();
         #[cfg(feature = "verbose-timing")]
         {
+            let kv = self.get_additional_timers();
             for (key, dur) in kv.iter() {
                 println!("\t{}:\t{}s", key, dur.as_secs_f64());
             }

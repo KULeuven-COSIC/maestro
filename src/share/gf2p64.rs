@@ -33,7 +33,7 @@ impl GF2p64 {
     /// Multiply an element by X (i.e. by 0x0000000000000002)
     /// This is essentially a left shift of the bit-vector mod MODULUS
     /// not constant time
-    fn mul_by_X(&mut self) {
+    fn mul_by_x(&mut self) {
         let high_bit = self.0 >> (Self::NBITS - 1);
         self.0 = self.0 << 1;
         if high_bit != 0 {
@@ -48,7 +48,7 @@ impl GF2p64 {
             if other.0 & (1 << i) != 0 {
                 result.0 ^= self.0
             }
-            self.mul_by_X()
+            self.mul_by_x()
         }
         result
     }
@@ -142,7 +142,7 @@ impl Field for GF2p64 {
         v.into_iter()
             .chunks(Self::NBYTES)
             .into_iter()
-            .map(|mut c| {
+            .map(|c| {
                 let x = u64::from_be_bytes(
                     c.collect::<Vec<u8>>()
                         .try_into()
@@ -157,7 +157,7 @@ impl Field for GF2p64 {
         debug_assert_eq!(v.len(), Self::NBYTES * dest.len());
         dest.iter_mut()
             .zip(v.into_iter().chunks(Self::NBYTES).into_iter())
-            .for_each(|(dst, mut c)| {
+            .for_each(|(dst, c)| {
                 dst.0 = u64::from_be_bytes(
                     c.collect::<Vec<u8>>()
                         .try_into()
@@ -222,24 +222,39 @@ impl Neg for GF2p64 {
 impl Mul for GF2p64 {
     type Output = Self;
 
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
     fn mul(self, rhs: Self) -> Self::Output {
-        #[cfg(any(
-            all(
-                feature = "clmul",
-                target_arch = "x86_64",
-                target_feature = "sse2",
-                target_feature = "pclmulqdq"
-            ),
-            all(
-                feature = "clmul",
-                target_arch = "aarch64",
-                target_feature = "neon",
-                target_feature = "aes"
-            )
-        ))]
-        {
-            return Self::mul_clmul_u64(&self, &rhs);
-        }
+        Self::mul_clmul_u64(&self, &rhs)
+    }
+
+    #[cfg(not(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    )))]
+    fn mul(self, rhs: Self) -> Self::Output {
         //Fall back
         self.mul_using_add(&rhs)
     }
@@ -544,7 +559,7 @@ const GF8_EB_TABLE: [u64; 256] = [
 
 impl GF2p64Subfield for GF8 {
     fn embed(self) -> GF2p64 {
-        return GF2p64(GF8_EB_TABLE[self.0 as usize]);
+        GF2p64(GF8_EB_TABLE[self.0 as usize])
     }
 }
 
@@ -569,7 +584,7 @@ const GF4_EB_TABLE: [u64; 16] = [
 
 impl GF2p64Subfield for GF4 {
     fn embed(self) -> GF2p64 {
-        return GF2p64(GF4_EB_TABLE[self.as_u8() as usize]);
+        GF2p64(GF4_EB_TABLE[self.as_u8() as usize])
     }
 }
 
