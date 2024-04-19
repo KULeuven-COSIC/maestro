@@ -50,6 +50,10 @@ impl ChidaParty {
     pub fn get_additional_timers(&self) -> Vec<(String, Duration)> {
         self.0.get_additional_timers()
     }
+
+    pub fn as_party_mut(&mut self) -> &mut MainParty {
+        &mut self.0
+    }
 }
 /// [ChidaParty] paired with an [ImplVariant]
 pub struct ChidaBenchmarkParty {

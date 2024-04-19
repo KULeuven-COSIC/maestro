@@ -4,7 +4,7 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, network::task::{Direction, IoLayer}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, GF8InvBlackBox}, network::task::{Direction, IoLayerOwned}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 use super::{offline, LUT256Party};
 
@@ -65,7 +65,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         self.inner.pre_processing(n_multiplications)
     }
 
-    fn io(&self) -> &IoLayer {
+    fn io(&self) -> &IoLayerOwned {
         self.inner.io()
     }
 

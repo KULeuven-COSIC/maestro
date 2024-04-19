@@ -4,7 +4,7 @@ use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::{IoLayerOwned}, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 
 
 pub struct GF4CircuitSemihonestParty(ChidaParty);
@@ -14,7 +14,7 @@ impl GF4CircuitSemihonestParty {
         ChidaParty::setup(connected, n_worker_threads).map(|chida_party| Self(chida_party))
     }
 
-    fn io(&self) -> &IoLayer {
+    fn io(&self) -> &IoLayerOwned {
         <ChidaParty as ArithmeticBlackBox<GF4>>::io(&self.0)
     }
 }
@@ -85,7 +85,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
         self.0.pre_processing(n_multiplications)
     }
 
-    fn io(&self) -> &IoLayer {
+    fn io(&self) -> &IoLayerOwned {
         self.0.io()
     }
 
@@ -276,6 +276,9 @@ mod test {
     impl TestSetup<GF4CircuitSemihonestParty> for GF4SemihonestSetup {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (std::thread::JoinHandle<(T1,GF4CircuitSemihonestParty)>, std::thread::JoinHandle<(T2,GF4CircuitSemihonestParty)>, std::thread::JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
             localhost_setup_gf4_circuit_semi_honest(f1, f2, f3)
+        }
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(_n_threads: usize, _f1: F1, _f2: F2, _f3: F3) -> (JoinHandle<(T1,GF4CircuitSemihonestParty)>, JoinHandle<(T2,GF4CircuitSemihonestParty)>, JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
+            unimplemented!()
         }
     }
 

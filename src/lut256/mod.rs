@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 
-use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf8::GF8};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::{IoLayerOwned}, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf8::GF8};
 mod online;
 mod offline;
 
@@ -41,7 +41,7 @@ impl LUT256Party {
         })
     }
 
-    pub fn io(&self) -> &IoLayer {
+    pub fn io(&self) -> &IoLayerOwned {
         <ChidaParty as ArithmeticBlackBox<GF8>>::io(&self.inner)
     }
 }
@@ -150,6 +150,9 @@ mod test {
     impl TestSetup<LUT256Party> for LUT256Setup {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
             localhost_setup_lut256(f1, f2, f3)
+        }
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(_n_threads: usize, _f1: F1, _f2: F2, _f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
+            unimplemented!()
         }
     }
 }

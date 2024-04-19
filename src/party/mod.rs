@@ -7,12 +7,14 @@ mod thread_party;
 use std::borrow::Borrow;
 use std::io::{self, Write};
 use std::thread;
-use rand::SeedableRng;
+use itertools::Itertools;
+use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use crate::network::task::{Direction, IoLayer};
+use crate::network::task::{Direction, IoLayerOwned};
 use crate::network::{self, ConnectedParty};
-use crate::party::correlated_randomness::{GlobalRng, SharedRng};
+use crate::party::correlated_randomness::SharedRng;
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
 #[cfg(feature = "verbose-timing")]
@@ -88,7 +90,7 @@ pub trait ArithmeticBlackBox<F: Field> {
     fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>>;
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
     fn generate_alpha(&mut self, n: usize) -> Vec<F>;
-    fn io(&self) -> &IoLayer;
+    fn io(&self) -> &IoLayerOwned;
     
     fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
     fn constant(&self, value: F) -> RssShare<F>;
@@ -107,12 +109,11 @@ pub trait Party {
     fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize);
     fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> network::FieldVectorReceiver<F>;
     fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> network::FieldSliceReceiver<'a, F>;
-    fn wait_for_completion(&self);
 }
 
 pub struct MainParty {
     pub i: usize,
-    io: Option<IoLayer>,
+    io: Option<IoLayerOwned>,
     // /// Channel to player i+1
     // pub comm_next: CommChannel,
     // /// Channel to player i-1
@@ -122,6 +123,10 @@ pub struct MainParty {
     random_prev: SharedRng,
     random_local: ChaCha20Rng,
     thread_pool: Option<ThreadPool>
+}
+
+struct MyTask<'a> {
+    id: &'a usize,
 }
 
 impl MainParty {
@@ -150,7 +155,7 @@ impl MainParty {
 
         Ok(Self {
             i: party.i,
-            io: Some(IoLayer::spawn_io(party.comm_prev, party.comm_next)?),
+            io: Some(IoLayerOwned::spawn_io(party.comm_prev, party.comm_next)?),
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
@@ -168,9 +173,9 @@ impl MainParty {
             if n_cores > 0 {
                 builder = builder.num_threads(n_cores);
             }
-        }else if n_worker_threads != 1 {
-            // spawn n_workder_threads -1 (since main thread is already included)
-            builder = builder.num_threads(n_worker_threads -1);
+        }else{
+            // spawn n_workder_threads
+            builder = builder.num_threads(n_worker_threads);
         }
         builder = builder.thread_name(|i| format!("worker-{}", i));
         builder.build().unwrap()
@@ -178,8 +183,9 @@ impl MainParty {
 
     pub fn setup_semi_honest(party: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         let mut rng = ChaCha20Rng::from_entropy();
-        let io_layer = IoLayer::spawn_io(party.comm_prev, party.comm_next)?;
+        let io_layer = IoLayerOwned::spawn_io(party.comm_prev, party.comm_next)?;
         let (rand_next, rand_prev) = SharedRng::setup_all_pairwise_semi_honest(&mut rng, &io_layer).unwrap();
+        
         Ok(Self {
             i: party.i,
             io: Some(io_layer),
@@ -191,13 +197,19 @@ impl MainParty {
         })
     }
 
-    pub fn io(&self) -> &IoLayer {
-        self.io.as_ref().expect("Shutdown was called.")
+    pub fn io(&self) -> &IoLayerOwned {
+        self.io.as_ref().expect("Teardown was called.")
+    }
+
+    pub fn wait_for_completion(&self) {
+        self.io().wait_for_completion()
     }
 
     pub fn teardown(&mut self) -> MpcResult<()> {
-        debug_assert!(self.io.is_some());
-        self.io.take().map(|io| {
+        self.thread_pool.take().into_iter().for_each(|thread_pool| drop(thread_pool));
+        let io = self.io.take();
+        debug_assert!(io.is_some());
+        if let Some(io) = io {
             let (nb_prev, nb_next) = io.shutdown()?;
             let mut comm_next = nb_next.into_channel()?;
             let mut comm_prev = nb_prev.into_channel()?;
@@ -234,17 +246,16 @@ impl MainParty {
             };
             self.stats.prev = stats_prev;
             self.stats.next = stats_next;
-            io::Result::Ok(())
-        }).transpose()?
-        .unwrap_or(());
+            return Ok(());
+        }
         Ok(())
     }
 
     pub fn print_statistics(&self) {
         assert!(self.io.is_none(), "Call teardown() first");
-        let kv = self.get_additional_timers();
         #[cfg(feature = "verbose-timing")]
         {
+            let kv = self.get_additional_timers();
             for (key, dur) in kv.iter() {
                 println!("\t{}:\t{}s", key, dur.as_secs_f64());
             }
@@ -270,17 +281,78 @@ impl MainParty {
         return Vec::new();
     }
 
+    pub fn split_range_equally(&self, end_exclusive: usize) -> Vec<(usize,usize)> {
+        let n_parts = self.thread_pool.as_ref().map(|tp| tp.current_num_threads()).unwrap_or(1);
+        let length = end_exclusive/n_parts;
+        let mut start = 0;
+        let mut remaining = end_exclusive;
+        let mut vec = Vec::with_capacity(n_parts);
+        for i in 0..n_parts {
+            if i != n_parts-1 {
+                vec.push((start, start+length));
+            }else{
+                vec.push((start, start+remaining))
+            }
+            start += length;
+            remaining -= length;
+        }
+        vec
+    }
+
     pub fn create_thread_parties(&mut self, ranges: Vec<(usize,usize)>) -> Vec<ThreadParty> {
+        assert!(self.io.is_some(), "I/O closed");
         let mut vec = Vec::with_capacity(ranges.len());
         for (start, end) in ranges {
             let random_local = ChaCha20Rng::from_rng(&mut self.random_local).unwrap();
             let random_next = SharedRng::seeded_from(&mut self.random_next);
             let random_prev = SharedRng::seeded_from(&mut self.random_prev);
-            let io = self.io.as_ref().expect("I/O closed");
+            let io = self.io().clone_io_layer();
             let i = self.i;
             vec.push(ThreadParty::new(i, start, end, random_next, random_prev, random_local, io))
         }
+
+        let vec = vec.into_iter().map(|a| a).collect_vec();
+        let vec = <Vec<ThreadParty> as IntoParallelIterator>::into_par_iter(vec).collect();
         vec
+    }
+
+    pub fn run_in_threadpool<T: Send,F: FnOnce()->MpcResult<T> + Send>(&self, f: F) -> MpcResult<T> {
+        self.thread_pool.as_ref().expect("Thread pool not enabled").install(f)
+    }
+
+    // pub fn thread_pool_map(&mut self, ranges: Vec<(usize,usize)>) {
+    //     let ids = vec![1,2,3];
+    //     let tasks = vec![MyTask{ id: &ids[0]}, MyTask{ id: &ids[1]}];
+    //     let f: Vec<_> = tasks.into_par_iter().map(|t| t).collect();
+    //     let parties = self.create_thread_parties(ranges)
+    //         .into_par_iter().map(|tp| tp.task_size()).collect_vec_list();
+    // }
+}
+
+#[inline]
+fn generate_alpha<F: Field, R: Rng + CryptoRng>(next: &mut R, prev: &mut R, n: usize) -> Vec<F>
+where R: FieldRngExt<F>
+{
+   next.generate(n).into_iter().zip(prev.generate(n).into_iter()).map(|(next, prev)| next - prev).collect()
+}
+
+#[inline]
+fn generate_random<F: Field, R: Rng + CryptoRng>(next: &mut R, prev: &mut R, n: usize) -> Vec<RssShare<F>>
+where R: FieldRngExt<F>
+{
+    let si = prev.generate(n);
+    let sii = next.generate(n);
+    si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
+}
+
+#[inline]
+fn constant<F: Field>(i: usize, value: F) -> RssShare<F> {
+    if i == 0 {
+        RssShare::from(value, F::zero())
+    }else if i == 2 {
+        RssShare::from(F::zero(), value)
+    }else{
+        RssShare::from(F::zero(), F::zero())
     }
 }
 
@@ -289,28 +361,18 @@ impl Party for MainParty {
     fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
     where ChaCha20Rng: FieldRngExt<F>
     {
-        self.random_next.as_mut().generate(n).into_iter().zip(
-            self.random_prev.as_mut().generate(n).into_iter()
-        ).map(|(next, prev)| next - prev).collect()
+        generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
     fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
     where ChaCha20Rng: FieldRngExt<F>
     {
-        let si = self.random_prev.as_mut().generate(n);
-        let sii = self.random_next.as_mut().generate(n);
-        si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si,sii)).collect()
+        generate_random(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
     #[inline]
     fn constant<F: Field>(&self, value: F) -> RssShare<F> {
-        if self.i == 0 {
-            RssShare::from(value, F::zero())
-        }else if self.i == 2 {
-            RssShare::from(F::zero(), value)
-        }else{
-            RssShare::from(F::zero(), F::zero())
-        }
+        constant(self.i, value)
     }
 
     // I/O
@@ -324,10 +386,6 @@ impl Party for MainParty {
 
     fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> network::FieldSliceReceiver<'a, F> {
         self.io().receive_field_slice(direction, dst)
-    }
-
-    fn wait_for_completion(&self) {
-        self.io().wait_for_completion()
     }
 }
 
@@ -373,10 +431,8 @@ pub mod test {
     use rustls::pki_types::{PrivateKeyDer, CertificateDer};
     use crate::network::task::Direction;
     use crate::network::{Config, ConnectedParty, CreatedParty};
-    use crate::party::correlated_randomness::{GlobalRng, SharedRng};
+    use crate::party::correlated_randomness::SharedRng;
     use crate::party::MainParty;
-    use crate::share::gf8::GF8;
-    use crate::share::test::{assert_eq, consistent};
 
     const TEST_KEY_DIR: &str = "keys";
 
@@ -414,6 +470,7 @@ pub mod test {
 
     pub trait TestSetup<P> {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut P) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut P) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut P) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,P)>, JoinHandle<(T2,P)>, JoinHandle<(T3,P)>);
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut P) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut P) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut P) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,P)>, JoinHandle<(T2,P)>, JoinHandle<(T3,P)>);
     }
 
     pub fn localhost_connect<T1: Send + 'static, F1: Send + FnOnce(ConnectedParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(ConnectedParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(ConnectedParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<T1>, JoinHandle<T2>, JoinHandle<T3>) {
@@ -476,26 +533,26 @@ pub mod test {
         (party1, party2, party3)
     }
 
-    pub fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut MainParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut MainParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut MainParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,MainParty)>, JoinHandle<(T2,MainParty)>, JoinHandle<(T3,MainParty)>) {
-        let _f1 = |p: ConnectedParty| {
+    pub fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut MainParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut MainParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut MainParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_threads: Option<usize>) -> (JoinHandle<(T1,MainParty)>, JoinHandle<(T2,MainParty)>, JoinHandle<(T3,MainParty)>) {
+        let _f1 = move |p: ConnectedParty| {
             // println!("P1: Before Setup");
-            let mut p = MainParty::setup(p, None).unwrap();
+            let mut p = MainParty::setup(p, n_threads).unwrap();
             // println!("P1: After Setup");
             let res = f1(&mut p);
             p.teardown().unwrap();
             (res, p)
         };
-        let _f2 = |p: ConnectedParty| {
+        let _f2 = move |p: ConnectedParty| {
             // println!("P2: Before Setup");
-            let mut p = MainParty::setup(p, None).unwrap();
+            let mut p = MainParty::setup(p, n_threads).unwrap();
             // println!("P2: After Setup");
             let res = f2(&mut p);
             p.teardown().unwrap();
             (res, p)
         };
-        let _f3 = |p: ConnectedParty| {
+        let _f3 = move |p: ConnectedParty| {
             // println!("P3: Before Setup");
-            let mut p = MainParty::setup(p, None).unwrap();
+            let mut p = MainParty::setup(p, n_threads).unwrap();
             // println!("P3: After Setup");
             let res = f3(&mut p);
             p.teardown().unwrap();
@@ -504,15 +561,18 @@ pub mod test {
         localhost_connect(_f1, _f2, _f3)
     }
 
-    struct PartySetup;
+    pub struct PartySetup;
     impl TestSetup<MainParty> for PartySetup {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut MainParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut MainParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut MainParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,MainParty)>, JoinHandle<(T2,MainParty)>, JoinHandle<(T3,MainParty)>) {
-            localhost_setup(f1, f2, f3)
+            localhost_setup(f1, f2, f3, None)
+        }
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut MainParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut MainParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut MainParty) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,MainParty)>, JoinHandle<(T2,MainParty)>, JoinHandle<(T3,MainParty)>) {
+            localhost_setup(f1, f2, f3, Some(n_threads))
         }
     }
 
     pub fn simple_localhost_setup<F: Send + Clone + Fn(&mut MainParty) -> T + 'static, T: Send + 'static>(f: F) -> ((T,T,T), (MainParty, MainParty, MainParty)) {
-        let (h1, h2, h3) = localhost_setup(f.clone(), f.clone(), f);
+        let (h1, h2, h3) = localhost_setup(f.clone(), f.clone(), f, None);
         let (t1, p1) = h1.join().unwrap();
         let (t2, p2) = h2.join().unwrap();
         let (t3, p3) = h3.join().unwrap();
@@ -581,9 +641,43 @@ pub mod test {
             p.io().send(Direction::Next, buf.clone());
             let rcv_buf = p.io().receive_slice(Direction::Previous, &mut buf);
             rcv_buf.rcv().unwrap();
-            // p.teardown();
+            // localhost_setup calls teardown
         }
-        let (p1, p2, p3) = localhost_setup(send_receive_teardown, send_receive_teardown, send_receive_teardown);
+        let (p1, p2, p3) = localhost_setup(send_receive_teardown, send_receive_teardown, send_receive_teardown, None);
+        p1.join().unwrap();
+        p2.join().unwrap();
+        p3.join().unwrap();
+    }
+
+    #[test]
+    fn correct_split_range_single_thread() {
+        const THREADS: usize = 3;
+        fn split_range_single_test(p: &mut MainParty) {
+            let range = p.split_range_equally(3);
+            assert_eq!(vec![(0,3)], range);
+            let range = p.split_range_equally(300);
+            assert_eq!(vec![(0,300)], range);
+            let range = p.split_range_equally(100);
+            assert_eq!(vec![(0,100)], range);
+        }
+        let (p1, p2, p3) = localhost_setup(split_range_single_test, split_range_single_test, split_range_single_test, None);
+        p1.join().unwrap();
+        p2.join().unwrap();
+        p3.join().unwrap();
+    }
+
+    #[test]
+    fn correct_split_range() {
+        const THREADS: usize = 3;
+        fn split_range_test(p: &mut MainParty) {
+            let range = p.split_range_equally(3);
+            assert_eq!(vec![(0,1), (1,2), (2,3)], range);
+            let range = p.split_range_equally(300);
+            assert_eq!(vec![(0,100), (100,200), (200,300)], range);
+            let range = p.split_range_equally(100);
+            assert_eq!(vec![(0,33), (33,66), (66,100)], range);
+        }
+        let (p1, p2, p3) = localhost_setup(split_range_test, split_range_test, split_range_test, Some(THREADS));
         p1.join().unwrap();
         p2.join().unwrap();
         p3.join().unwrap();

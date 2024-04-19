@@ -14,7 +14,7 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
@@ -320,7 +320,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     type Rng = ChaCha20Rng;
     type Digest = Sha256;
 
-    fn io(&self) -> &IoLayer {
+    fn io(&self) -> &IoLayerOwned {
         self.inner.io()
     }
 
@@ -434,6 +434,9 @@ pub mod test {
     {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,FurukawaParty<F>)>, JoinHandle<(T2,FurukawaParty<F>)>, JoinHandle<(T3,FurukawaParty<F>)>) {
             localhost_setup_furukawa(f1, f2, f3)
+        }
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static>(_n_threads: usize, _f1: F1, _f2: F2, _f3: F3) -> (JoinHandle<(T1,FurukawaParty<F>)>, JoinHandle<(T2,FurukawaParty<F>)>, JoinHandle<(T3,FurukawaParty<F>)>) {
+            unimplemented!()
         }
     }
 

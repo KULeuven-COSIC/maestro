@@ -5,7 +5,7 @@ use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 use crate::{
-    aes::GF8InvBlackBox, network::task::{Direction, IoLayer}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}
+    aes::GF8InvBlackBox, network::task::{Direction, IoLayerOwned}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}
 };
 
 #[cfg(feature = "verbose-timing")]
@@ -375,7 +375,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         self.inner.pre_processing(n_multiplications)
     }
 
-    fn io(&self) -> &IoLayer {
+    fn io(&self) -> &IoLayerOwned {
         self.inner.io()
     }
 

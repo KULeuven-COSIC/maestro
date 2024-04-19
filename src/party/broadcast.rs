@@ -179,7 +179,7 @@ mod test {
     use crate::party::broadcast::{Broadcast, BroadcastContext};
     use crate::party::error::MpcError;
     use crate::party::MainParty;
-    use crate::party::test::localhost_setup;
+    use crate::party::test::{PartySetup, TestSetup};
     use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
     use crate::share::gf8::GF8;
     use crate::share::test::secret_share;
@@ -202,7 +202,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
+        let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
         let ((c1, x13, x12), _) = h1.join().unwrap();
         let ((c2, x21, x23), _) = h2.join().unwrap();
         let ((c3, x32, x31), _) = h3.join().unwrap();
@@ -248,7 +248,7 @@ mod test {
                 p.compare_view(context).unwrap();
             }
         };
-        let (h1,h2,h3) = localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
+        let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
         h1.join().unwrap();
         h2.join().unwrap();
         h3.join().unwrap();
@@ -292,7 +292,7 @@ mod test {
                     }
                 }
             };
-            let (h1,h2,h3) = localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
+            let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
             h1.join().unwrap();
             h2.join().unwrap();
             h3.join().unwrap();
@@ -329,7 +329,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(compute(x1), compute(x2), compute(x3));
+        let (h1, h2, h3) = PartySetup::localhost_setup(compute(x1), compute(x2), compute(x3));
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -382,7 +382,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(x1), program(x2), program(x3));
+        let (h1, h2, h3) = PartySetup::localhost_setup(program(x1), program(x2), program(x3));
         let (open1, _) = h1.join().unwrap();
         let (open2, _) = h2.join().unwrap();
         let (open3, _) = h3.join().unwrap();

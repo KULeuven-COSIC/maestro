@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf4::GF4};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::{IoLayerOwned}, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf4::GF4};
 
 pub mod online;
 pub mod offline;
@@ -48,7 +48,7 @@ impl WL16Party {
         if self.opt {
             n = if n % 2 == 0 { n } else { n+1 };
         }
-        let mut new = offline::generate_random_ohv16(&mut self.inner, n)?;
+        let mut new = offline::generate_random_ohv16(self.inner.as_party_mut(), n)?;
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;
         }else{
@@ -57,7 +57,7 @@ impl WL16Party {
         Ok(())
     }
 
-    pub fn io(&self) -> &IoLayer {
+    pub fn io(&self) -> &IoLayerOwned {
         <ChidaParty as ArithmeticBlackBox<GF4>>::io(&self.inner)
     }
 }
@@ -182,6 +182,9 @@ mod test {
     impl TestSetup<WL16Party> for WL16Setup {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (std::thread::JoinHandle<(T1,WL16Party)>, std::thread::JoinHandle<(T2,WL16Party)>, std::thread::JoinHandle<(T3,WL16Party)>) {
             localhost_setup_wl16(f1, f2, f3)
+        }
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static>(_n_threads: usize, _f1: F1, _f2: F2, _f3: F3) -> (JoinHandle<(T1,WL16Party)>, JoinHandle<(T2,WL16Party)>, JoinHandle<(T3,WL16Party)>) {
+            unimplemented!()
         }
     }
 }

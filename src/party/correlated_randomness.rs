@@ -1,5 +1,5 @@
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
-use crate::network::task::{Direction, IoLayer};
+use crate::network::task::{Direction, IoLayerOwned};
 use crate::network::CommChannel;
 use crate::party::{commitment, MainParty};
 use rand_chacha::ChaCha20Rng;
@@ -58,7 +58,7 @@ impl SharedRng {
         }
     }
 
-    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, io: &IoLayer) -> MpcResult<(Self, Self)> {
+    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, io: &IoLayerOwned) -> MpcResult<(Self, Self)> {
         // receive seed from P+1
         let mut seed_next = [0u8; 32];
         let rcv_seed_next = io.receive_slice(Direction::Next, &mut seed_next[0..CR_SEC_PARAM]);
