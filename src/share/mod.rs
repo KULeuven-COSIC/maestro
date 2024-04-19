@@ -1,17 +1,22 @@
 pub mod gf8;
 mod gf8_tables;
+mod gf4_bs_table;
 pub mod gf4;
 pub mod wol;
 pub mod bs_bool16;
 pub mod gf2p64;
 
 use std::borrow::Borrow;
+use std::fmt::Debug;
 use std::io;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone + Copy + PartialEq + AddAssign { // + AsRef<[u8]>
     /// The field size in byte
     const NBYTES: usize;
+    
+    /// Returns the size in byte of a serialization of n_elements many field elements
+    fn serialized_size(n_elements: usize) -> usize;
 
     /// The field size in bits
     const NBITS: usize = 8 * Self::NBYTES;
@@ -25,9 +30,9 @@ pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self
     // Returns if the value is zero
     fn is_zero(&self) -> bool;
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8>;
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, len: usize) -> Vec<u8>;
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self>;
+    fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
 }
@@ -42,7 +47,7 @@ pub trait FieldVectorCommChannel<F: Field> {
     fn read_vector(&mut self, buffer: &mut [F]) -> io::Result<()>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RssShare<F: Field> {
     pub si: F,
     pub sii: F
@@ -106,7 +111,7 @@ pub trait FieldDigestExt<F: Field> {
     fn update(&mut self, message: &[F]);
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use std::borrow::Borrow;
     use std::fmt::Debug;
@@ -116,9 +121,9 @@ pub mod test {
     use crate::share::gf8::GF8;
 
     pub fn consistent<F: Field + PartialEq + Debug>(share1: &RssShare<F>, share2: &RssShare<F>, share3: &RssShare<F>) {
-        assert_eq!(share1.sii, share2.si);
-        assert_eq!(share2.sii, share3.si);
-        assert_eq!(share3.sii, share1.si);
+        assert_eq!(share1.sii, share2.si, "share1 and share2 are inconsistent: share1={:?}, share2={:?}, share3={:?}", share1, share2, share3);
+        assert_eq!(share2.sii, share3.si, "share2 and share3 are inconsistent: share1={:?}, share2={:?}, share3={:?}", share1, share2, share3);
+        assert_eq!(share3.sii, share1.si, "share1 and share3 are inconsistent: share1={:?}, share2={:?}, share3={:?}", share1, share2, share3);
     }
 
     pub fn assert_eq<F: Field + PartialEq + Debug>(share1: RssShare<F>, share2: RssShare<F>, share3: RssShare<F>, value: F) {

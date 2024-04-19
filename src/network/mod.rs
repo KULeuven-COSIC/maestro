@@ -134,6 +134,28 @@ impl Stream {
             Self::Server(stream) => stream.conn.complete_io(&mut stream.sock).map(|_|()),
         }
     }
+
+    pub fn teardown(self) -> io::Result<()> {
+        match self {
+            Self::Client(mut stream) => {
+                stream.conn.send_close_notify();
+                while stream.conn.wants_write() {
+                    stream.conn.write_tls(&mut stream.sock).unwrap();
+                }
+                drop(stream.conn);
+                drop(stream.sock);
+            },
+            Self::Server(mut stream) => {
+                stream.conn.send_close_notify();
+                while stream.conn.wants_write() {
+                    stream.conn.write_tls(&mut stream.sock).unwrap();
+                }
+                drop(stream.conn);
+                drop(stream.sock);
+            }
+        }
+        Ok(())
+    }
 }
 
 pub struct CreatedParty {
@@ -166,7 +188,7 @@ impl CreatedParty {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "benchmark-helper"))]
     pub fn port(&self) -> io::Result<u16> {
         self.server_socket
             .local_addr()
@@ -327,14 +349,28 @@ impl CommChannel {
         return self.rounds;
     }
 
-    pub fn teardown(&mut self) {
-        self.stream = None // drop the connection; this will close the socket
+    /// closes the connection properly. This may block if data needs to be written
+    pub fn teardown(&mut self) -> io::Result<()> {
+        match self.stream.take() {
+            Some(stream) => stream.teardown(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Clone for Config {
+    fn clone(&self) -> Self {
+        Self { player_addr: self.player_addr.clone(), player_ports: self.player_ports.clone(), my_cert: self.my_cert.clone(), my_key: self.my_key.clone_key(), player_certs: self.player_certs.clone() }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{thread, net::{TcpListener, TcpStream}, io::{Read, Write}, time::Instant};
+    use std::{io::{ErrorKind, Read, Write}, net::{TcpListener, TcpStream}, thread, time::{Duration, Instant}};
+
+    use crate::{network::non_blocking::NonBlockingCommChannel, party::test::localhost_connect};
+
+    use super::non_blocking::NonBlockingStream;
 
 
     // #[test]
@@ -376,5 +412,76 @@ mod tests {
 
         server.join().unwrap();
         client.join().unwrap();
+    }
+
+    fn write_until_block(s: &mut NonBlockingStream, buf: &[u8]) -> usize {
+        let mut total = 0;
+        loop {
+            match s.write(buf) {
+                Ok(n) => total += n,
+                Err(io_err) => if io_err.kind() == ErrorKind::WouldBlock {
+                    return total;
+                }else{
+                    panic!("other error: {}", io_err);
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn channel_close_properly() {
+        const WRITE_SIZE: usize = 1_000_000;
+        let (p1, p2, p3) = localhost_connect(|p| p, |p| p, |p| p);
+        let p1 = p1.join().unwrap();
+        let p2 = p2.join().unwrap();
+        let p3 = p3.join().unwrap();
+        // we return channel p1 to p2
+        let mut comm_next = NonBlockingCommChannel::from_channel(p1.comm_next).unwrap();
+        let mut comm_next_receiver = NonBlockingCommChannel::from_channel(p2.comm_prev).unwrap();
+        // close others
+        drop(p1.comm_prev);
+        drop(p2.comm_next);
+        drop(p3.comm_prev);
+        drop(p3.comm_next);
+        
+        let (send, receive) = oneshot::channel::<()>();
+
+        let buf = vec![0x11; WRITE_SIZE];
+        let mut rcv_buf = vec![0; WRITE_SIZE];
+
+        // write until block
+        let total_sent = write_until_block(&mut comm_next.stream, &buf);
+        
+        // close the connection
+        let mut comm_next = comm_next.into_channel().unwrap();
+
+        let writer = thread::spawn(move || {
+            send.send(()).unwrap();
+            comm_next.teardown().unwrap();
+            drop(comm_next);
+        });
+        
+        // now read
+        receive.recv().unwrap();
+        // wait a tiny bit more to make sure writer called teardown()
+        thread::sleep(Duration::from_millis(10));
+
+        let mut bytes_left = total_sent;
+        while bytes_left > 0 {
+            let bytes_to_read = usize::min(bytes_left, WRITE_SIZE);
+            match comm_next_receiver.stream.read(&mut rcv_buf[..bytes_to_read]) {
+                Ok(n) => bytes_left -= n,
+                Err(io_err) => if io_err.kind() == ErrorKind::WouldBlock {
+                    () // retry
+                }else{
+                    panic!("unexpected error: {}", io_err);
+                }
+            }
+        }
+
+        let mut comm_next_receiver = comm_next_receiver.into_channel().unwrap();
+        comm_next_receiver.teardown().unwrap();
+        drop(comm_next_receiver);
+        writer.join().unwrap();
     }
 }

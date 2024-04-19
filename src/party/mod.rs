@@ -1,12 +1,9 @@
 mod commitment;
 pub mod correlated_randomness;
-mod offline;
 pub mod broadcast;
 pub mod error;
-mod online;
 
-use std::io;
-
+use std::io::{self, Write};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use crate::network::task::IoLayer;
@@ -14,12 +11,68 @@ use crate::network::ConnectedParty;
 use crate::party::correlated_randomness::{GlobalRng, SharedRng};
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
+#[cfg(feature = "verbose-timing")]
+use {std::{collections::HashMap, sync::Mutex}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
+use std::time::Duration;
 use self::error::MpcResult;
 
-struct CommStats {
+#[derive(Clone, Copy)]
+pub struct CommStats {
     bytes_received: u64,
     bytes_sent: u64,
     rounds: usize,
+}
+
+impl CommStats {
+    pub fn empty() -> Self {
+        Self {
+            bytes_received: 0,
+            bytes_sent: 0,
+            rounds: 0,
+        }
+    }
+
+    pub fn new(bytes_received: u64, bytes_sent: u64, rounds: usize) -> Self {
+        Self {
+            bytes_received,
+            bytes_sent,
+            rounds
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.bytes_received = 0;
+        self.bytes_sent = 0;
+        self.rounds = 0;
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CombinedCommStats {
+    pub prev: CommStats,
+    pub next: CommStats,
+}
+
+impl CombinedCommStats {
+    pub fn empty() -> Self {
+        Self {
+            prev: CommStats::empty(),
+            next: CommStats::empty(),
+        }
+    }
+
+    pub fn print_comm_statistics(&self, i: usize) {
+        let p_next = ((i+1) % 3) + 1;
+        let p_prev = ((3 + i-1) % 3) + 1;
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, self.next.bytes_sent, self.next.bytes_received, self.next.rounds);
+        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds);
+        println!("Total communication: {} bytes send, {} bytes received", self.next.bytes_sent + self.prev.bytes_sent, self.next.bytes_received + self.prev.bytes_received);
+    }
+
+    pub fn write_to_csv<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        write!(writer, "{},{},{},{},{},{}", self.next.bytes_sent, self.next.bytes_received, self.next.rounds, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds)?;
+        Ok(())
+    }
 }
 
 pub trait ArithmeticBlackBox<F: Field> {
@@ -47,8 +100,7 @@ pub struct Party {
     // pub comm_next: CommChannel,
     // /// Channel to player i-1
     // pub comm_prev: CommChannel,
-    stats_next: Option<CommStats>,
-    stats_prev: Option<CommStats>,
+    stats: CombinedCommStats,
     random_next: SharedRng,
     random_prev: SharedRng,
     random_local: ChaCha20Rng,
@@ -85,8 +137,7 @@ impl Party {
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
-            stats_next: None,
-            stats_prev: None,
+            stats: CombinedCommStats::empty(),
         })
     }
 
@@ -100,8 +151,7 @@ impl Party {
             random_next: rand_next,
             random_prev: rand_prev,
             random_local: rng,
-            stats_next: None,
-            stats_prev: None,
+           stats: CombinedCommStats::empty(),
         })
     }
 
@@ -163,21 +213,21 @@ impl Party {
             match self.i {
                 0 => {
                     // 01
-                    comm_next.teardown();
+                    comm_next.teardown()?;
                     // 02
-                    comm_prev.teardown();
+                    comm_prev.teardown()?;
                 }
                 1 => {
                     // 01
-                    comm_prev.teardown();
+                    comm_prev.teardown()?;
                     // 12
-                    comm_next.teardown();
+                    comm_next.teardown()?;
                 }
                 2 => {
                     // 02
-                    comm_next.teardown();
+                    comm_next.teardown()?;
                     // 12
-                    comm_prev.teardown();
+                    comm_prev.teardown()?;
                 }
                 _ => unreachable!()
             };
@@ -191,30 +241,75 @@ impl Party {
                 bytes_sent: comm_prev.get_bytes_sent(),
                 rounds: comm_prev.get_rounds(),
             };
-            self.stats_next = Some(stats_next);
-            self.stats_prev = Some(stats_prev);
+            self.stats.prev = stats_prev;
+            self.stats.next = stats_next;
             io::Result::Ok(())
         }).transpose()?
         .unwrap_or(());
         Ok(())
     }
 
-    pub fn print_comm_statistics(&self) {
+    pub fn print_statistics(&self) {
         assert!(self.io.is_none(), "Call teardown() first");
+        let kv = self.get_additional_timers();
+        #[cfg(feature = "verbose-timing")]
+        {
+            for (key, dur) in kv.iter() {
+                println!("\t{}:\t{}s", key, dur.as_secs_f64());
+            }
+        }
+    }
 
-        let stats_next = self.stats_next.as_ref().unwrap();
-        let stats_prev = self.stats_prev.as_ref().unwrap();
+    pub fn get_additional_timers(&self) -> Vec<(String, Duration)> {
+        assert!(self.io.is_none(), "Call teardown() first");
+        #[cfg(feature = "verbose-timing")]
+        {
+            println!("Verbose timing data:");
+            let mut guard = IO_TIMER.lock().unwrap();
+            let mut kv: Vec<(String,Duration)> = guard.times.drain().collect();
+            drop(guard);
+            let mut guard = PARTY_TIMER.lock().unwrap();
+            kv.extend(guard.times.drain());
+            drop(guard);
 
-        let p_next = ((self.i+1) % 3) + 1;
-        let p_prev = ((3 + self.i-1) % 3) + 1;
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, stats_next.bytes_sent, stats_next.bytes_received, stats_next.rounds);
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, stats_prev.bytes_sent, stats_prev.bytes_received, stats_prev.rounds);
-        println!("Total communication: {} bytes send, {} bytes received", stats_next.bytes_sent + stats_prev.bytes_sent, stats_next.bytes_received + stats_prev.bytes_received);
+            kv.sort_by_key(|(k,_)| k.clone());
+            return kv;
+        }
+        #[cfg(not(feature = "verbose-timing"))]
+        return Vec::new();
+    }
+}
+
+#[cfg(feature = "verbose-timing")]
+lazy_static! {
+    pub static ref PARTY_TIMER: Mutex<Timer> = Mutex::new(Timer::new());
+}
+
+#[cfg(feature = "verbose-timing")]
+pub struct Timer {
+    times: HashMap<String, Duration>
+}
+
+#[cfg(feature = "verbose-timing")]
+impl Timer {
+    pub fn new() -> Self {
+        Self {
+            times: HashMap::new(),
+        }
+    }
+
+    pub fn report_time(&mut self, key: &str, duration: Duration) {
+        if !self.times.contains_key(key) {
+            self.times.insert(key.to_string(), Duration::from_secs(0));
+        }
+        if let Some(dur) = self.times.get_mut(key) {
+            *dur += duration;
+        }
     }
 }
 
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use std::fs::File;
     use std::io::BufReader;

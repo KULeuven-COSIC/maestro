@@ -1,8 +1,8 @@
 use itertools::izip;
 
-use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}};
-
-use super::{RndOhv16, RndOhvOutput};
+use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}, wollut16::{RndOhv16, RndOhvOutput}};
+#[cfg(feature = "verbose-timing")]
+use {std::time::Instant, crate::party::PARTY_TIMER};
 
 fn map_si(rss: &RssShare<BsBool16>) -> &BsBool16 {
     &rss.si
@@ -63,6 +63,11 @@ fn generate_ohv16<P: ArithmeticBlackBox<BsBool16> + ArithmeticBlackBox<GF4>>(par
    debug_assert_eq!(n16, r1.len());
    debug_assert_eq!(n16, r2.len());
    debug_assert_eq!(n16, r3.len());
+
+    #[cfg(feature = "verbose-timing")]
+    let mul_phase = Instant::now();
+    #[cfg(feature = "verbose-timing")]
+    let total = mul_phase.clone();
 
     // Round 1: compute r_i * r_j for i=0,1,2,3 and j > i
     // fill a with r0|r0|r0|r1|r1|r2
@@ -176,36 +181,56 @@ fn generate_ohv16<P: ArithmeticBlackBox<BsBool16> + ArithmeticBlackBox<GF4>>(par
     let ohv_14 = inner_product(&elements, n16, zero, &SELECTOR_IDX_14);
     let ohv_15 = inner_product(&elements, n16, zero, &SELECTOR_IDX_15);
 
+    #[cfg(feature = "verbose-timing")]
+    {
+        let mul_phase = mul_phase.elapsed();
+        PARTY_TIMER.lock().unwrap().report_time("prep_mul", mul_phase);
+    }
+    #[cfg(feature = "verbose-timing")]
+    let transpose_ohv = Instant::now();
+
     let ohv_transposed = un_bitslice([ohv_0, ohv_1, ohv_2, ohv_3, ohv_4, ohv_5, ohv_6, ohv_7, ohv_8, ohv_9, ohv_10, ohv_11, ohv_12, ohv_13, ohv_14, ohv_15]);
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER.lock().unwrap().report_time("prep_transpose_ohv", transpose_ohv.elapsed());
+    #[cfg(feature = "verbose-timing")]
+    let transpose_rand = Instant::now();
+
     let rand_transposed = un_bitslice4([r0,r1,r2,r3]);
+    
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER.lock().unwrap().report_time("prep_transpose_rand", transpose_rand.elapsed());
 
-    Ok(izip!(ohv_transposed.into_iter().take(n), rand_transposed.into_iter().take(n), party.generate_alpha(n)).map(|((ohv_si, ohv_sii), rand, alpha)| {
+    let res = izip!(ohv_transposed.into_iter().take(n), rand_transposed.into_iter().take(n)).map(|((ohv_si, ohv_sii), rand)| {
         RndOhvOutput {
-            si: RndOhv16(ohv_si),
-            sii: RndOhv16(ohv_sii),
-            random: rand.si + alpha,
+            si: ohv_si,
+            sii: ohv_sii,
+            random: rand.si,
         }
-    }).collect())
+    }).collect();
 
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER.lock().unwrap().report_time("prep_total", total.elapsed());
+
+    Ok(res)
 }
 
-fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(u16,u16)> {
-    let mut res = vec![(0u16,0u16); 16*bs[0].len()];
+fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16,RndOhv16)> {
+    let mut res = vec![(RndOhv16::new(0u16),RndOhv16::new(0u16)); 16*bs[0].len()];
     for i in 0..16 {
         let bit = &bs[i];
         for j in 0..bit.len() {
             let si = bit[j].si.as_u16();
             let sii = bit[j].sii.as_u16();
             for k in 0..16 {
-                res[16*j+k].0 |= ((si >> k) & 0x1) << i;
-                res[16*j+k].1 |= ((sii >> k) & 0x1) << i;
+                res[16*j+k].0.0 |= ((si >> k) & 0x1) << i;
+                res[16*j+k].1.0 |= ((sii >> k) & 0x1) << i;
             }
         }
     }
     res
 }
 
-fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
+pub fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
     let mut res = vec![0u8; bs[0].len()*16];
     for i in 0..4 {
         let bit = &bs[i];
@@ -227,7 +252,7 @@ mod test {
     use itertools::izip;
     use rand::thread_rng;
 
-    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::offline::generate_random_ohv16};
+    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::{offline::generate_random_ohv16}};
 
     use super::{generate_ohv16, un_bitslice4};
 
@@ -301,7 +326,7 @@ mod test {
             let ohv = o1.si.0 ^ o2.si.0 ^ o3.si.0;
             let index = rand.as_u8() as usize;
             assert!(index < 16);
-            assert_eq!(ohv, 0x1 << index);
+            assert_eq!(1 << index, ohv);
         }
     }
 
@@ -331,7 +356,7 @@ mod test {
             let ohv = o1.si.0 ^ o2.si.0 ^ o3.si.0;
             let index = rand.as_u8() as usize;
             assert!(index < 16);
-            assert_eq!(ohv, 0x1 << index);
+            assert_eq!(1 << index, ohv);
         }
     }
 }

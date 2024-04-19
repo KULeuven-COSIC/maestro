@@ -1,6 +1,9 @@
-use std::{borrow::Borrow, collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, thread::{self, JoinHandle}};
+use std::{borrow::Borrow, collections::VecDeque, io::{self, ErrorKind, Read, Write}, sync::{mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, Mutex}, thread::{self, JoinHandle}};
 
-use crate::share::Field;
+use crate::{party::CombinedCommStats, share::Field};
+use lazy_static::lazy_static;
+#[cfg(feature = "verbose-timing")]
+use {std::time::Instant, crate::party::Timer};
 
 use super::{non_blocking::NonBlockingCommChannel, receiver, CommChannel};
 
@@ -10,7 +13,10 @@ pub enum Direction { Next, Previous }
 pub enum Task {
     Write { direction: Direction, data: Vec<u8>},
     Read { direction: Direction, length: usize, mailback: oneshot::Sender<Vec<u8>> },
-    Sync
+    Sync { 
+        /// if true, write comm stats to [IO_COMM_STATS] and reset the stats
+        write_comm_stats: bool 
+    }
 }
 
 struct ReadTask {
@@ -93,8 +99,8 @@ impl<T> TaskQueue<T> {
 
 enum State {
     WaitingForTasks,
-    Working { sync_requested: bool, close_requested: bool },
-    Sync { close_requested: bool },
+    Working { sync_requested: bool, close_requested: bool, write_comm_stats_requested: bool },
+    Sync { close_requested: bool, write_comm_stats: bool },
     Close
 }
 
@@ -108,8 +114,7 @@ impl State {
 }
 
 struct IoThreadContext {
-    comm_next: NonBlockingCommChannel,
-    comm_prev: NonBlockingCommChannel,
+    comm: NonBlockingCommChannel,
     read_tasks_receiver: Receiver<Task>,
     read_queue: TaskQueue<ReadTask>,
     write_queue: TaskQueue<WriteTask>,
@@ -119,11 +124,10 @@ struct IoThreadContext {
 
 impl IoThreadContext {
 
-    pub fn new(comm_next: CommChannel, comm_prev: CommChannel, task_channel: Receiver<Task>) -> io::Result<(Self, Receiver<()>)> {
+    pub fn new(comm: CommChannel, task_channel: Receiver<Task>) -> io::Result<(Self, Receiver<()>)> {
         let (send, receive) = sync_channel(0); // bound 0 creates rendez-vouz channel
         Ok((Self {
-            comm_next: NonBlockingCommChannel::from_channel(comm_next)?,
-            comm_prev: NonBlockingCommChannel::from_channel(comm_prev)?,
+            comm: NonBlockingCommChannel::from_channel(comm)?,
             read_tasks_receiver: task_channel,
             read_queue: TaskQueue::new(),
             write_queue: TaskQueue::new(),
@@ -132,7 +136,7 @@ impl IoThreadContext {
         }, receive))
     }
 
-    fn handle_io(&mut self) -> io::Result<()> {
+    fn handle_io(&mut self, my_direction: Direction) -> io::Result<()> {
         loop {
 
             match self.state {
@@ -144,15 +148,13 @@ impl IoThreadContext {
                             if self.state.is_working() {
                                 // try to write
                                 if !self.write_queue.is_empty() {
-                                    Self::non_blocking_write(&mut self.comm_prev, &mut self.write_queue, Direction::Previous)?;
-                                    Self::non_blocking_write(&mut self.comm_next, &mut self.write_queue, Direction::Next)?;
+                                    Self::non_blocking_write(&mut self.comm, &mut self.write_queue, my_direction)?;
                                 }
                                 // try to read
                                 if !self.read_queue.is_empty() {
-                                    Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
-                                    Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
+                                    Self::non_blocking_read(&mut self.comm, &mut self.read_queue, my_direction)?;
                                 }
-                                if self.write_queue.is_empty() && self.read_queue.is_empty() {
+                                if self.write_queue.is_empty() && self.read_queue.is_empty() && !self.comm.stream.wants_write() {
                                     self.state = State::WaitingForTasks; // the added task was small enough to be completed right away
                                 }
                             }
@@ -163,10 +165,10 @@ impl IoThreadContext {
                         }
                     }
                 },
-                State::Working { sync_requested, close_requested } => {
-                    if self.read_queue.is_empty() && self.write_queue.is_empty() {
+                State::Working { sync_requested, close_requested, write_comm_stats_requested } => {
+                    if self.read_queue.is_empty() && self.write_queue.is_empty() && !self.comm.stream.wants_write() {
                         self.state = if sync_requested {
-                            State::Sync { close_requested }
+                            State::Sync { close_requested, write_comm_stats: write_comm_stats_requested }
                         }else if close_requested {
                             State::Close
                         }else{
@@ -175,24 +177,33 @@ impl IoThreadContext {
                         };
                     }else{
                         // there is work to do
-                        if !self.write_queue.is_empty_for(Direction::Previous) {
-                            Self::non_blocking_write(&mut self.comm_prev, &mut self.write_queue, Direction::Previous)?;
+                        if !self.write_queue.is_empty_for(my_direction) {
+                            Self::non_blocking_write(&mut self.comm, &mut self.write_queue, my_direction)?;
                         }
-                        if !self.write_queue.is_empty_for(Direction::Next) {
-                            Self::non_blocking_write(&mut self.comm_next, &mut self.write_queue, Direction::Next)?;
+                        if !self.read_queue.is_empty_for(my_direction) {
+                            Self::non_blocking_read(&mut self.comm, &mut self.read_queue, my_direction)?;
                         }
-                        if !self.read_queue.is_empty_for(Direction::Previous) {
-                            Self::non_blocking_read(&mut self.comm_prev, &mut self.read_queue, Direction::Previous)?;
-                        }
-                        if !self.read_queue.is_empty_for(Direction::Next) {
-                            Self::non_blocking_read(&mut self.comm_next, &mut self.read_queue, Direction::Next)?;
+                        if self.comm.stream.wants_write() {
+                            Self::non_blocking_write_tls(&mut self.comm)?;
                         }
 
                         // let's see if new tasks are available
                         self.add_new_tasks_non_blocking();
                     }
                 },
-                State::Sync { close_requested } => {
+                State::Sync { close_requested, write_comm_stats } => {
+                    if write_comm_stats {
+                        // write and reset the communication statistics
+                        let stats = self.comm.get_comm_stats();
+                        self.comm.reset_comm_stats();
+                        let mut guard = IO_COMM_STATS.lock().unwrap();
+                        match my_direction {
+                            Direction::Next => guard.next = stats,
+                            Direction::Previous => guard.prev = stats,
+                        }
+                        drop(guard);
+                    }
+
                     // the protocol wants to sync and all tasks are done
                     match self.sync.send(()) {
                         Ok(()) => {
@@ -219,23 +230,23 @@ impl IoThreadContext {
             Task::Read { direction, length, mailback } => {
                 self.read_queue.put(direction, ReadTask::new(length, mailback));
                 if !self.state.is_working() {
-                    self.state = State::Working { sync_requested: false,  close_requested: false }
+                    self.state = State::Working { sync_requested: false,  close_requested: false, write_comm_stats_requested: false }
                 }
             },
                 
             Task::Write { direction, data } => {
                 self.write_queue.put(direction, WriteTask::new(data));
                 if !self.state.is_working() {
-                    self.state = State::Working { sync_requested: false,  close_requested: false }
+                    self.state = State::Working { sync_requested: false,  close_requested: false, write_comm_stats_requested: false }
                 }
             },
 
-            Task::Sync => { 
-                if let State::Working { close_requested,  .. } = self.state {
+            Task::Sync { write_comm_stats } => { 
+                if let State::Working { close_requested, write_comm_stats_requested, .. } = self.state {
                     // there are tasks left that will be completed before sync
-                    self.state = State::Working { sync_requested: true, close_requested };
+                    self.state = State::Working { sync_requested: true, close_requested, write_comm_stats_requested: write_comm_stats | write_comm_stats_requested };
                 }else{
-                    self.state = State::Sync { close_requested: false };
+                    self.state = State::Sync { close_requested: false, write_comm_stats };
                 }
             }
         }
@@ -252,8 +263,8 @@ impl IoThreadContext {
                 Err(TryRecvError::Disconnected) => {
                     // the sender disconnected, this indicates closing
                     cont = false;
-                    if let State::Working { sync_requested, .. } = self.state {
-                        self.state = State::Working { sync_requested, close_requested: true }
+                    if let State::Working { sync_requested, write_comm_stats_requested, .. } = self.state {
+                        self.state = State::Working { sync_requested, close_requested: true, write_comm_stats_requested }
                     }
                     
                 }
@@ -286,8 +297,7 @@ impl IoThreadContext {
                         }
                         Err(io_err)
                     }
-                }
-                
+                }  
             },
             None => Ok(()), // no read task, nothing to do
         }
@@ -323,45 +333,100 @@ impl IoThreadContext {
             None => Ok(()), // no write task, nothing to do
         }
     }
+
+    fn non_blocking_write_tls(channel: &mut NonBlockingCommChannel) -> io::Result<()> {
+        match channel.stream.write_tls() {
+            Ok(_) => Ok(()), // here we can ignore the reported number of written bytes since they have been counted before in [Self::non_blocking_write]
+            Err(io_err) => {
+                // a few error types are expected, and are not an error
+                if io_err.kind() == ErrorKind::WouldBlock || io_err.kind() == ErrorKind::Interrupted {
+                    return Ok(()); // all is well, we try again later
+                }
+                Err(io_err)
+            }
+        }
+    }
 }
 
 pub struct IoLayer {
-    task_channel: Sender<Task>,
-    sync_channel: Receiver<()>,
-    io_thread_handle: JoinHandle<(IoThreadContext, io::Result<()>)>,
+    task_prev_channel: Sender<Task>,
+    task_next_channel: Sender<Task>,
+    sync_prev_channel: Receiver<()>,
+    sync_next_channel: Receiver<()>,
+    io_prev_thread_handle: JoinHandle<(IoThreadContext, io::Result<()>)>,
+    io_next_thread_handle: JoinHandle<(IoThreadContext, io::Result<()>)>,
+}
+
+
+#[cfg(feature = "verbose-timing")]
+lazy_static! {
+    pub static ref IO_TIMER: Mutex<Timer> = Mutex::new(Timer::new());
+}
+
+lazy_static! {
+    static ref IO_COMM_STATS: Mutex<CombinedCommStats> = Mutex::new(CombinedCommStats::empty());
 }
 
 impl IoLayer {
     pub fn spawn_io(comm_prev: CommChannel, comm_next: CommChannel) -> io::Result<Self> {
-        let (send, rcv) = channel();
-        let (mut ctx, sync_receiver) = IoThreadContext::new(comm_next, comm_prev, rcv)?;
-        let handle = thread::spawn(move || {
+        // setup thread for I/O to prev party
+        let (send_prev, rcv_prev) = channel();
+        let (mut ctx_prev, sync_receiver_prev) = IoThreadContext::new(comm_prev, rcv_prev)?;
+
+        // setup thread for I/O to next party
+        let (send_next, rcv_next) = channel();
+        let (mut ctx_next, sync_receiver_next) = IoThreadContext::new(comm_next, rcv_next)?;
+
+        let handle_prev = thread::spawn(move || {
             // the IO loop
-            let res = ctx.handle_io();
+            let res = ctx_prev.handle_io(Direction::Previous);
             res.unwrap();
             // when exit or error
-            (ctx, Ok(()))
+            (ctx_prev, Ok(()))
         });
+        let handle_next = thread::spawn(move || {
+            // the IO loop
+            let res = ctx_next.handle_io(Direction::Next);
+            res.unwrap();
+            // when exit or error
+            (ctx_next, Ok(()))
+        });
+        
         Ok(Self {
-            task_channel: send,
-            sync_channel: sync_receiver,
-            io_thread_handle: handle,
+            task_prev_channel: send_prev,
+            task_next_channel: send_next,
+            sync_prev_channel: sync_receiver_prev,
+            sync_next_channel: sync_receiver_next,
+            io_prev_thread_handle: handle_prev,
+            io_next_thread_handle: handle_next,
         })
     }
 
     pub fn send(&self, direction: Direction, bytes: Vec<u8>) {
         if !bytes.is_empty() {
-            match self.task_channel.send(Task::Write { direction, data: bytes }) {
+            let channel = match direction {
+                Direction::Previous => &self.task_prev_channel,
+                Direction::Next => &self.task_next_channel,
+            };
+            match channel.send(Task::Write { direction, data: bytes }) {
                 Ok(()) => (),
                 Err(_) => panic!("The IO is already closed"),
             }
         }
     }
 
-    pub fn receive(&self, direction: Direction, length: usize) -> oneshot::Receiver<Vec<u8>> {
+    pub fn receive(&self, direction: Direction, length: usize) -> receiver::VecReceiver {
+        receiver::VecReceiver::new(self.receive_raw(direction, length))
+    }
+
+    fn receive_raw(&self, direction: Direction, length: usize) -> oneshot::Receiver<Vec<u8>> {
         let (send, recv) = oneshot::channel();
         if length > 0 {
-            match self.task_channel.send(Task::Read { direction, length, mailback: send }) {
+            let channel = match direction {
+                Direction::Previous => &self.task_prev_channel,
+                Direction::Next => &self.task_next_channel,
+            };
+            match channel.send(Task::Read { direction, length, mailback: send }) {
                 Ok(()) => recv,
                 Err(_) => panic!("The IO is already closed"),
             }
@@ -373,54 +438,112 @@ impl IoLayer {
     }
 
     pub fn receive_slice<'a>(&self, direction: Direction, dst: &'a mut [u8]) -> receiver::SliceReceiver<'a> {
-        receiver::SliceReceiver::new(self.receive(direction, dst.len()), dst)
+        receiver::SliceReceiver::new(self.receive_raw(direction, dst.len()), dst)
     }
 
-    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>)
+    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize)
     {
-        let as_bytes = F::as_byte_vec(elements);
+        #[cfg(feature = "verbose-timing")]
+        let start = Instant::now();
+        let as_bytes = F::as_byte_vec(elements, len);
+        #[cfg(feature = "verbose-timing")]
+        {
+            let end = start.elapsed();
+            IO_TIMER.lock().unwrap().report_time("ser", end);
+        }
         self.send(direction, as_bytes)
     }
 
     pub fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(self.receive(direction, F::NBYTES*num_elements))
+        receiver::FieldVectorReceiver::new(self.receive_raw(direction, F::serialized_size(num_elements)), num_elements)
     }
 
     pub fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(self.receive(direction, F::NBYTES*dst.len()), dst)
+        receiver::FieldSliceReceiver::new(self.receive_raw(direction, F::serialized_size(dst.len())), dst)
     }
 
     pub fn wait_for_completion(&self) {
+        #[cfg(feature = "verbose-timing")]
+        let start = Instant::now();
         // first send a Sync task, then block and wait to the IO thread to sync
-        match self.task_channel.send(Task::Sync) {
-            Ok(()) => {
-                match self.sync_channel.recv() {
-                    Ok(()) => (), // sync is completed, return the function to caller
-                    Err(_) => panic!("The IO is already closed"),
+        match (self.task_prev_channel.send(Task::Sync {write_comm_stats: false}), self.task_next_channel.send(Task::Sync {write_comm_stats: false})) {
+            (Ok(()), Ok(())) => {
+                let sync_prev = self.sync_prev_channel.recv();
+                let sync_next = self.sync_next_channel.recv();
+                match (sync_prev, sync_next) {
+                    (Ok(()), Ok(())) => {
+                        // sync is completed, return the function to caller
+                        #[cfg(feature = "verbose-timing")]
+                        {
+                            let end = start.elapsed();
+                            IO_TIMER.lock().unwrap().report_time("io", end);
+                        }
+                    }, 
+                    _ => panic!("The IO is already closed"),
                 }
             },
-            Err(_) => panic!("The IO is already closed"),
+            _ => panic!("The IO is already closed"),
         }
     }
 
     pub fn shutdown(self) -> io::Result<(NonBlockingCommChannel, NonBlockingCommChannel)>{
         // first send Sync task
-        match self.task_channel.send(Task::Sync) {
+        match self.task_prev_channel.send(Task::Sync{write_comm_stats: false}) {
             Ok(()) => (),
-            Err(_) => return Err(io::Error::new(ErrorKind::NotConnected, "Task channel no longer connected")),
+            Err(_) => return Err(io::Error::new(ErrorKind::NotConnected, "Task channel to prev no longer connected")),
+        }
+        match self.task_next_channel.send(Task::Sync{write_comm_stats: false}) {
+            Ok(()) => (),
+            Err(_) => return Err(io::Error::new(ErrorKind::NotConnected, "Task channel to next no longer connected")),
         }
         // then close task channel to indicate closing
-        drop(self.task_channel);
+        drop(self.task_prev_channel);
+        drop(self.task_next_channel);
         // then wait for sync
-        match self.sync_channel.recv() {
+        match self.sync_prev_channel.recv() {
             Ok(()) => (),
-            Err(_) => return Err(io::Error::new(ErrorKind::NotConnected, "Sync channel no longer connected")),
+            Err(_) => return Err(io::Error::new(ErrorKind::NotConnected, "Sync channel to prev no longer connected")),
+        }
+        match self.sync_next_channel.recv() {
+            Ok(()) => (),
+            Err(_) => return Err(io::Error::new(ErrorKind::NotConnected, "Sync channel to next no longer connected")),
         }
         // finally wait for IO thread
-        match self.io_thread_handle.join() {
-            Ok((ctx, Ok(()))) => Ok((ctx.comm_prev, ctx.comm_next)),
-            Ok((_, Err(io_err))) => Err(io_err),
-            Err(_join_err) => Err(io::Error::new(ErrorKind::Other, "Error when joining the thread")),
+        let res_prev = match self.io_prev_thread_handle.join() {
+            Ok((ctx_prev, Ok(()))) => Ok(ctx_prev.comm),
+            Ok((_, Err(io_err_prev))) => Err(io_err_prev),
+            Err(_join_err) => Err(io::Error::new(ErrorKind::Other, "Error when joining the I/O thread of prev")),
+        };
+        let res_next = match self.io_next_thread_handle.join() {
+            Ok((ctx_next, Ok(()))) => Ok(ctx_next.comm),
+            Ok((_, Err(io_err_next))) => Err(io_err_next),
+            Err(_join_err) => Err(io::Error::new(ErrorKind::Other, "Error when joining the I/O thread of next")),
+        };
+        match (res_prev, res_next) {
+            (Ok(comm_prev), Ok(comm_next)) => Ok((comm_prev, comm_next)),
+            (Err(err), _) => Err(err),
+            (_, Err(err)) => Err(err),
+        }
+    }
+
+    pub fn reset_comm_stats(&self) -> CombinedCommStats {
+        match (self.task_prev_channel.send(Task::Sync {write_comm_stats: true}), self.task_next_channel.send(Task::Sync {write_comm_stats: true})) {
+            (Ok(()), Ok(())) => {
+                let sync_prev = self.sync_prev_channel.recv();
+                let sync_next = self.sync_next_channel.recv();
+                match (sync_prev, sync_next) {
+                    (Ok(()), Ok(())) => {
+                        // sync is completed, return the function to caller
+                        let mut guard = IO_COMM_STATS.lock().unwrap();
+                        let comm_stats = guard.clone();
+                        guard.prev.reset();
+                        guard.next.reset();
+                        comm_stats
+                    }, 
+                    _ => panic!("The IO is already closed"),
+                }
+            },
+            _ => panic!("The IO is already closed"),
         }
     }
 }
@@ -430,10 +553,9 @@ mod test {
     use std::{iter::repeat, thread};
 
     use itertools::Itertools;
-    use oneshot::Receiver;
     use rand::{seq::SliceRandom, thread_rng, CryptoRng, Rng};
 
-    use crate::{network::CommChannel, party::test::localhost_connect};
+    use crate::{network::{receiver::VecReceiver, CommChannel}, party::test::localhost_connect};
 
     use super::{Direction, IoLayer};
 
@@ -680,7 +802,7 @@ mod test {
         let io2 = IoLayer::spawn_io(p2.comm_prev, p2.comm_next).unwrap();
         let io3 = IoLayer::spawn_io(p3.comm_prev, p3.comm_next).unwrap();
 
-        fn send(io: &IoLayer, msg_to_prev: String, msg_to_next: String) -> (Receiver<Vec<u8>>, Receiver<Vec<u8>>) {
+        fn send(io: &IoLayer, msg_to_prev: String, msg_to_next: String) -> (VecReceiver, VecReceiver) {
             assert_eq!(msg_to_prev.len(), msg_to_next.len());
             let rcv_prev = io.receive(Direction::Previous, msg_to_prev.len());
             io.send(Direction::Next, msg_to_next.as_bytes().to_vec());

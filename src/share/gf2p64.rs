@@ -124,12 +124,12 @@ impl Field for GF2p64 {
         self.0 == 0u64
     }
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8> {
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         // Using big-endian encoding
         it.into_iter().flat_map(|gf| gf.borrow().0.to_be_bytes()).collect()
     }
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+    fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         debug_assert!(v.len() % Self::NBYTES == 0);
         v.into_iter().chunks(Self::NBYTES).into_iter().map(|mut c| {
             let x = u64::from_be_bytes(c.collect::<Vec<u8>>().try_into().expect("chunk with incorrect length"));
@@ -142,6 +142,10 @@ impl Field for GF2p64 {
         dest.iter_mut().zip(v.into_iter().chunks(Self::NBYTES).into_iter()).for_each(|(dst, mut c)| {
             dst.0 = u64::from_be_bytes(c.collect::<Vec<u8>>().try_into().expect("chunk with incorrect length"));
         })
+    }
+    
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements * Self::NBYTES
     }
 
 }
@@ -238,7 +242,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF2p64> for R {
     fn generate(&mut self, n: usize) -> Vec<GF2p64> {
         let mut r = vec![0; n*GF2p64::NBYTES];
         self.fill_bytes(&mut r);
-        GF2p64::from_byte_vec(r)
+        GF2p64::from_byte_vec(r, n)
     }
 
     fn fill(&mut self, buf: &mut [GF2p64]) {
@@ -323,8 +327,8 @@ mod test {
     #[test]
     fn test_serialization() {
         let v = vec![GF2p64(0x1),GF2p64(0xffffffffffffffff),GF2p64(0x3),GF2p64(0x123456781234578)];
-        let as_bytes = GF2p64::as_byte_vec(v.iter());
-        let v_new = GF2p64::from_byte_vec(as_bytes);
+        let as_bytes = GF2p64::as_byte_vec(v.iter(), 4);
+        let v_new = GF2p64::from_byte_vec(as_bytes, 4);
         assert_eq!(v_new, v);
     }
 

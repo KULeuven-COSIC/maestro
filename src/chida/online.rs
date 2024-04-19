@@ -160,7 +160,7 @@ fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si
     .map(|(i,alpha)| alpha.si + alpha.sii + si[i].cube() + (si[i] + sii[i]).cube())
     .collect();
     // send to P+1
-    party.io().send_field::<GF8>(Direction::Next, &x3ii);
+    party.io().send_field::<GF8>(Direction::Next, &x3ii, n);
 
     // MULT(x^12, x^2) and MULT(x^12, x^3)
     // receive from P-1
@@ -177,7 +177,7 @@ fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si
         x14x15ii[n+i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
     }
     // send to P+1
-    party.io().send_field::<GF8>(Direction::Next, &x14x15ii);
+    party.io().send_field::<GF8>(Direction::Next, &x14x15ii, 2*n);
 
     // MULT(x^240, x^14)
     let x14x15i = rcv_x14x15i.rcv()?;
@@ -188,7 +188,7 @@ fn gf8_inv_layer_opt<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si
     // receive from P-1
     let rcv_si = party.io().receive_field_slice(Direction::Previous, si);
     // send to P+1
-    party.io().send_field::<GF8>(Direction::Next, sii.iter());
+    party.io().send_field::<GF8>(Direction::Next, sii.iter(), n);
     
     rcv_si.rcv()?;
     party.io().wait_for_completion();
@@ -225,7 +225,7 @@ pub fn input_round<F: Field>(party: &mut Party, input: &[F]) -> MpcResult<(Vec<R
     izip!(pi_random.iter_mut(), input, my_random).for_each(|(pi_random, inp, rand)| pi_random.sii += *inp - rand);
 
     // send sii to P+1
-    party.io().send_field::<F>(Direction::Next, pi_random.iter().map(|rss| &rss.sii));
+    party.io().send_field::<F>(Direction::Next, pi_random.iter().map(|rss| &rss.sii), n);
     // receive si from P-1
     let rcv_prev_si = party.io().receive_field(Direction::Previous, piii_random.len());
 
@@ -269,7 +269,7 @@ pub fn input_round_aes_states(party: &mut Party, input: Vec<Vec<GF8>>) -> MpcRes
     }
 
     // send sii to P+1
-    party.io().send_field::<GF8>(Direction::Next, pi_random.iter().map(|rss| &rss.sii));
+    party.io().send_field::<GF8>(Direction::Next, pi_random.iter().map(|rss| &rss.sii), 16*n);
     // receive si from P-1
     let rcv_prev_si = party.io().receive_field(Direction::Previous, piii_random.len());
 
@@ -300,21 +300,21 @@ pub fn output_round<F: Field>(party: &mut Party, to_p1: &[RssShare<F>], to_p2: &
     let (my, siii) = match party.i {
         0 => {
             // send my share to P2
-            party.io().send_field::<F>(Direction::Next, to_p2.iter().map(|rss| &rss.si));
+            party.io().send_field::<F>(Direction::Next, to_p2.iter().map(|rss| &rss.si), to_p2.len());
             // receive s3 from P3
             let s3 = party.io().receive_field(Direction::Previous, to_p1.len()).rcv()?;
             (to_p1, s3)
         },
         1 => {
             // send my share to P3
-            party.io().send_field::<F>(Direction::Next, to_p3.iter().map(|rss| &rss.si));
+            party.io().send_field::<F>(Direction::Next, to_p3.iter().map(|rss| &rss.si), to_p3.len());
             // receive s1 from P1
             let s1 = party.io().receive_field(Direction::Previous, to_p2.len()).rcv()?;
             (to_p2, s1)
         },
         2 => {
             // send my share to P1
-            party.io().send_field::<F>(Direction::Next, to_p1.iter().map(|rss| &rss.si));
+            party.io().send_field::<F>(Direction::Next, to_p1.iter().map(|rss| &rss.si), to_p1.len());
             // receive s2 from P2
             let s2 = party.io().receive_field(Direction::Previous, to_p3.len()).rcv()?;
             (to_p3, s2)
@@ -341,7 +341,7 @@ where ChaCha20Rng: FieldRngExt<F>
         ci[i] = ai[i] * bi[i] + ai[i] * bii[i] + aii[i] * bi[i] + alpha_i;
     }
     // println!("Writing {} elements to comm_prev", ci.len());
-    party.io().send_field::<F>(Direction::Previous, ci.iter());
+    party.io().send_field::<F>(Direction::Previous, ci.iter(), ci.len());
     // println!("Expecting {} elements from comm_next", cii.len());
     party.io().receive_field_slice(Direction::Next, cii).rcv()?;
     party.io().wait_for_completion();
@@ -350,7 +350,7 @@ where ChaCha20Rng: FieldRngExt<F>
 
 
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use std::thread::JoinHandle;
 

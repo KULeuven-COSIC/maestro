@@ -1,4 +1,4 @@
-use crate::{chida::ChidaParty, party::{broadcast::BroadcastContext, Party}, share::Field, wollut16::RndOhvOutput};
+use crate::{party::{broadcast::BroadcastContext, Party}, share::Field, wollut16::RndOhvOutput};
 
 mod online;
 mod offline;

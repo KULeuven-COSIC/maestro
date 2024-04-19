@@ -5,6 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+benchmark-helper = ["criterion"]
+verbose-timing = []
+default = ["clmul"]
+clmul = []
+
 [dependencies]
 rustls = {version = "0.22.1"}
 rustls-pemfile = "2.0.0"
@@ -16,10 +22,16 @@ serde = {version = "1.0", features = ["derive"]}
 clap = {version = "4.4.13", features = ["derive"]}
 oneshot = "0.1.6"
 itertools = "0.12.1"
+criterion = {version ="0.4", optional = true }
+lazy_static = {version = "1.4.0" }
 
 [dev-dependencies]
 # serial_test = "*"
 
-[features]
-default = ["clmul"]
-clmul = []
+[[bin]]
+name = "lut_benchmark"
+harness = false
+required-features = ["benchmark-helper"]
+
+[lib]
+required-features = ["verbose-timing"]

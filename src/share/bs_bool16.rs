@@ -9,7 +9,7 @@ use super::{Field, FieldDigestExt, FieldRngExt};
 /// a bit-sliced vector of 16 booleans
 /// or mathematically, this is an element in F_2^16
 /// this means, addition, multiplicaiton is done **element-wise**
-#[derive(Clone,Copy,Default,PartialEq)]
+#[derive(Clone,Copy,Default,PartialEq, Debug)]
 pub struct BsBool16(u16);
 
 impl BsBool16 {
@@ -24,6 +24,9 @@ impl BsBool16 {
 }
 
 impl Field for BsBool16 {
+    fn serialized_size(n_elements: usize) -> usize {
+        2*n_elements
+    }
 
     const NBYTES: usize = 2;
 
@@ -36,11 +39,11 @@ impl Field for BsBool16 {
         self.0 == 0
     }
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>) -> Vec<u8> {
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         it.into_iter().flat_map(|el| [el.borrow().0 as u8, (el.borrow().0 >> 8) as u8]).collect()
     }
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+    fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         debug_assert!(v.len() % 2 == 0);
         v.into_iter().chunks(2).into_iter().map(|mut chunk| {
             let low = chunk.next().unwrap() as u16;

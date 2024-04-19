@@ -14,13 +14,14 @@ use itertools::izip;
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayer}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, Party}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
 // simd: how many parallel AES calls
 pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     let mut party = FurukawaParty::setup(connected).unwrap();
+    let setup_comm_stats = party.io().reset_comm_stats();
     let inputs = aes::random_state(&mut party, simd);
     // create random key states for benchmarking purposes
     let ks = aes::random_keyschedule(&mut party);
@@ -28,9 +29,12 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     let start = Instant::now();
     party.do_preprocessing(0, simd).unwrap();
     let prep_duration = start.elapsed();
+    let prep_comm_stats = party.io().reset_comm_stats();
+
     let start = Instant::now();
     let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
     let online_duration = start.elapsed();
+    let online_comm_stats = party.io().reset_comm_stats();
     party.finalize().unwrap();
     let post_sacrifice_duration = start.elapsed();
     let _ = aes::output(&mut party, output).unwrap();
@@ -39,7 +43,51 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize) {
     println!("Finished benchmark");
     
     println!("Party {}: Furukawa et al. with SIMD={} took {}s (pre-processing), {}s (online), {}s (post-sacrifice), {}s (total)", party.inner.i, simd, prep_duration.as_secs_f64(), online_duration.as_secs_f64(), post_sacrifice_duration.as_secs_f64(), (prep_duration+online_duration+post_sacrifice_duration).as_secs_f64());
-    party.inner.print_comm_statistics();
+    println!("Setup:");
+    setup_comm_stats.print_comm_statistics(party.inner.i);
+    println!("Pre-Processing:");
+    prep_comm_stats.print_comm_statistics(party.inner.i);
+    println!("Online Phase:");
+    online_comm_stats.print_comm_statistics(party.inner.i);
+    party.inner.print_statistics();
+}
+
+pub struct MalChidaBenchmark;
+
+impl BenchmarkProtocol for MalChidaBenchmark {
+    fn protocol_name(&self) -> String {
+        "mal-chida".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
+        let mut party = FurukawaParty::setup(conn).unwrap();
+        let _setup_comm_stats = party.io().reset_comm_stats();
+        let inputs = aes::random_state(&mut party, simd);
+        // create random key states for benchmarking purposes
+        let ks = aes::random_keyschedule(&mut party);
+
+        println!("After setup");
+
+        let start = Instant::now();
+        party.do_preprocessing(0, simd).unwrap();
+        let prep_duration = start.elapsed();
+        let prep_comm_stats = party.io().reset_comm_stats();
+
+        println!("After pre-processing");
+
+        let start = Instant::now();
+        let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
+        party.finalize().unwrap();
+        let online_duration = start.elapsed();
+        println!("After online");
+        let online_comm_stats = party.io().reset_comm_stats();
+        // let post_sacrifice_duration = start.elapsed();
+        let _ = aes::output(&mut party, output).unwrap();
+        println!("After output");
+        party.inner.teardown().unwrap();
+        println!("After teardown");
+        
+        BenchmarkResult::new(prep_duration, online_duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
+    }
 }
 
 struct MulTripleVector<F> {
@@ -138,7 +186,7 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
                 alpha_j + *ai_j * *bi_j + *ai_j * *bii_j + *aii_j * *bi_j
             })
             .collect();
-        self.inner.io().send_field::<F>(Direction::Previous, ci.iter());
+        self.inner.io().send_field::<F>(Direction::Previous, ci.iter(), ci.len());
         let rcv_cii = self.inner.io().receive_field(Direction::Next, ci.len());
         // note down the observed multiplication triple
         // first the ones we already have

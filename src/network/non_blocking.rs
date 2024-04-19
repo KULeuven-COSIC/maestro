@@ -1,6 +1,8 @@
 use std::{io::{self, Read, Write}, net::TcpStream};
 use rustls::{ClientConnection, ServerConnection};
 
+use crate::party::CommStats;
+
 use super::{CommChannel, Stream};
 
 
@@ -17,10 +19,6 @@ pub enum NonBlockingStream {
     Client(rustls::StreamOwned<ClientConnection, TcpStream>),
     Server(rustls::StreamOwned<ServerConnection, TcpStream>),
 }
-
-// fn mio_to_net(stream: TcpStream) -> std::net::TcpStream {
-//     unsafe { std::net::TcpStream::from_raw_fd(stream.into_raw_fd()) }
-// }
 
 impl NonBlockingStream {
     pub fn from_stream(stream: Stream) -> io::Result<Self> {
@@ -50,6 +48,20 @@ impl NonBlockingStream {
             }
         }
     }
+
+    pub fn wants_write(&self) -> bool {
+        match self {
+            Self::Client(stream) => stream.conn.wants_write(),
+            Self::Server(stream) => stream.conn.wants_write(),
+        }
+    }
+
+    pub fn write_tls(&mut self) -> io::Result<usize> {
+        match self {
+            Self::Client(stream) => stream.conn.write_tls(&mut stream.sock),
+            Self::Server(stream) => stream.conn.write_tls(&mut stream.sock),
+        }
+    }
 }
 
 impl NonBlockingCommChannel {
@@ -72,6 +84,16 @@ impl NonBlockingCommChannel {
             bytes_received: self.bytes_received,
             rounds: self.rounds 
         })
+    }
+
+    pub fn get_comm_stats(&self) -> CommStats {
+        CommStats::new(self.bytes_received, self.bytes_sent, self.rounds)
+    }
+
+    pub fn reset_comm_stats(&mut self) {
+        self.bytes_received = 0;
+        self.bytes_sent = 0;
+        self.rounds = 0;
     }
 }
 

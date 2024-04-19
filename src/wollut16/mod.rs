@@ -3,19 +3,22 @@
 //!
 
 
-use crate::{chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::{gf4::GF4, Field}};
+use std::time::Instant;
 
-mod online;
-mod offline;
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayer, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf4::GF4};
+
+pub mod online;
+pub mod offline;
 
 // Party for WOLLUT16
 pub struct WL16Party {
     inner: ChidaParty,
     prep_ohv: Vec<RndOhvOutput>,
+    opt: bool,
 }
 
 // a random one-hot vector of size 16
-#[derive(PartialEq,Debug)]
+#[derive(PartialEq,Debug,Clone, Copy)]
 pub struct RndOhv16(u16);
 
 /// Output of the random one-hot vector pre-processing.
@@ -36,11 +39,15 @@ impl WL16Party {
             Self {
                 inner: party,
                 prep_ohv: Vec::new(),
+                opt: true,
             }
         })
     }
 
-    pub fn prepare_rand_ohv(&mut self, n: usize) -> MpcResult<()> {
+    pub fn prepare_rand_ohv(&mut self, mut n: usize) -> MpcResult<()> {
+        if self.opt {
+            n = if n % 2 == 0 { n } else { n+1 };
+        }
         let mut new = offline::generate_random_ohv16(&mut self.inner, n)?;
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;
@@ -55,15 +62,99 @@ impl WL16Party {
     }
 }
 
+pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize) {
+    let mut party = WL16Party::setup(connected).unwrap();
+    let setup_comm_stats = party.io().reset_comm_stats();
+    let start_prep = Instant::now();
+    party.do_preprocessing(0, simd).unwrap();
+    let prep_duration = start_prep.elapsed();
+    let prep_comm_stats = party.io().reset_comm_stats();
+
+    let input = aes::random_state(&mut party.inner, simd);
+    // create random key states for benchmarking purposes
+    let ks = aes::random_keyschedule(&mut party.inner);
+
+    let start = Instant::now();
+    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+    let duration = start.elapsed();
+    let online_comm_stats = party.io().reset_comm_stats();
+    let _ = aes::output(&mut party.inner, output).unwrap();
+    party.inner.teardown().unwrap();
+    
+    println!("Finished benchmark");
+    
+    println!("Party {}: LUT-16 with SIMD={} took {}s (pre-processing) and {}s (online phase)", party.inner.party_index(), simd, prep_duration.as_secs_f64(), duration.as_secs_f64());
+    println!("Setup:");
+    setup_comm_stats.print_comm_statistics(party.inner.party_index());
+    println!("Pre-Processing:");
+    prep_comm_stats.print_comm_statistics(party.inner.party_index());
+    println!("Online Phase:");
+    online_comm_stats.print_comm_statistics(party.inner.party_index());
+    party.inner.print_statistics();
+}
+
+pub struct LUT16Benchmark;
+
+impl BenchmarkProtocol for LUT16Benchmark {
+    fn protocol_name(&self) -> String {
+        "lut16".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
+        let mut party = WL16Party::setup(conn).unwrap();
+        let _setup_comm_stats = party.io().reset_comm_stats();
+        println!("After setup");
+        let start_prep = Instant::now();
+        party.do_preprocessing(0, simd).unwrap();
+        let prep_duration = start_prep.elapsed();
+        let prep_comm_stats = party.io().reset_comm_stats();
+        println!("After pre-processing");
+
+        let input = aes::random_state(&mut party.inner, simd);
+        // create random key states for benchmarking purposes
+        let ks = aes::random_keyschedule(&mut party.inner);
+
+        let start = Instant::now();
+        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+        let duration = start.elapsed();
+        let online_comm_stats = party.io().reset_comm_stats();
+        println!("After online");
+        let _ = aes::output(&mut party.inner, output).unwrap();
+        println!("After outout");
+        party.inner.teardown().unwrap();
+        println!("After teardown");
+        
+        BenchmarkResult::new(prep_duration, duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
+    }
+}
+
 impl RndOhv16 {
-    pub fn lut(&self, offset: usize, table: &[u8; 16]) -> GF4 {
-        let mut res = GF4::ZERO;
-        for i in 0..16_usize {
-            if ((self.0 >> i) & 0x1) == 0x1 {
-                res += GF4::new_unchecked(table[i ^ offset]);
-            }
-        }
-        res
+
+    pub fn new(table: u16) -> Self {
+        Self(table)
+    }
+
+    /// tables contains table[offset ^ i] at position offset
+    /// table[offset ^ i][j] is the j-th bit of the lookup
+    #[inline]
+    pub fn lut(&self, offset: usize, tables: &[[u16; 4]; 16]) -> GF4 {
+        let table = &tables[offset];
+        self.lut_table(table)
+    }
+
+    #[inline]
+    fn lut_table(&self, table: &[u16; 4]) -> GF4 {
+        let b0 = self.0 & table[0];
+        let b1 = self.0 & table[1];
+        let b2 = self.0 & table[2];
+        let b3 = self.0 & table[3];
+        let res = (b0.count_ones() & 0x1) | (b1.count_ones() & 0x1) << 1 | (b2.count_ones() & 0x1) << 2 | (b3.count_ones() & 0x1) << 3;
+        GF4::new_unchecked(res as u8)
+    }
+
+    #[inline]
+    pub fn lut_rss(offset: usize, rnd_ohv_si: &Self, rnd_ohv_sii: &Self, tables: &[[u16; 4]; 16]) -> (GF4, GF4) {
+        let table = &tables[offset];
+        (rnd_ohv_si.lut_table(table), rnd_ohv_sii.lut_table(table))
     }
 }
 
