@@ -370,6 +370,7 @@ pub const INV_GF8: [u8; 256] = [0x0, 0x1, 0x8d, 0xf6, 0xcb, 0x52, 0x7b, 0xd1, 0x
 #[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
 
+    use itertools::repeat_n;
     use rand::{thread_rng, CryptoRng, Rng};
 
     use crate::{aes::{aes128_inv_no_keyschedule, aes128_keyschedule, aes128_no_keyschedule, sbox_layer, INV_GF8}, party::test::TestSetup, share::{gf8::GF8, test::{assert_eq, consistent, secret_share}, RssShare}};
@@ -411,7 +412,7 @@ pub mod test {
         }
     }
 
-    pub fn test_sub_bytes<S: TestSetup<P>, P: GF8InvBlackBox>()
+    pub fn test_sub_bytes<S: TestSetup<P>, P: GF8InvBlackBox>(n_worker_threads: Option<usize>)
     {
         // check all possible S-box inputs by using 16 AES states in parallel
         let mut rng = thread_rng();
@@ -443,7 +444,10 @@ pub mod test {
                 state
             }
         };
-        let (h1, h2, h3) = S::localhost_setup(program(state1), program(state2), program(state3));
+        let (h1, h2, h3) = match n_worker_threads {
+            Some(n_worker_threads) => S::localhost_setup_multithreads(n_worker_threads, program(state1), program(state2), program(state3)),
+            None => S::localhost_setup(program(state1), program(state2), program(state3)),
+        };
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
@@ -496,11 +500,11 @@ pub mod test {
         (state1, state2, state3)
     }
 
-    pub fn test_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>()
+    pub fn test_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>(n_blocks: usize, n_worker_threads: Option<usize>)
     {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
-        let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
+        let input: Vec<_> = repeat_n(input, n_blocks).flatten().map(|x|GF8(x)).collect();
         let round_keys: [[u8; 16]; 11] = [ // already in row-first representation
             [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
             [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
@@ -536,13 +540,16 @@ pub mod test {
                 output
             }
         };
-        let (h1, h2, h3) = S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3));
+        let (h1, h2, h3) = match n_worker_threads {
+            Some(n_worker_threads) => S::localhost_setup_multithreads(n_worker_threads, program(in1, ks1), program(in2, ks2), program(in3, ks3)),
+            None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
+        };
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
-        assert_eq!(s1.n, 1);
-        assert_eq!(s2.n, 1);
-        assert_eq!(s3.n, 1);
+        assert_eq!(s1.n, n_blocks);
+        assert_eq!(s2.n, n_blocks);
+        assert_eq!(s3.n, n_blocks);
 
         let shares: Vec<_> = s1.to_bytes().into_iter().zip(s2.to_bytes().into_iter().zip(s3.to_bytes()))
             .map(|(s1, (s2,s3))| (s1, s2, s3)).collect();
@@ -552,7 +559,7 @@ pub mod test {
         }
 
         for (i,(s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq(s1, s2, s3, GF8(expected[i]));
+            assert_eq(s1, s2, s3, GF8(expected[i % 16]));
         }
     }
 
@@ -568,7 +575,7 @@ pub mod test {
         (v1, v2, v3)
     }
 
-    pub fn test_aes128_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>() {
+    pub fn test_aes128_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>(n_worker_threads: Option<usize>) {
         let mut rng = thread_rng();
         let key = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
         let (key1, key2, key3) = transpose(key.into_iter().map(|x| secret_share(&mut rng, &GF8(x))));
@@ -583,7 +590,10 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) = S::localhost_setup(program(key1), program(key2), program(key3));
+        let (h1, h2, h3) = match n_worker_threads {
+            Some(n_worker_threads) => S::localhost_setup_multithreads(n_worker_threads, program(key1), program(key2), program(key3)),
+            None => S::localhost_setup(program(key1), program(key2), program(key3)),
+        };
         let (ks1, _) = h1.join().unwrap();
         let (ks2, _) = h2.join().unwrap();
         let (ks3, _) = h3.join().unwrap();
@@ -641,10 +651,10 @@ pub mod test {
         assert_eq!(state.si, copy.si);
     }
 
-    pub fn test_inv_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>() {
+    pub fn test_inv_aes128_no_keyschedule_gf8<S: TestSetup<P>, P: GF8InvBlackBox + ArithmeticBlackBox<GF8>>(n_blocks: usize, n_worker_threads: Option<usize>) {
         // FIPS 197 Appendix B
         let input: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32]; //[0x32, 0x88, 0x31, 0xe0, 0x43, 0x5a, 0x31, 0x37, 0xf6, 0x30, 0x98, 0x07, 0xa8, 0x8d, 0xa2, 0x34];
-        let input: Vec<_> = input.into_iter().map(|x|GF8(x)).collect();
+        let input: Vec<_> = repeat_n(input, n_blocks).flatten().map(|x|GF8(x)).collect();
         let round_keys: [[u8; 16]; 11] = [ // already in row-first representation
             [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
             [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
@@ -680,13 +690,16 @@ pub mod test {
                 output
             }
         };
-        let (h1, h2, h3) = S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3));
+        let (h1, h2, h3) = match n_worker_threads {
+            Some(n_worker_threads) => S::localhost_setup_multithreads(n_worker_threads, program(in1, ks1), program(in2, ks2), program(in3, ks3)),
+            None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
+        };
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
-        assert_eq!(s1.n, 1);
-        assert_eq!(s2.n, 1);
-        assert_eq!(s3.n, 1);
+        assert_eq!(s1.n, n_blocks);
+        assert_eq!(s2.n, n_blocks);
+        assert_eq!(s3.n, n_blocks);
 
         let shares: Vec<_> = s1.to_bytes().into_iter().zip(s2.to_bytes().into_iter().zip(s3.to_bytes()))
             .map(|(s1, (s2,s3))| (s1, s2, s3)).collect();
@@ -696,7 +709,7 @@ pub mod test {
         }
 
         for (i,(s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq(s1, s2, s3, GF8(expected[i]));
+            assert_eq(s1, s2, s3, GF8(expected[i % 16]));
         }
     }
 }

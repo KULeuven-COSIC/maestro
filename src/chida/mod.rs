@@ -58,6 +58,10 @@ impl ChidaParty {
     pub fn has_multi_threading(&self) -> bool {
         self.0.has_multi_threading()
     }
+
+    pub fn num_worker_threads(&self) -> usize {
+        self.0.num_worker_threads()
+    }
 }
 /// [ChidaParty] paired with an [ImplVariant]
 pub struct ChidaBenchmarkParty {

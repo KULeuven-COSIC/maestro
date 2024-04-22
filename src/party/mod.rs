@@ -206,6 +206,10 @@ impl MainParty {
         self.thread_pool.is_some()
     }
 
+    pub fn num_worker_threads(&self) -> usize {
+        self.thread_pool.as_ref().map(|tp| tp.current_num_threads()).unwrap_or(1)
+    }
+
     pub fn teardown(&mut self) -> MpcResult<()> {
         self.thread_pool.take().into_iter().for_each(|thread_pool| drop(thread_pool));
         let io = self.io.take();
@@ -282,9 +286,7 @@ impl MainParty {
         return Vec::new();
     }
 
-    pub fn split_range_equally(&self, end_exclusive: usize) -> Vec<(usize,usize)> {
-        let n_parts = self.thread_pool.as_ref().map(|tp| tp.current_num_threads()).unwrap_or(1);
-        let length = end_exclusive/n_parts;
+    fn split_range_helper(n_parts: usize, length: usize, end_exclusive: usize) -> Vec<(usize,usize)> {
         let mut start = 0;
         let mut remaining = end_exclusive;
         let mut vec = Vec::with_capacity(n_parts);
@@ -295,9 +297,45 @@ impl MainParty {
                 vec.push((start, start+remaining))
             }
             start += length;
-            remaining -= length;
+            remaining = remaining.overflowing_sub(length).0;
         }
         vec
+    }
+
+    pub fn split_range_equally(&self, end_exclusive: usize) -> Vec<(usize,usize)> {
+        let n_parts = self.thread_pool.as_ref().map(|tp| tp.current_num_threads()).unwrap_or(1);
+        let length = if end_exclusive % n_parts == 0 { end_exclusive/n_parts } else { end_exclusive/n_parts +1 };
+        Self::split_range_helper(n_parts, length, end_exclusive)
+    }
+
+    /// Returns intervals of equal, even length where the last interval may be shorter and of odd length
+    pub fn split_range_equally_even(&self, end_exclusive: usize) -> Vec<(usize,usize)> {
+        let n_parts = self.thread_pool.as_ref().map(|tp| tp.current_num_threads()).unwrap_or(1);
+        if n_parts == 1 {
+            return vec![(0, end_exclusive)];
+        }
+        let length = {
+            if end_exclusive % n_parts == 0 {
+                if end_exclusive/n_parts % 2 == 0 {
+                    end_exclusive/n_parts
+                }else{
+                    // next larger, even number
+                    end_exclusive/n_parts + 1
+                }
+            }else{
+                let new = end_exclusive/n_parts+1;
+                if new % 2 == 0 {
+                    new
+                }else{
+                    // next larger, even number
+                    new+1
+                }
+            }
+        };
+        if (n_parts-1) * length > end_exclusive {
+            panic!("Range is too small to be divided into even slices");
+        }
+        Self::split_range_helper(n_parts, length, end_exclusive)
     }
 
     pub fn create_thread_parties(&mut self, ranges: Vec<(usize,usize)>) -> Vec<ThreadParty> {
@@ -673,9 +711,28 @@ pub mod test {
             let range = p.split_range_equally(300);
             assert_eq!(vec![(0,100), (100,200), (200,300)], range);
             let range = p.split_range_equally(100);
-            assert_eq!(vec![(0,33), (33,66), (66,100)], range);
+            assert_eq!(vec![(0,34), (34,68), (68,100)], range);
         }
         let (p1, p2, p3) = localhost_setup(split_range_test, split_range_test, split_range_test, Some(THREADS));
+        p1.join().unwrap();
+        p2.join().unwrap();
+        p3.join().unwrap();
+    }
+
+    #[test]
+    fn correct_split_range_even() {
+        const THREADS: usize = 3;
+        fn split_range_even_test(p: &mut MainParty) {
+            let range = p.split_range_equally_even(30);
+            assert_eq!(vec![(0,10), (10,20), (20,30)], range);
+            let range = p.split_range_equally_even(31);
+            assert_eq!(vec![(0,12), (12,24), (24,31)], range);
+            let range = p.split_range_equally_even(5);
+            assert_eq!(vec![(0,2), (2,4), (4,5)], range);
+            let range = p.split_range_equally_even(4);
+            assert_eq!(vec![(0,2), (2,4), (4,4)], range);
+        }
+        let (p1, p2, p3) = localhost_setup(split_range_even_test, split_range_even_test, split_range_even_test, Some(THREADS));
         p1.join().unwrap();
         p2.join().unwrap();
         p3.join().unwrap();

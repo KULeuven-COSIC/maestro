@@ -28,6 +28,14 @@ impl ThreadParty {
     pub fn task_size(&self) -> usize {
         self.range_end - self.range_start
     }
+
+    pub fn range_start(&self) -> usize {
+        self.range_start
+    }
+
+    pub fn range_end(&self) -> usize {
+        self.range_end
+    }
 }
 
 impl Party for ThreadParty {

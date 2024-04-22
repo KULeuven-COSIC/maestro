@@ -477,16 +477,16 @@ pub mod test {
 
     #[test]
     fn aes128_no_keyschedule_gf8() {
-        test_aes128_no_keyschedule_gf8::<FurukawaSetup,_>();
+        test_aes128_no_keyschedule_gf8::<FurukawaSetup,_>(1, None);
     }
 
     #[test]
     fn aes128_keyschedule_gf8() {
-        test_aes128_keyschedule_gf8::<FurukawaSetup,_>();
+        test_aes128_keyschedule_gf8::<FurukawaSetup,_>(None);
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_gf8() {
-        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup,_>();
+        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup,_>(1, None);
     }
 }

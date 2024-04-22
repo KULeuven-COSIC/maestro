@@ -574,41 +574,41 @@ pub mod test {
 
     #[test]
     fn sub_bytes_simple() {
-        test_sub_bytes::<ChidaSetupSimple,_>();
+        test_sub_bytes::<ChidaSetupSimple,_>(None);
     }
 
     #[test]
     fn sub_bytes_optimized() {
-        test_sub_bytes::<ChidaSetupOpt,_>();
+        test_sub_bytes::<ChidaSetupOpt,_>(None);
     }
 
     #[test]
     fn aes128_no_keyschedule_gf8_simple() {
-        test_aes128_no_keyschedule_gf8::<ChidaSetupSimple,_>();
+        test_aes128_no_keyschedule_gf8::<ChidaSetupSimple,_>(1, None);
     }
 
     #[test]
     fn aes128_no_keyschedule_gf8_optimized() {
-        test_aes128_no_keyschedule_gf8::<ChidaSetupOpt,_>();
+        test_aes128_no_keyschedule_gf8::<ChidaSetupOpt,_>(1, None);
     }
 
     #[test]
     fn aes128_keyschedule_gf8_simple() {
-        test_aes128_keyschedule_gf8::<ChidaSetupSimple,_>();
+        test_aes128_keyschedule_gf8::<ChidaSetupSimple,_>(None);
     }
 
     #[test]
     fn aes128_keyschedule_gf8_optimized() {
-        test_aes128_keyschedule_gf8::<ChidaSetupOpt,_>();
+        test_aes128_keyschedule_gf8::<ChidaSetupOpt,_>(None);
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_gf8_simple() {
-        test_inv_aes128_no_keyschedule_gf8::<ChidaSetupSimple,_>();
+        test_inv_aes128_no_keyschedule_gf8::<ChidaSetupSimple,_>(1, None);
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_gf8_optimized() {
-        test_inv_aes128_no_keyschedule_gf8::<ChidaSetupOpt,_>();
+        test_inv_aes128_no_keyschedule_gf8::<ChidaSetupOpt,_>(1, None);
     }
 }

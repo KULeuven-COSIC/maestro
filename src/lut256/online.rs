@@ -105,21 +105,21 @@ mod test {
 
     #[test]
     fn sub_bytes() {
-        test_sub_bytes::<LUT256Setup,_>()
+        test_sub_bytes::<LUT256Setup,_>(None)
     }
 
     #[test]
     fn aes128_keyschedule_lut16() {
-        test_aes128_keyschedule_gf8::<LUT256Setup, _>()
+        test_aes128_keyschedule_gf8::<LUT256Setup, _>(None)
     }
 
     #[test]
     fn aes_128_no_keyschedule_lut16() {
-        test_aes128_no_keyschedule_gf8::<LUT256Setup, _>()
+        test_aes128_no_keyschedule_gf8::<LUT256Setup, _>(1, None)
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_lut16() {
-        test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>()
+        test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>(1, None)
     }
 }

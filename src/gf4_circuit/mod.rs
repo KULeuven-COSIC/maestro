@@ -284,21 +284,21 @@ mod test {
 
     #[test]
     fn sub_bytes() {
-        test_sub_bytes::<GF4SemihonestSetup, _>()
+        test_sub_bytes::<GF4SemihonestSetup, _>(None)
     }
 
     #[test]
     fn aes128_no_keyschedule_gf8() {
-        test_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>();
+        test_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>(1, None);
     }
 
     #[test]
     fn aes128_keyschedule_gf8() {
-        test_aes128_keyschedule_gf8::<GF4SemihonestSetup,_>();
+        test_aes128_keyschedule_gf8::<GF4SemihonestSetup,_>(None);
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_gf8() {
-        test_inv_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>();
+        test_inv_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>(1, None);
     }
 }
