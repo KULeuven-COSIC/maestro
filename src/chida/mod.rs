@@ -54,6 +54,10 @@ impl ChidaParty {
     pub fn as_party_mut(&mut self) -> &mut MainParty {
         &mut self.0
     }
+
+    pub fn has_multi_threading(&self) -> bool {
+        self.0.has_multi_threading()
+    }
 }
 /// [ChidaParty] paired with an [ImplVariant]
 pub struct ChidaBenchmarkParty {

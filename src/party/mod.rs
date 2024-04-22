@@ -166,15 +166,12 @@ impl MainParty {
 
     fn build_thread_pool(n_worker_threads: usize) -> ThreadPool {
         let mut builder = ThreadPoolBuilder::new();
-        builder = builder.use_current_thread();
         if n_worker_threads == 0 {
-            // spawn as many threads as there are cores (minus one since main thread is already included)
-            let n_cores = thread::available_parallelism().unwrap().get()-1;
-            if n_cores > 0 {
-                builder = builder.num_threads(n_cores);
-            }
+            // spawn as many threads as there are cores
+            let n_cores = thread::available_parallelism().unwrap().get();
+            builder = builder.num_threads(n_cores);
         }else{
-            // spawn n_workder_threads
+            // spawn n_worker_threads
             builder = builder.num_threads(n_worker_threads);
         }
         builder = builder.thread_name(|i| format!("worker-{}", i));
@@ -203,6 +200,10 @@ impl MainParty {
 
     pub fn wait_for_completion(&self) {
         self.io().wait_for_completion()
+    }
+
+    pub fn has_multi_threading(&self) -> bool {
+        self.thread_pool.is_some()
     }
 
     pub fn teardown(&mut self) -> MpcResult<()> {
@@ -310,9 +311,6 @@ impl MainParty {
             let i = self.i;
             vec.push(ThreadParty::new(i, start, end, random_next, random_prev, random_local, io))
         }
-
-        let vec = vec.into_iter().map(|a| a).collect_vec();
-        let vec = <Vec<ThreadParty> as IntoParallelIterator>::into_par_iter(vec).collect();
         vec
     }
 
@@ -681,5 +679,87 @@ pub mod test {
         p1.join().unwrap();
         p2.join().unwrap();
         p3.join().unwrap();
+    }
+
+    #[test]
+    fn can_create_multiple_party_instances_in_same_thread_after_teardown() {
+        const N_THREADS: usize = 3;
+        let addr1 = Ipv4Addr::from_str("127.0.0.1").unwrap();
+        let addr2 = Ipv4Addr::from_str("127.0.0.1").unwrap();
+        let addr3 = Ipv4Addr::from_str("127.0.0.1").unwrap();
+        let party1 = CreatedParty::bind(0, IpAddr::V4(addr1), 0).unwrap();
+        let party2 = CreatedParty::bind(1, IpAddr::V4(addr2), 0).unwrap();
+        let party3 = CreatedParty::bind(2, IpAddr::V4(addr3), 0).unwrap();
+
+        // get ports
+        let port1 = party1.port().unwrap();
+        let port2 = party2.port().unwrap();
+        let port3 = party3.port().unwrap();
+
+        // create certificates
+        let certs = create_certificates();
+        let (sk1, pk1) = certs.0;
+        let (sk2, pk2) = certs.1;
+        let (sk3, pk3) = certs.2;
+
+        let certificates = vec![pk1.clone(), pk2.clone(), pk3.clone()];
+        let ports = vec![port1, port2, port3];
+
+        let party1 = {
+            let config = Config::new( vec![addr1, addr2, addr3], ports.clone(), certificates.clone(), pk1, sk1);
+            thread::Builder::new().name("party1".to_string()).spawn(move || {
+                let mut party1 = MainParty::setup(party1.connect(config.clone(), None).unwrap(), Some(N_THREADS)).unwrap();
+                // teardown
+                party1.teardown().unwrap();
+                drop(party1);
+
+                // create another party in the same thread
+                let party1 = CreatedParty::bind(0, IpAddr::V4(addr1), port1).unwrap();
+                let party1 = party1.connect(config, None).unwrap();
+                let mut party1 = MainParty::setup(party1, Some(N_THREADS)).unwrap();
+                // ok
+                party1.teardown().unwrap()
+            }).unwrap()
+        };
+
+        let party2 = {
+            let config = Config::new(vec![addr1, addr2, addr3], ports.clone(), certificates.clone(), pk2, sk2);
+            thread::Builder::new().name("party2".to_string()).spawn(move || {
+                let mut party2 = MainParty::setup(party2.connect(config.clone(), None).unwrap(), Some(N_THREADS)).unwrap();
+                // teardown
+                party2.teardown().unwrap();
+                drop(party2);
+
+                // create another party in the same thread
+                let party2 = CreatedParty::bind(1, IpAddr::V4(addr2), port2).unwrap();
+                let party2 = party2.connect(config, None).unwrap();
+                let mut party2 = MainParty::setup(party2, Some(N_THREADS)).unwrap();
+                
+                // ok
+                party2.teardown().unwrap()
+            }).unwrap()
+        };
+
+        let party3 = {
+            let config = Config::new(vec![addr1, addr2, addr3], ports, certificates, pk3, sk3);
+            thread::Builder::new().name("party3".to_string()).spawn(move || {
+                let mut party3 = MainParty::setup(party3.connect(config.clone(), None).unwrap(), Some(N_THREADS)).unwrap();
+                // teardown
+                party3.teardown().unwrap();
+                drop(party3);
+
+                // create another party in the same thread
+                let party3 = CreatedParty::bind(2, IpAddr::V4(addr3), port3).unwrap();
+                let party3 = party3.connect(config, None).unwrap();
+                let mut party3 = MainParty::setup(party3, Some(N_THREADS)).unwrap();
+                
+                // ok
+                party3.teardown().unwrap()
+            }).unwrap()
+        };
+
+        party1.join().unwrap();
+        party2.join().unwrap();
+        party3.join().unwrap();
     }
 }

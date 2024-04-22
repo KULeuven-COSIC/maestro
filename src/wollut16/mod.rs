@@ -48,7 +48,11 @@ impl WL16Party {
         if self.opt {
             n = if n % 2 == 0 { n } else { n+1 };
         }
-        let mut new = offline::generate_random_ohv16(self.inner.as_party_mut(), n)?;
+        let mut new = if self.inner.has_multi_threading() {
+            offline::generate_random_ohv16_mt(self.inner.as_party_mut(), n)?
+        }else{
+            offline::generate_random_ohv16(self.inner.as_party_mut(), n)?
+        };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;
         }else{
