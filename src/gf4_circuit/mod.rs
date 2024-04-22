@@ -2,9 +2,10 @@ use std::time::{Duration, Instant};
 
 use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
+use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::{IoLayerOwned}, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::{self, ChidaParty}, network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats, MainParty, Party}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 
 
 pub struct GF4CircuitSemihonestParty(ChidaParty);
@@ -128,7 +129,11 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
         Ok(())
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-        gf8_inv_via_gf4_mul_opt(self, si, sii)
+        if self.0.has_multi_threading() && si.len() > 2*self.0.num_worker_threads() {
+            gf8_inv_via_gf4_mul_opt_mt(self.0.as_party_mut(), si, sii)
+        }else{
+            gf8_inv_via_gf4_mul_opt(self.0.as_party_mut(), si, sii)
+        }
     }
 }
 
@@ -187,7 +192,28 @@ fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(party: &mut P, si: &mut [GF8]
     Ok(())
 }
 
-fn gf8_inv_via_gf4_mul_opt<P: ArithmeticBlackBox<BsGF4>>(party: &mut P, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+fn gf8_inv_via_gf4_mul_opt(party: &mut MainParty, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    gf8_inv_via_gf4_mul_opt_no_sync(party, si, sii)?;
+    party.wait_for_completion();
+    Ok(())
+}
+
+fn gf8_inv_via_gf4_mul_opt_mt(party: &mut MainParty, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+    debug_assert_eq!(si.len(), sii.len());
+    let ranges = party.split_range_equally_even(si.len());
+    let chunk_size = ranges[0].1 - ranges[0].0;
+    let thread_parties = party.create_thread_parties(ranges);
+    party.run_in_threadpool(|| {
+        thread_parties.into_par_iter().zip_eq(si.par_chunks_mut(chunk_size)).zip_eq(sii.par_chunks_mut(chunk_size))
+        .map(|((mut thread_party, si), sii)| {
+            gf8_inv_via_gf4_mul_opt_no_sync(&mut thread_party, si, sii)
+        }).collect::<MpcResult<Vec<()>>>()
+    })?;
+    party.wait_for_completion();
+    Ok(())
+}
+
+fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(party: &mut P, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     
     // Step 1: WOL-conversion
@@ -199,7 +225,7 @@ fn gf8_inv_via_gf4_mul_opt<P: ArithmeticBlackBox<BsGF4>>(party: &mut P, si: &mut
     // compute v^2 = (e*ah^2 + (ah*al) + al^2)^2
     let mut vi = vec![BsGF4::default(); n];
     let mut vii = vec![BsGF4::default(); n];
-    party.mul(&mut vi, &mut vii, &ah_i, &ah_ii, &al_i, &al_ii)?;
+    chida::online::mul_no_sync(party, &mut vi, &mut vii, &ah_i, &ah_ii, &al_i, &al_ii)?;
     izip!(vi.iter_mut(), &ah_i, &al_i).for_each(|(dst, ah, al)| {
         *dst += ah.square_mul_e() + al.square();
         *dst = dst.square();
@@ -215,7 +241,7 @@ fn gf8_inv_via_gf4_mul_opt<P: ArithmeticBlackBox<BsGF4>>(party: &mut P, si: &mut
     
     let mut vp6_si = vec![BsGF4::default(); n];
     let mut vp6_sii = vec![BsGF4::default(); n];
-    party.mul(&mut vp6_si, &mut vp6_sii, &vi, &vii, &vp4_si, &vp4_sii)?;
+    chida::online::mul_no_sync(party, &mut vp6_si, &mut vp6_sii, &vi, &vii, &vp4_si, &vp4_sii)?;
 
     vp4_si.iter_mut().for_each(|x| *x = x.square());
     vp4_sii.iter_mut().for_each(|x| *x = x.square());
@@ -224,7 +250,7 @@ fn gf8_inv_via_gf4_mul_opt<P: ArithmeticBlackBox<BsGF4>>(party: &mut P, si: &mut
 
     let mut v_inv_i = vi;
     let mut v_inv_ii = vii;
-    party.mul(&mut v_inv_i, &mut v_inv_ii, &vp6_si, &vp6_sii, &vp8_si, &vp8_sii)?;
+    chida::online::mul_no_sync(party, &mut v_inv_i, &mut v_inv_ii, &vp6_si, &vp6_sii, &vp8_si, &vp8_sii)?;
 
     // compute bh = ah * v_inv and bl = (ah + al) * v_inv
     let mut bh_bl_i = vec![BsGF4::default(); 2*n];
@@ -236,7 +262,7 @@ fn gf8_inv_via_gf4_mul_opt<P: ArithmeticBlackBox<BsGF4>>(party: &mut P, si: &mut
     al_ii.iter_mut().zip(ah_ii.iter()).for_each(|(dst, ah)| *dst += *ah);
     let ah_al_i = append(&ah_i, &al_i);
     let ah_al_ii = append(&ah_ii, &al_ii);
-    party.mul(&mut bh_bl_i, &mut bh_bl_ii, &ah_al_i, &ah_al_ii, &v_inv_v_inv_i, &v_inv_v_inv_ii)?;
+    chida::online::mul_no_sync(party, &mut bh_bl_i, &mut bh_bl_ii, &ah_al_i, &ah_al_ii, &v_inv_v_inv_i, &v_inv_v_inv_ii)?;
 
     un_wol_bitslice_gf4(&bh_bl_i[..n], &bh_bl_i[n..], si);
     un_wol_bitslice_gf4(&bh_bl_ii[..n], &bh_bl_ii[n..], sii);
@@ -262,23 +288,23 @@ mod test {
     use super::GF4CircuitSemihonestParty;
 
 
-    pub fn localhost_setup_gf4_circuit_semi_honest<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,GF4CircuitSemihonestParty)>, JoinHandle<(T2,GF4CircuitSemihonestParty)>, JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
-        fn adapter<T, Fx: FnOnce(&mut GF4CircuitSemihonestParty)->T>(conn: ConnectedParty, f: Fx) -> (T,GF4CircuitSemihonestParty) {
-            let mut party = GF4CircuitSemihonestParty::setup(conn, None).unwrap();
+    pub fn localhost_setup_gf4_circuit_semi_honest<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,GF4CircuitSemihonestParty)>, JoinHandle<(T2,GF4CircuitSemihonestParty)>, JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
+        fn adapter<T, Fx: FnOnce(&mut GF4CircuitSemihonestParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,GF4CircuitSemihonestParty) {
+            let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads).unwrap();
             let t = f(&mut party);
             party.0.teardown().unwrap();
             (t, party)
         }
-        localhost_connect(|conn_party| adapter(conn_party, f1), |conn_party| adapter(conn_party, f2), |conn_party| adapter(conn_party, f3))
+        localhost_connect(move |conn_party| adapter(conn_party, f1, n_worker_threads), move |conn_party| adapter(conn_party, f2, n_worker_threads), move |conn_party| adapter(conn_party, f3, n_worker_threads))
     }
 
     pub struct GF4SemihonestSetup;
     impl TestSetup<GF4CircuitSemihonestParty> for GF4SemihonestSetup {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (std::thread::JoinHandle<(T1,GF4CircuitSemihonestParty)>, std::thread::JoinHandle<(T2,GF4CircuitSemihonestParty)>, std::thread::JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
-            localhost_setup_gf4_circuit_semi_honest(f1, f2, f3)
+            localhost_setup_gf4_circuit_semi_honest(f1, f2, f3, None)
         }
-        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(_n_threads: usize, _f1: F1, _f2: F2, _f3: F3) -> (JoinHandle<(T1,GF4CircuitSemihonestParty)>, JoinHandle<(T2,GF4CircuitSemihonestParty)>, JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
-            unimplemented!()
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,GF4CircuitSemihonestParty)>, JoinHandle<(T2,GF4CircuitSemihonestParty)>, JoinHandle<(T3,GF4CircuitSemihonestParty)>) {
+            localhost_setup_gf4_circuit_semi_honest(f1, f2, f3, Some(n_threads))
         }
     }
 
@@ -288,8 +314,20 @@ mod test {
     }
 
     #[test]
+    fn sub_bytes_mt() {
+        const N_THREADS: usize = 3;
+        test_sub_bytes::<GF4SemihonestSetup, _>(Some(N_THREADS))
+    }
+
+    #[test]
     fn aes128_no_keyschedule_gf8() {
         test_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>(1, None);
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8_mt() {
+        const N_THREADS: usize = 3;
+        test_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>(100, Some(N_THREADS));
     }
 
     #[test]
@@ -300,5 +338,11 @@ mod test {
     #[test]
     fn inv_aes128_no_keyschedule_gf8() {
         test_inv_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>(1, None);
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8_mt() {
+        const N_THREADS: usize = 3;
+        test_inv_aes128_no_keyschedule_gf8::<GF4SemihonestSetup,_>(1, Some(N_THREADS));
     }
 }
