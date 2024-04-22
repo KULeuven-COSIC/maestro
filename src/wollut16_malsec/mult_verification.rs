@@ -1,4 +1,4 @@
-use std::{fmt::Debug, slice};
+use std::slice;
 
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
@@ -6,10 +6,56 @@ use sha2::Sha256;
 use crate::{
     network::task::Direction,
     party::{broadcast::Broadcast, error::MpcResult},
-    share::{Field, FieldDigestExt, FieldRngExt, HasTwo, Invertible, RssShare},
+    share::{
+        gf2p64::{GF2p64, GF2p64Subfield},
+        Field, FieldDigestExt, FieldRngExt, HasTwo, Invertible, RssShare,
+    },
 };
 
 use super::WL16ASParty;
+
+/// Protocol `8` to verify the multiplication triples at the end of the protocol.
+pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool> {
+    let r: GF2p64 = coin_flip(party)?;
+    let n = party
+        .gf4_triples_to_check
+        .len()
+        .checked_next_power_of_two()
+        .expect("n too large");
+    // Compute randomized vectors for inner product
+    let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+    let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+    let mut z = RssShare::from(GF2p64::ZERO, GF2p64::ZERO);
+    let mut weight = GF2p64::ONE;
+    for i in 0..party.gf4_triples_to_check.len() {
+        let x = embed_sharing(
+            party.gf4_triples_to_check.ai[i],
+            party.gf4_triples_to_check.aii[i],
+        );
+        x_vec[i] = x.mul_by_sc(weight);
+        let y = embed_sharing(
+            party.gf4_triples_to_check.bi[i],
+            party.gf4_triples_to_check.bii[i],
+        );
+        y_vec[i] = y.mul_by_sc(weight);
+        let zs = embed_sharing(
+            party.gf4_triples_to_check.ci[i],
+            party.gf4_triples_to_check.cii[i],
+        );
+        z += zs.mul_by_sc(weight);
+        weight *= r;
+    }
+    party.gf4_triples_to_check.shrink(0);
+    verify_dot_product(party, &x_vec, &y_vec, &z)
+}
+
+/// Embed
+fn embed_sharing<F>(ai: F, aii: F) -> RssShare<GF2p64>
+where
+    F: Field + Copy + GF2p64Subfield,
+{
+    RssShare::from(ai.embed(), aii.embed())
+}
 
 /// Protocol to verify the component-wise multiplication triples
 ///
@@ -42,8 +88,8 @@ where
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)
         .collect();
     let mut hs = [F::ZERO; 2];
-    hs[0] = weak_dot_prod(party, f1, g1);
-    hs[1] = weak_dot_prod(party, &f2, &g2);
+    hs[0] = weak_dot_prod(f1, g1);
+    hs[1] = weak_dot_prod(&f2, &g2);
     let h = ss_to_rss_shares(party, &hs)?;
     let h1 = &h[0];
     let h2 = &h[1];
@@ -85,8 +131,7 @@ fn lagrange_deg2<F: Field + Copy + HasTwo + Invertible>(
     h1: &RssShare<F>,
     h2: &RssShare<F>,
     x: F,
-) -> RssShare<F>
-{
+) -> RssShare<F> {
     // Lagrange weights
     // w0^-1 = (1-0)*(2-0) = 1*2 = 2
     let w0 = F::TWO.inverse();
@@ -146,11 +191,8 @@ where
 /// The result is a sum sharing.
 ///
 /// This function assumes that both vectors are of equal length.
-fn weak_dot_prod<'a, I, F: Field + Copy + Sized + 'a>(
-    party: &mut WL16ASParty,
-    x_vec: I,
-    y_vec: I,
-) -> F
+#[inline]
+fn weak_dot_prod<'a, I, F: Field + Copy + Sized + 'a>(x_vec: I, y_vec: I) -> F
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
@@ -223,10 +265,8 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::borrow::Borrow;
 
     use rand::{thread_rng, CryptoRng, Rng};
-    use sha2::digest::typenum::Zero;
 
     use crate::{
         share::{
@@ -284,7 +324,7 @@ mod test {
         let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
         let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>| {
             move |p: &mut WL16ASParty| {
-                let c = weak_dot_prod(p, &a, &b);
+                let c = weak_dot_prod(&a, &b);
                 ss_to_rss_shares(p, &[c]).unwrap()[0]
             }
         };
@@ -309,72 +349,81 @@ mod test {
         let (h01, h02, h03) = secret_share(&mut rng, &h0);
         let (h11, h12, h13) = secret_share(&mut rng, &h1);
         let (h21, h22, h23) = secret_share(&mut rng, &h2);
-        let program = |h0: RssShare<GF2p64>, h1: RssShare<GF2p64>, h2: RssShare<GF2p64>, x: GF2p64| {
-            move |_p: &mut WL16ASParty| {
-                lagrange_deg2(&h0, &h1, &h2, x)
-            }
-        }; 
-        let (h1, h2, h3) =
-            localhost_setup_wl16as(program(h01, h11, h21, x), program(h02, h12, h22, x), program(h03, h13, h23, x));
+        let program =
+            |h0: RssShare<GF2p64>, h1: RssShare<GF2p64>, h2: RssShare<GF2p64>, x: GF2p64| {
+                move |_p: &mut WL16ASParty| lagrange_deg2(&h0, &h1, &h2, x)
+            };
+        let (h1, h2, h3) = localhost_setup_wl16as(
+            program(h01, h11, h21, x),
+            program(h02, h12, h22, x),
+            program(h03, h13, h23, x),
+        );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap(); 
+        let (r3, _) = h3.join().unwrap();
         consistent(&r1, &r2, &r3);
-        assert_eq(r1, r2, r3, y)        
-    }
-
-    fn bogus_secret_share<F: Field, R: Rng + CryptoRng>(
-        _rng: &mut R,
-        x: &F,
-    ) -> (RssShare<F>, RssShare<F>, RssShare<F>) {
-        let x1 = RssShare::from(x.clone(), F::ZERO);
-        let x2 = RssShare::from(F::ZERO, F::ZERO);
-        let x3 = RssShare::from(F::ZERO, x.clone());
-        (x1, x2, x3)
-    }
-
-    fn bogus_share_vector<F: Field, R: Rng + CryptoRng>(
-        rng: &mut R,
-        elements: impl IntoIterator<Item = impl Borrow<F>>,
-    ) -> (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)
-    where
-        R: FieldRngExt<F>,
-    {
-        let (s1, (s2, s3)) = elements
-            .into_iter()
-            .map(|value| {
-                let (s1, s2, s3) = bogus_secret_share(rng, value.borrow());
-                (s1, (s2, s3))
-            })
-            .unzip();
-        (s1, s2, s3)
+        assert_eq(r1, r2, r3, y)
     }
 
     #[test]
-    fn test_inner_prod() {
+    fn test_inner_prod_correctness() {
         let mut rng = thread_rng();
         let a_vec: Vec<GF2p64> = gen_rand_vec::<_, GF2p64>(&mut rng, 32);
         let b_vec: Vec<GF2p64> = gen_rand_vec::<_, GF2p64>(&mut rng, 32);
         let c: GF2p64 = a_vec
             .iter()
             .zip(&b_vec)
-            .fold(GF2p64::ZERO, |s, (&a, b)| s + a * *b);        
-        let (a1, a2, a3) = bogus_share_vector(&mut rng, a_vec);
-        let (b1, b2, b3) = bogus_share_vector(&mut rng, b_vec);
-        let (c1, c2, c3) = bogus_secret_share(&mut rng, &c);
+            .fold(GF2p64::ZERO, |s, (&a, b)| s + a * *b);
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share(&mut rng, &c);
         let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>, c: RssShare<GF2p64>| {
-            move |p: &mut WL16ASParty| {
-                verify_dot_product(p, &a, &b, &c).unwrap()
-            }
-        }; 
-        let (h1, h2, h3) =
-            localhost_setup_wl16as(program(a1, b1, c1), program(a2, b2, c2), program(a3, b3, c3));
+            move |p: &mut WL16ASParty| verify_dot_product(p, &a, &b, &c).unwrap()
+        };
+        let (h1, h2, h3) = localhost_setup_wl16as(
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+        );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();  
-        assert_eq!(r1, true);   
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, true);
         assert_eq!(r1, r2);
-        assert_eq!(r1, r3);         
+        assert_eq!(r1, r3);
     }
 
+    #[test]
+    fn test_inner_prod_soundness() {
+        let mut rng = thread_rng();
+        let a_vec: Vec<GF2p64> = gen_rand_vec::<_, GF2p64>(&mut rng, 32);
+        let b_vec: Vec<GF2p64> = gen_rand_vec::<_, GF2p64>(&mut rng, 32);
+        let c: GF2p64 = a_vec
+            .iter()
+            .zip(&b_vec)
+            .fold(GF2p64::ZERO, |s, (&a, b)| s + a * *b);
+        // Offset product by random amount
+        let mut r = gen_rand_vec::<_, GF2p64>(&mut rng, 1)[0];
+        if r.is_zero() {
+            r = GF2p64::ONE
+        }
+        let c = c + r;
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share(&mut rng, &c);
+        let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>, c: RssShare<GF2p64>| {
+            move |p: &mut WL16ASParty| verify_dot_product(p, &a, &b, &c).unwrap()
+        };
+        let (h1, h2, h3) = localhost_setup_wl16as(
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, false);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
 }

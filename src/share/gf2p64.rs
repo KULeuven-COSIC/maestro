@@ -302,7 +302,7 @@ impl<D: Digest> FieldDigestExt<GF2p64> for D {
     }
 }
 
-trait GF2p64Subfield {
+pub trait GF2p64Subfield {
     fn embed(self) -> GF2p64;
 }
 

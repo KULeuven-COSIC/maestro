@@ -3,7 +3,7 @@
 use crate::{
     network::ConnectedParty,
     party::{broadcast::BroadcastContext, error::MpcResult, Party},
-    share::{gf4::GF4, gf8::GF8},
+    share::gf4::GF4,
     wollut16::RndOhvOutput,
 };
 
@@ -16,7 +16,6 @@ pub struct WL16ASParty {
     prep_ohv: Vec<RndOhvOutput>,
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<GF4>,
-    gf8_triples_to_check: MulTripleVector<GF8>,
     broadcast_context: BroadcastContext,
 }
 
@@ -26,7 +25,6 @@ impl WL16ASParty {
             inner: party,
             prep_ohv: Vec::new(),
             gf4_triples_to_check: MulTripleVector::new(),
-            gf8_triples_to_check: MulTripleVector::new(),
             broadcast_context: BroadcastContext::new(),
         })
     }
@@ -56,6 +54,15 @@ impl<F> MulTripleVector<F> {
 
     pub fn len(&self) -> usize {
         self.ai.len()
+    }
+
+    pub fn shrink(&mut self, new_length: usize) {
+        self.ai.truncate(new_length);
+        self.aii.truncate(new_length);
+        self.bi.truncate(new_length);
+        self.bii.truncate(new_length);
+        self.ci.truncate(new_length);
+        self.cii.truncate(new_length);
     }
 
     pub fn push(&mut self, ai: F, aii: F, bi: F, bii: F, ci: F, cii: F) {
