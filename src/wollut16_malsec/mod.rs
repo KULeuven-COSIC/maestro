@@ -3,7 +3,7 @@
 use crate::{
     network::ConnectedParty,
     party::{broadcast::BroadcastContext, error::MpcResult, Party},
-    share::gf4::GF4,
+    share::{gf4::GF4, Field, RssShare},
     wollut16::RndOhvOutput,
 };
 
@@ -30,48 +30,36 @@ impl WL16ASParty {
     }
 }
 
-struct MulTripleVector<F> {
+struct MulTripleVector<F: Field> {
     // s.t. a*b = c
-    ai: Vec<F>,
-    aii: Vec<F>,
-    bi: Vec<F>,
-    bii: Vec<F>,
-    ci: Vec<F>,
-    cii: Vec<F>,
+    a: Vec<RssShare<F>>,
+    b: Vec<RssShare<F>>,
+    c: Vec<RssShare<F>>,
 }
 
-impl<F> MulTripleVector<F> {
+impl<F: Field> MulTripleVector<F> {
     pub fn new() -> Self {
         Self {
-            ai: Vec::new(),
-            aii: Vec::new(),
-            bi: Vec::new(),
-            bii: Vec::new(),
-            ci: Vec::new(),
-            cii: Vec::new(),
+            a: Vec::new(),
+            b: Vec::new(),
+            c: Vec::new(),
         }
     }
 
     pub fn len(&self) -> usize {
-        self.ai.len()
+        self.a.len()
     }
 
     pub fn shrink(&mut self, new_length: usize) {
-        self.ai.truncate(new_length);
-        self.aii.truncate(new_length);
-        self.bi.truncate(new_length);
-        self.bii.truncate(new_length);
-        self.ci.truncate(new_length);
-        self.cii.truncate(new_length);
+        self.a.truncate(new_length);
+        self.b.truncate(new_length);
+        self.c.truncate(new_length);
     }
 
-    pub fn push(&mut self, ai: F, aii: F, bi: F, bii: F, ci: F, cii: F) {
-        self.ai.push(ai);
-        self.aii.push(aii);
-        self.bi.push(bi);
-        self.bii.push(bii);
-        self.ci.push(ci);
-        self.cii.push(cii);
+    pub fn push(&mut self, a: RssShare<F>, b: RssShare<F>, c: RssShare<F>) {
+        self.a.push(a);
+        self.b.push(b);
+        self.c.push(c);
     }
 }
 
