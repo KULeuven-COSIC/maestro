@@ -135,24 +135,24 @@ mod test {
 
     use super::LUT256Party;
 
-    pub fn localhost_setup_lut256<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
-        fn adapter<T, Fx: FnOnce(&mut LUT256Party)->T>(conn: ConnectedParty, f: Fx) -> (T,LUT256Party) {
-            let mut party = LUT256Party::setup(conn, None).unwrap();
+    pub fn localhost_setup_lut256<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
+        fn adapter<T, Fx: FnOnce(&mut LUT256Party)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,LUT256Party) {
+            let mut party = LUT256Party::setup(conn, n_worker_threads).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();
             (t, party)
         }
-        localhost_connect(|conn_party| adapter(conn_party, f1), |conn_party| adapter(conn_party, f2), |conn_party| adapter(conn_party, f3))
+        localhost_connect(move |conn_party| adapter(conn_party, f1, n_worker_threads), move |conn_party| adapter(conn_party, f2, n_worker_threads), move |conn_party| adapter(conn_party, f3, n_worker_threads))
     }
 
     pub struct LUT256Setup;
     impl TestSetup<LUT256Party> for LUT256Setup {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
-            localhost_setup_lut256(f1, f2, f3)
+            localhost_setup_lut256(f1, f2, f3, None)
         }
-        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(_n_threads: usize, _f1: F1, _f2: F2, _f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
-            unimplemented!()
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut LUT256Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut LUT256Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut LUT256Party) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,LUT256Party)>, JoinHandle<(T2,LUT256Party)>, JoinHandle<(T3,LUT256Party)>) {
+            localhost_setup_lut256(f1, f2, f3, Some(n_threads))
         }
     }
 }
