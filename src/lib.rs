@@ -10,3 +10,4 @@ pub mod network;
 pub mod party;
 pub mod share;
 pub mod wollut16;
+pub mod wollut16_malsec;

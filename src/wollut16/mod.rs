@@ -148,8 +148,8 @@ impl RndOhv16 {
         Self(table)
     }
 
-    /// tables contains table[offset ^ i] at position offset
-    /// table[offset ^ i][j] is the j-th bit of the lookup
+    /// tables contains table\[offset ^ i\] at position offset
+    /// table\[offset ^ i\]\[j\] is the j-th bit of the lookup
     #[inline]
     pub fn lut(&self, offset: usize, tables: &[[u16; 4]; 16]) -> GF4 {
         let table = &tables[offset];

@@ -1,3 +1,6 @@
+//! This module implements the 64-bit finite field `GF(2^64)`.
+//! 
+//! On supported hardware the feature `clmul` should provide a speed-up for field multiplications.
 use std::{
     borrow::Borrow,
     fmt::{Debug, Formatter},
@@ -10,13 +13,15 @@ use sha2::Digest;
 
 use super::{gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, Invertible};
 
-/// An element of GF(2^64) := GF(2)[X] / X^64+X^4+X^3+X+1
+/// An element of `GF(2^64) := GF(2)[X] / X^64+X^4+X^3+X+1`
 ///
-/// An element is represented as a byte where the top 4 bits are always 0.
+/// An element is represented as an 64-bit vector in the form of an `u64`.
 #[derive(Copy, Clone, Default, PartialEq)]
 pub struct GF2p64(u64);
 
 impl GF2p64 {
+
+    /// Returns a new field element from a bit-vector.
     pub fn new<T>(x: T) -> Self
     where
         u64: From<T>,

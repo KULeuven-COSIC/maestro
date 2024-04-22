@@ -1,3 +1,9 @@
+//! This module implements the 4-bit finite field `GF(2^4)`.
+//! 
+//! It provides two data types: 
+//! - [GF4] contains a single field element
+//! - [BsGF4] contains two field elements packed for efficiency
+
 use std::{
     borrow::Borrow,
     fmt::{Debug, Formatter},
@@ -10,7 +16,7 @@ use sha2::Digest;
 
 use super::{gf4_bs_table, Field, FieldDigestExt, FieldRngExt};
 
-/// An element of GF(2^4) := GF(2)[X] / X^4+x+1
+/// An element of `GF(2^4) := GF(2)[X] / X^4+X+1`
 ///
 /// An element is represented as a byte where the top 4 bits are always 0.
 #[derive(Copy, Clone, Default, PartialEq)]
@@ -264,7 +270,9 @@ impl<D: Digest> FieldDigestExt<GF4> for D {
     }
 }
 
-/// 2 GF(2^4) elements
+/// Two elements of `GF(2^4) := GF(2)[X] / X^4+X+1`
+///
+/// The two elements are represented as a byte where the top bits are the first element.
 #[derive(Clone, Copy, PartialEq, Default)]
 pub struct BsGF4(u8);
 
