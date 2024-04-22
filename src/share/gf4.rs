@@ -1,6 +1,6 @@
 //! This module implements the 4-bit finite field `GF(2^4)`.
-//! 
-//! It provides two data types: 
+//!
+//! It provides two data types:
 //! - [GF4] contains a single field element
 //! - [BsGF4] contains two field elements packed for efficiency
 

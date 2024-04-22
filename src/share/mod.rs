@@ -32,10 +32,10 @@ pub trait Field:
     /// The field size in bits
     const NBITS: usize = 8 * Self::NBYTES;
 
-    /// Zero
+    /// Zero the neutral element of addition
     const ZERO: Self;
 
-    /// One
+    /// One the neutral element of multiplication
     const ONE: Self;
 
     // Returns if the value is zero
@@ -53,6 +53,11 @@ pub trait Invertible: Field {
     fn inverse(self) -> Self;
 }
 
+pub trait HasTwo: Field {
+    /// Multiplicative Inverse (zero may map to zero)
+    const TWO: Self;
+}
+
 pub trait FieldVectorCommChannel<F: Field> {
     fn write_vector(&mut self, vector: &[F]) -> io::Result<()>;
     fn read_vector(&mut self, buffer: &mut [F]) -> io::Result<()>;
@@ -67,6 +72,13 @@ pub struct RssShare<F: Field> {
 impl<F: Field> RssShare<F> {
     pub fn from(si: F, sii: F) -> Self {
         Self { si, sii }
+    }
+
+    pub fn mul_by_sc(self, scalar: F) -> Self {
+        Self {
+            si: self.si * scalar,
+            sii: self.sii * scalar,
+        }
     }
 }
 
