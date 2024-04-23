@@ -64,10 +64,12 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>,Vec<GF
     #[cfg(feature = "verbose-timing")]
     let lut_open_time = Instant::now();
 
+    let alphas = party.generate_alpha(v.len());
+
     let rnd_ohv = &party.prep_ohv[party.prep_ohv.len()-v.len()..];
     let rcv_cii = party.io().receive_field(Direction::Next, v.len());
     let rcv_ciii = party.io().receive_field(Direction::Previous, v.len());
-    let ci: Vec<_> = v.iter().zip(rnd_ohv).map(|(v, r)| *v + r.random).collect();
+    let ci: Vec<_> = izip!(v.iter(), rnd_ohv, alphas).map(|(v, r, alpha)| *v + r.random + alpha).collect();
     party.io().send_field::<GF4>(Direction::Next, &ci, ci.len());
     party.io().send_field::<GF4>(Direction::Previous, &ci, ci.len());
     
