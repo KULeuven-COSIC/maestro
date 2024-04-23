@@ -1,8 +1,9 @@
 use std::{ops::AddAssign, time::Instant};
 
 use itertools::izip;
-use rand::{CryptoRng, RngCore};
+use rand::{seq::SliceRandom, CryptoRng, RngCore};
 use rand_chacha::ChaCha20Rng;
+use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 use sha2::Sha256;
 use rand::Rng;
 
@@ -19,7 +20,7 @@ const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];
 /// Note that unless `n` is a power of 2 larger or equal to 2^10, this function will generate more triples but only return exactly `n`.
 /// Depending on `next_power_of_two(n)`, different bucket sizes are chosen internally.
 #[allow(non_snake_case)]
-pub fn bucket_cut_and_choose<F: Field + PartialEq + Copy + AddAssign>(party: &mut MainParty, n: usize) -> MpcResult<MulTripleVector<F>> 
+pub fn bucket_cut_and_choose<F: Field + Send + Sync>(party: &mut MainParty, n: usize) -> MpcResult<MulTripleVector<F>> 
 where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
 {
     // choose params
@@ -41,21 +42,14 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         };
     let C = B;
     let M = N*B+C;
-    println!("N={}, B={}, M={}", N, B, M);
+    // println!("N={}, B={}, M={}", N, B, M);
     // generate multiplication triples optimistically
     let mul_triples_time = Instant::now();
-    let mut a = party.generate_random(M);
-    let mut b = party.generate_random(M);
-
-    let alphas = party.generate_alpha(M);
-    let mut ci: Vec<_> = izip!(alphas, a.iter(), b.iter()).map(|(alpha_j, aj, bj)| {
-        alpha_j + aj.si * bj.si + aj.si * bj.sii + aj.sii * bj.si
-    }).collect();
-    // receive cii from P+1
-    let rcv_cii = party.io().receive_field(Direction::Next, M);
-    // send ci to P-1
-    party.io().send_field::<F>(Direction::Previous, &ci, M);
-    let mut cii = rcv_cii.rcv()?;
+    let (mut a, mut b, mut ci, mut cii) = if party.has_multi_threading() && M >= 2*party.num_worker_threads() {
+        optimistic_mul_mt(party, M)?
+    }else{
+        optimistic_mul(party, M)?
+    };
     party.io().wait_for_completion();
     let mul_triples_time = mul_triples_time.elapsed();
 
@@ -63,7 +57,11 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
     let mut rng = GlobalRng::setup_global(party)?;
 
     let shuffle_time = Instant::now();
-    shuffle(rng.as_mut(), &mut a, &mut b, &mut ci, &mut cii);
+    if party.has_multi_threading() && M >= 2*party.num_worker_threads() {
+        shuffle_mt(party, rng.as_mut(), &mut a, &mut b, &mut ci, &mut cii)
+    }else{
+        shuffle(rng.as_mut(), &mut a, &mut b, &mut ci, &mut cii);
+    }
     let shuffle_time = shuffle_time.elapsed();
 
     let open_check_time = Instant::now();
@@ -86,7 +84,11 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
     let (ci_check, ci_sac) = ci[C..].split_at_mut(N);
     let (cii_check, cii_sac) = cii[C..].split_at_mut(N);
 
-    sacrifice(party, N, B-1, ai_check, aii_check, bi_check, bii_check, ci_check, cii_check, ai_sac, aii_sac, bi_sac, bii_sac, ci_sac, cii_sac)?;
+    if party.has_multi_threading() && N >= 2*party.num_worker_threads() {
+        sacrifice_mt(party, N, B-1, ai_check, aii_check, bi_check, bii_check, ci_check, cii_check, ai_sac, aii_sac, bi_sac, bii_sac, ci_sac, cii_sac)?;
+    }else{
+        sacrifice(party, N, B-1, ai_check, aii_check, bi_check, bii_check, ci_check, cii_check, ai_sac, aii_sac, bi_sac, bii_sac, ci_sac, cii_sac)?;
+    }
     
     let correct_triples = MulTripleVector {
         ai: ai.into_iter().take(n).collect(),
@@ -99,6 +101,53 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
     let sacrifice_time = sacrifice_time.elapsed();
     println!("Bucket cut-and-choose: optimistic multiplication: {}s, shuffle: {}s, open: {}s, sacrifice: {}s", mul_triples_time.as_secs_f64(), shuffle_time.as_secs_f64(), open_check_time.as_secs_f64(), sacrifice_time.as_secs_f64());
     Ok(correct_triples)
+}
+
+type OptimisticMulResult<F> = (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<F>, Vec<F>);
+
+#[allow(non_snake_case)]
+fn optimistic_mul_mt<F: Field + Send>(party: &mut MainParty, M: usize) -> MpcResult<OptimisticMulResult<F>>
+where ChaCha20Rng: FieldRngExt<F>
+{
+    let ranges = party.split_range_equally(M);
+    let thread_parties = party.create_thread_parties(ranges);
+    let res = party.run_in_threadpool(|| {
+        thread_parties.into_par_iter().map(|mut thread_party| {
+            let batch_size = thread_party.task_size();
+            optimistic_mul(&mut thread_party, batch_size)
+        }).collect::<MpcResult<Vec<OptimisticMulResult<F>>>>()
+    })?;
+    let mut a = Vec::with_capacity(M);
+    let mut b = Vec::with_capacity(M);
+    let mut ci = Vec::with_capacity(M);
+    let mut cii = Vec::with_capacity(M);
+    res.into_iter().for_each(|(mut ax, mut bx, mut cix, mut ciix)| {
+        a.append(&mut ax);
+        b.append(&mut bx);
+        ci.append(&mut cix);
+        cii.append(&mut ciix);
+    });
+    party.wait_for_completion();
+    Ok((a,b,ci,cii))
+}
+
+#[allow(non_snake_case)]
+fn optimistic_mul<F: Field, P: Party>(party: &mut P, M: usize) -> MpcResult<OptimisticMulResult<F>>
+where ChaCha20Rng: FieldRngExt<F>
+{
+    let a = party.generate_random(M);
+    let b = party.generate_random(M);
+
+    let alphas = party.generate_alpha(M);
+    let ci: Vec<_> = izip!(alphas, a.iter(), b.iter()).map(|(alpha_j, aj, bj)| {
+        alpha_j + aj.si * bj.si + aj.si * bj.sii + aj.sii * bj.si
+    }).collect();
+    // receive cii from P+1
+    let rcv_cii = party.receive_field(Direction::Next, M);
+    // send ci to P-1
+    party.send_field::<F>(Direction::Previous, &ci, M);
+    let cii = rcv_cii.rcv()?;
+    Ok((a, b, ci, cii))
 }
 
 fn shuffle<R: RngCore + CryptoRng, F: Field>(rng: &mut R, a: &mut [RssShare<F>], b: &mut [RssShare<F>], ci: &mut [F], cii: &mut [F]) {
@@ -130,6 +179,22 @@ fn shuffle<R: RngCore + CryptoRng, F: Field>(rng: &mut R, a: &mut [RssShare<F>],
     shuffle_from_random_tape(&tape, b);
     shuffle_from_random_tape(&tape, ci);
     shuffle_from_random_tape(&tape, cii);
+}
+
+fn shuffle_mt<R: RngCore + CryptoRng + Clone + Send, F: Field + Send>(party: &MainParty, rng: &mut R, a: &mut [RssShare<F>], b: &mut [RssShare<F>], ci: &mut [F], cii: &mut [F]) {
+    debug_assert_eq!(a.len(), b.len());
+    debug_assert_eq!(a.len(), ci.len());
+    debug_assert_eq!(a.len(), cii.len());
+    let mut rng_a = rng.clone();
+    let mut rng_b = rng.clone();
+    let mut rng_ci = rng.clone();
+    let rng_cii = rng;
+    party.run_in_threadpool_scoped(|scope| {
+        scope.spawn(|_| a.shuffle(&mut rng_a));
+        scope.spawn(|_| b.shuffle(&mut rng_b));
+        scope.spawn(|_| ci.shuffle(&mut rng_ci));
+        scope.spawn(|_| cii.shuffle(rng_cii));
+    });
 }
 
 fn open_and_check<F: Field + PartialEq + Copy>(party: &mut MainParty, a: &[RssShare<F>], b: &[RssShare<F>], ci: &[F], cii: &[F]) -> MpcResult<bool> {
@@ -173,6 +238,81 @@ pub fn sacrifice<F: Field + Copy + AddAssign>(party: &mut MainParty, n: usize, s
 ) -> MpcResult<()>
 where Sha256: FieldDigestExt<F>
 {
+    let context = sacrifice_party(party, n, sacrifice_bucket_size, ai_to_check, aii_to_check, bi_to_check, bii_to_check, ci_to_check, cii_to_check, ai_to_sacrifice, aii_to_sacrifice, bi_to_sacrifice, bii_to_sacrifice, ci_to_sacrifice, cii_to_sacrifice)?;
+    party.io().wait_for_completion();
+    party.compare_view(context).map_err(|mpc_err| {
+        match mpc_err {
+            MpcError::BroadcastError => {
+                println!("bucket triples failed");
+                MpcError::SacrificeError // turn broadcast error into sacrifice error
+            },
+            _ => mpc_err
+        }
+    })
+}
+
+/// Computes the sacrificing one triple for another step with support for checking one triple by sacrificing multiple other triples (e.g. a bucket) using multi-threading.
+/// The function will panic if multi-threading is not available for this party.
+/// 
+/// Parameters
+///  - `n` denotes the number of triples to check
+///  - `sacrifice_bucket_size` denotes the number of triples to sacrifice for **each** triple that is checked.
+///  - `ai_to_check`, `aii_to_check`, `bi_to_check`, `bii_to_check`, `ci_to_check` and `cii_to_check` are slices of length `n` that contain the multiplication triple to check.
+///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
+/// 
+/// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+pub fn sacrifice_mt<F: Field + Send + Sync>(party: &mut MainParty, n: usize, sacrifice_bucket_size: usize, 
+    ai_to_check: &[F], aii_to_check: &[F], bi_to_check: &[F], bii_to_check: &[F], ci_to_check: &[F], cii_to_check: &[F],
+    ai_to_sacrifice: &mut [F], aii_to_sacrifice: &mut [F], bi_to_sacrifice: &mut [F], bii_to_sacrifice: &mut [F], ci_to_sacrifice: &mut [F], cii_to_sacrifice: &mut [F],
+) -> MpcResult<()>
+where Sha256: FieldDigestExt<F>
+{
+    let ranges = party.split_range_equally(n);
+    let chunk_size = ranges[0].1 - ranges[0].0;
+    let sac_chunk_size = sacrifice_bucket_size*chunk_size;
+    let thread_parties = party.create_thread_parties(ranges);
+
+    let contexts = party.run_in_threadpool(|| {
+        thread_parties.into_par_iter().zip_eq(ai_to_check.par_chunks(chunk_size)).zip_eq(aii_to_check.par_chunks(chunk_size)).zip_eq(bi_to_check.par_chunks(chunk_size)).zip_eq(bii_to_check.par_chunks(chunk_size))
+        .zip_eq(ci_to_check.par_chunks(chunk_size)).zip_eq(cii_to_check.par_chunks(chunk_size))
+        .zip_eq(ai_to_sacrifice.par_chunks_mut(sac_chunk_size)).zip_eq(aii_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .zip_eq(bi_to_sacrifice.par_chunks_mut(sac_chunk_size)).zip_eq(bii_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .zip_eq(ci_to_sacrifice.par_chunks_mut(sac_chunk_size)).zip_eq(cii_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .map(|((((((((((((mut thread_party, ai_to_check), aii_to_check), bi_to_check), bii_to_check), ci_to_check), cii_to_check), ai_to_sacrifice), aii_to_sacrifice), bi_to_sacrifice), bii_to_sacrifice), ci_to_sacrifice), cii_to_sacrifice)| {
+            let batch_size = thread_party.task_size();
+            sacrifice_party(&mut thread_party, batch_size, sacrifice_bucket_size, ai_to_check, aii_to_check, bi_to_check, bii_to_check, ci_to_check, cii_to_check, ai_to_sacrifice, aii_to_sacrifice, bi_to_sacrifice, bii_to_sacrifice, ci_to_sacrifice, cii_to_sacrifice)
+        })
+        .collect::<MpcResult<Vec<BroadcastContext>>>()
+    })?;
+    let context = BroadcastContext::join(contexts);
+
+    party.io().wait_for_completion();
+    party.compare_view(context).map_err(|mpc_err| {
+        match mpc_err {
+            MpcError::BroadcastError => {
+                println!("bucket triples failed");
+                MpcError::SacrificeError // turn broadcast error into sacrifice error
+            },
+            _ => mpc_err
+        }
+    })
+}
+
+/// Computes the sacrificing one triple for another step with support for checking one triple by sacrificing multiple other triples (e.g. a bucket).
+/// 
+/// Parameters
+///  - `n` denotes the number of triples to check
+///  - `sacrifice_bucket_size` denotes the number of triples to sacrifice for **each** triple that is checked.
+///  - `ai_to_check`, `aii_to_check`, `bi_to_check`, `bii_to_check`, `ci_to_check` and `cii_to_check` are slices of length `n` that contain the multiplication triple to check.
+///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
+/// 
+/// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+fn sacrifice_party<P: Party, F: Field + Copy + AddAssign>(party: &mut P, n: usize, sacrifice_bucket_size: usize, 
+    ai_to_check: &[F], aii_to_check: &[F], bi_to_check: &[F], bii_to_check: &[F], ci_to_check: &[F], cii_to_check: &[F],
+    ai_to_sacrifice: &mut [F], aii_to_sacrifice: &mut [F], bi_to_sacrifice: &mut [F], bii_to_sacrifice: &mut [F], ci_to_sacrifice: &mut [F], cii_to_sacrifice: &mut [F],
+) -> MpcResult<BroadcastContext>
+where Sha256: FieldDigestExt<F>
+{
     // the first n elements are to be checked
     // the other bucket_size-1 * n elements are sacrificed
     // for element j to be checked, we sacrifice elements j + n*i for i=1..bucket_size
@@ -201,7 +341,7 @@ where Sha256: FieldDigestExt<F>
         }
     }
 
-    let rcv_rho_iii_sigma_iii = party.io().receive_field(Direction::Next, 2*n*sacrifice_bucket_size);
+    let rcv_rho_iii_sigma_iii = party.receive_field(Direction::Next, 2*n*sacrifice_bucket_size);
 
     // x + a
     let rho_ii = {
@@ -215,7 +355,7 @@ where Sha256: FieldDigestExt<F>
     };
     
     
-    party.io().send_field::<F>(Direction::Previous, rho_ii.as_ref().iter().chain(sigma_ii.as_ref().iter()), rho_ii.len()+sigma_ii.len());
+    party.send_field::<F>(Direction::Previous, rho_ii.as_ref().iter().chain(sigma_ii.as_ref().iter()), rho_ii.len()+sigma_ii.len());
     
     // x + a
     let rho_i = {
@@ -242,15 +382,15 @@ where Sha256: FieldDigestExt<F>
     let mut bucket_idx = 0;
     for el_idx in 0..ai_to_check.len() {
         for _j in 0..sacrifice_bucket_size {
-            let rho_times_sigma = rho[bucket_idx] * sigma[bucket_idx];
-            let mut zero_i = ci_to_check[el_idx] + ci_to_sacrifice[bucket_idx] + sigma[bucket_idx] * ai_to_check[el_idx] + rho[bucket_idx] * bi_to_check[el_idx];
-            if party.i == 0 {
-                zero_i += rho_times_sigma;
-            }
-            let mut zero_ii = cii_to_check[el_idx] + cii_to_sacrifice[bucket_idx] + sigma[bucket_idx] * aii_to_check[el_idx] + rho[bucket_idx] * bii_to_check[el_idx];
-            if party.i == 2 {
-                zero_ii += rho_times_sigma;
-            }
+            let rho_times_sigma = party.constant(rho[bucket_idx] * sigma[bucket_idx]);
+            let zero_i = ci_to_check[el_idx] + ci_to_sacrifice[bucket_idx] + sigma[bucket_idx] * ai_to_check[el_idx] + rho[bucket_idx] * bi_to_check[el_idx] + rho_times_sigma.si;
+            // if party.i == 0 {
+            //     zero_i += rho_times_sigma;
+            // }
+            let zero_ii = cii_to_check[el_idx] + cii_to_sacrifice[bucket_idx] + sigma[bucket_idx] * aii_to_check[el_idx] + rho[bucket_idx] * bii_to_check[el_idx] + rho_times_sigma.sii;
+            // if party.i == 2 {
+            //     zero_ii += rho_times_sigma;
+            // }
             // compare_view sends my prev_view to P+1 and compares it to that party's next_view
             // so we write zero_i to prev_view s.t. P+1 compares it to -zero_ii - zero_iii
             context.add_to_prev_view(&zero_i);
@@ -260,23 +400,14 @@ where Sha256: FieldDigestExt<F>
         }
     }
 
-    party.io().wait_for_completion();
-    party.compare_view(context).map_err(|mpc_err| {
-        match mpc_err {
-            MpcError::BroadcastError => {
-                println!("bucket triples failed");
-                MpcError::SacrificeError // turn broadcast error into sacrifice error
-            },
-            _ => mpc_err
-        }
-    })
+    Ok(context)
 }
 
 #[cfg(test)]
 pub mod test {
     use itertools::{izip, Itertools};
 
-    use crate::{furukawa::{offline::bucket_cut_and_choose, MulTripleVector}, party::test::simple_localhost_setup, share::{gf8::GF8, test::consistent, Field, RssShare}};
+    use crate::{furukawa::{offline::bucket_cut_and_choose, MulTripleVector}, party::{test::{simple_localhost_setup, PartySetup, TestSetup}, MainParty}, share::{gf8::GF8, test::consistent, Field, RssShare}};
 
     fn check_len<F>(triples: &MulTripleVector<F>, len: usize) {
         assert_eq!(triples.ai.len(), len);
@@ -298,6 +429,43 @@ pub mod test {
         let ((triples1, triples2, triples3), _) = simple_localhost_setup(|p| {
             bucket_cut_and_choose::<GF8>(p, N).unwrap()
         });
+
+        check_len(&triples1, N);
+        check_len(&triples2, N);
+        check_len(&triples3, N);
+        // check consistent
+        izip!(into_rss(&triples1.ai, &triples1.aii), into_rss(&triples2.ai, &triples2.aii), into_rss(&triples3.ai, &triples3.aii))
+            .for_each(|(a1, a2, a3)| consistent(&a1, &a2, &a3));
+        izip!(into_rss(&triples1.bi, &triples1.bii), into_rss(&triples2.bi, &triples2.bii), into_rss(&triples3.bi, &triples3.bii))
+            .for_each(|(b1, b2, b3)| consistent(&b1, &b2, &b3));
+        izip!(into_rss(&triples1.ci, &triples1.cii), into_rss(&triples2.ci, &triples2.cii), into_rss(&triples3.ci, &triples3.cii))
+            .for_each(|(c1, c2, c3)| consistent(&c1, &c2, &c3));
+
+
+        // check correct
+        for i in 0..N {
+            let a = triples1.ai[i] + triples2.ai[i] + triples3.ai[i];
+            let b = triples1.bi[i] + triples2.bi[i] + triples3.bi[i];
+            let c = triples1.ci[i] + triples2.ci[i] + triples3.ci[i];
+
+            assert_eq!(a * b, c);
+        }
+    }
+
+    #[test]
+    fn correct_gf8_triples_mt() {
+        const N_THREADS: usize = 3;
+        const N: usize = 1 << 10; // create 2^10 triples
+        // generate N triples with soundness 2^-40
+        fn bcc(p: &mut MainParty) -> MulTripleVector<GF8> {
+            bucket_cut_and_choose::<GF8>(p, N).unwrap()
+        }
+
+        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(N_THREADS, bcc, bcc, bcc);
+
+        let (triples1, _) = h1.join().unwrap();
+        let (triples2, _) = h2.join().unwrap();
+        let (triples3, _) = h3.join().unwrap();
 
         check_len(&triples1, N);
         check_len(&triples2, N);

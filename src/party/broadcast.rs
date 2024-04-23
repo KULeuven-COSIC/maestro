@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::slice;
 use sha2::{Sha256, Digest};
-use sha2::digest::FixedOutput;
+use sha2::digest::{FixedOutput, Update};
 use crate::network::task::Direction;
 use crate::party::error::{MpcError, MpcResult};
 use crate::party::MainParty;
@@ -44,6 +44,17 @@ impl BroadcastContext {
     where Sha256: FieldDigestExt<F>
     {
         FieldDigestExt::update(&mut self.view_prev, slice::from_ref(el));
+    }
+
+    pub fn join(contexts: Vec<Self>) -> Self {
+        let mut res = BroadcastContext::new();
+        contexts.into_iter().for_each(|context| {
+            let final_next = context.view_next.finalize();
+            let final_prev = context.view_prev.finalize();
+            Digest::update(&mut res.view_next, &final_next);
+            Digest::update(&mut res.view_prev, &final_prev);
+        });
+        res
     }
 }
 

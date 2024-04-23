@@ -6,7 +6,7 @@ use crate::{network::{task::{Direction, IoLayer}, FieldSliceReceiver, FieldVecto
 
 use super::{correlated_randomness::SharedRng, Party};
 
-pub struct ThreadParty {
+pub struct ThreadParty<T> {
     /// Party index 0, 1 or 2
     i: usize,
     range_start: usize,
@@ -15,14 +15,15 @@ pub struct ThreadParty {
     random_next: SharedRng,
     random_prev: SharedRng,
     random_local: ChaCha20Rng,
-    io_layer: OnceCell<IoLayer>
+    io_layer: OnceCell<IoLayer>,
+    pub additional_data: T,
 }
 
 
 
-impl ThreadParty {
-    pub fn new(i: usize, range_start: usize, range_end: usize, random_next: SharedRng, random_prev: SharedRng, random_local: ChaCha20Rng, io_layer: OnceCell<IoLayer>) -> Self {
-        Self { i, range_start, range_end, random_next, random_prev, random_local, io_layer }
+impl<T> ThreadParty<T> {
+    pub fn new(i: usize, range_start: usize, range_end: usize, random_next: SharedRng, random_prev: SharedRng, random_local: ChaCha20Rng, io_layer: OnceCell<IoLayer>, additional_data: T) -> Self {
+        Self { i, range_start, range_end, random_next, random_prev, random_local, io_layer, additional_data}
     }
 
     pub fn task_size(&self) -> usize {
@@ -38,7 +39,7 @@ impl ThreadParty {
     }
 }
 
-impl Party for ThreadParty {
+impl<T> Party for ThreadParty<T> {
     fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F> where ChaCha20Rng: FieldRngExt<F> {
         super::generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }

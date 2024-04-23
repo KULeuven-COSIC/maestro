@@ -21,7 +21,7 @@ use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 use {std::{collections::HashMap, sync::Mutex}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
 use std::time::Duration;
 use self::error::MpcResult;
-use self::thread_party::ThreadParty;
+pub use self::thread_party::ThreadParty;
 
 #[derive(Clone, Copy)]
 pub struct CommStats {
@@ -338,7 +338,11 @@ impl MainParty {
         Self::split_range_helper(n_parts, length, end_exclusive)
     }
 
-    pub fn create_thread_parties(&mut self, ranges: Vec<(usize,usize)>) -> Vec<ThreadParty> {
+    pub fn create_thread_parties(&mut self, ranges: Vec<(usize,usize)>) -> Vec<ThreadParty<()>> {
+        self.create_thread_parties_with_additional_data(ranges, |_,_| ())
+    }
+
+    pub fn create_thread_parties_with_additional_data<T, F: FnMut(usize,usize)->T>(&mut self, ranges: Vec<(usize,usize)>, mut data: F) -> Vec<ThreadParty<T>> {
         assert!(self.io.is_some(), "I/O closed");
         let mut vec = Vec::with_capacity(ranges.len());
         for (start, end) in ranges {
@@ -347,13 +351,17 @@ impl MainParty {
             let random_prev = SharedRng::seeded_from(&mut self.random_prev);
             let io = self.io().clone_io_layer();
             let i = self.i;
-            vec.push(ThreadParty::new(i, start, end, random_next, random_prev, random_local, io))
+            vec.push(ThreadParty::new(i, start, end, random_next, random_prev, random_local, io, data(start, end)))
         }
         vec
     }
 
     pub fn run_in_threadpool<T: Send,F: FnOnce()->MpcResult<T> + Send>(&self, f: F) -> MpcResult<T> {
         self.thread_pool.as_ref().expect("Thread pool not enabled").install(f)
+    }
+
+    pub fn run_in_threadpool_scoped<'scope, R: Send, F: FnOnce(&rayon::Scope<'scope>) -> R + Send>(&self, f: F) -> R {
+        self.thread_pool.as_ref().expect("Thread pool not enabled").scope(f)
     }
 
     // pub fn thread_pool_map(&mut self, ranges: Vec<(usize,usize)>) {
