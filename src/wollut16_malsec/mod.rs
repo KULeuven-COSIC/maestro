@@ -27,6 +27,7 @@ impl WL16ASParty {
             inner: party,
             prep_ohv: Vec::new(),
             gf4_triples_to_check: MulTripleVector::new(),
+            gf2_triples_to_check: MulTripleVector::new(),
             broadcast_context: BroadcastContext::new(),
         })
     }
