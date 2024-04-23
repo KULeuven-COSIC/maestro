@@ -3,7 +3,7 @@
 use crate::{
     network::ConnectedParty,
     party::{broadcast::BroadcastContext, error::MpcResult, MainParty},
-    share::{gf4::BsGF4, Field},
+    share::{bs_bool16::BsBool16, gf4::BsGF4, Field},
     wollut16::RndOhvOutput,
 };
 
@@ -17,6 +17,7 @@ pub struct WL16ASParty{
     prep_ohv: Vec<RndOhvOutput>,
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<BsGF4>,
+    gf2_triples_to_check: MulTripleVector<BsBool16>,
     broadcast_context: BroadcastContext,
 }
 
