@@ -98,7 +98,7 @@ fn simple_mul<P: Party>(party: &mut P, msb: &Vec<RssShare<BsBool16>>, other: &[V
 
 fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv,RndOhv)> {
     debug_assert_eq!(bs.len(), 256);
-    let mut rnd_ohv_res = vec![([0u8; 256],[0u8; 256]); 16*bs[0].len()];
+    let mut rnd_ohv_res = vec![([0u64; 4],[0u64; 4]); 16*bs[0].len()];
     for k in 0..16 {
         let mut res = vec![(0u16,0u16); 16*bs[0].len()];
         for i in 0..16 {
@@ -113,11 +113,20 @@ fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv,RndOhv)> {
             }
         }
         rnd_ohv_res.iter_mut().zip(res.into_iter()).for_each(|(dst, (ohv_i, ohv_ii))| {
-            for i in 0..16 {
-                dst.0[16*k+i] = 0xff * ((ohv_i >> i) & 0x1) as u8;
-                dst.1[16*k+i] = 0xff * ((ohv_ii >> i) & 0x1) as u8;
+            if k < 4 {
+                dst.0[0] |= (ohv_i as u64) << 16*k;
+                dst.1[0] |= (ohv_ii as u64) << 16*k;
+            }else if k < 8 {
+                dst.0[1] |= (ohv_i as u64) << 16*(k-4);
+                dst.1[1] |= (ohv_ii as u64) << 16*(k-4);
+            }else if k < 12 {
+                dst.0[2] |= (ohv_i as u64) << 16*(k-8);
+                dst.1[2] |= (ohv_ii as u64) << 16*(k-8);
+            }else{
+                dst.0[3] |= (ohv_i as u64) << 16*(k-12);
+                dst.1[3] |= (ohv_ii as u64) << 16*(k-12);
             }
-        })
+        });
     }
     rnd_ohv_res.into_iter().map(|(ohv_si, ohv_sii)| (RndOhv::new(ohv_si), RndOhv::new(ohv_sii))).collect()
 }
@@ -497,11 +506,20 @@ mod test {
         });
     }
 
-    fn reconstruct_rndohv(mut ohv1: RndOhv, ohv2: RndOhv, ohv3: RndOhv) -> [u8; 256] {
-        for i in 0..256 {
+    fn reconstruct_and_check_rndohv(mut ohv1: RndOhv, ohv2: RndOhv, ohv3: RndOhv, expected_bit: u8) {
+        for i in 0..4 {
             ohv1.0[i] ^= ohv2.0[i] ^ ohv3.0[i];
         }
-        ohv1.0
+        let ohv = ohv1.0;
+        if expected_bit < 64 {
+            assert_eq!([1 << expected_bit, 0, 0, 0], ohv);
+        }else if expected_bit < 128 {
+            assert_eq!([0, 1 << (expected_bit-64), 0, 0], ohv);
+        }else if expected_bit < 192 {
+            assert_eq!([0, 0, 1 << (expected_bit-128), 0], ohv);
+        }else {
+            assert_eq!([0, 0, 0, 1 << (expected_bit-192)], ohv);
+        }
     }
 
     #[test]
@@ -531,14 +549,7 @@ mod test {
             // random GF8 reconstructs to expected
             assert_eq!(s1.random_si + s2.random_si + s3.random_si, GF8(expected as u8));
             // reconstructed bitvec has correct bit set
-            let reconstructed = reconstruct_rndohv(s1.si, s2.si, s3.si);
-            for i in 0..256 {
-                if i == expected {
-                    assert_eq!(reconstructed[i], 0xff);
-                }else{
-                    assert_eq!(reconstructed[i], 0x00);
-                }
-            }
+            reconstruct_and_check_rndohv(s1.si, s2.si, s3.si, expected as u8);
         });
     }
 
@@ -566,14 +577,7 @@ mod test {
             // reconstruct random GF8
             let index = s1.random_si + s2.random_si + s3.random_si;
             // reconstructed bitvec has correct bit set
-            let reconstructed = reconstruct_rndohv(s1.si, s2.si, s3.si);
-            for i in 0..=255 {
-                if i == index.0 {
-                    assert_eq!(reconstructed[i as usize], 0xff);
-                }else{
-                    assert_eq!(reconstructed[i as usize], 0x00);
-                }
-            }
+            reconstruct_and_check_rndohv(s1.si, s2.si, s3.si, index.0);
         });
     }
 
@@ -614,14 +618,7 @@ mod test {
             // reconstruct random GF8
             let index = s1.random_si + s2.random_si + s3.random_si;
             // reconstructed bitvec has correct bit set
-            let reconstructed = reconstruct_rndohv(s1.si, s2.si, s3.si);
-            for i in 0..=255 {
-                if i == index.0 {
-                    assert_eq!(reconstructed[i as usize], 0xff);
-                }else{
-                    assert_eq!(reconstructed[i as usize], 0x00);
-                }
-            }
+            reconstruct_and_check_rndohv(s1.si, s2.si, s3.si, index.0);
         });
     }
 }
