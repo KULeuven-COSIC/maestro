@@ -17,29 +17,27 @@ use super::WL16ASParty;
 /// Protocol `8` to verify the multiplication triples at the end of the protocol.
 pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool> {
     let r: GF2p64 = coin_flip(party)?;
-    let n = party
-        .gf4_triples_to_check
-        .len()
-        .checked_next_power_of_two()
-        .expect("n too large");
+    let k = party.gf4_triples_to_check.len() * 2; //each BsGF4 contains two values
+    let n = k.checked_next_power_of_two().expect("n too large");
     // Compute randomized vectors for inner product
     let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
     let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
     let mut z = RssShare::from(GF2p64::ZERO, GF2p64::ZERO);
     let mut weight = GF2p64::ONE;
     for i in 0..party.gf4_triples_to_check.len() {
-        let x = embed_sharing(
-            party.gf4_triples_to_check.a[i]
-        );
-        x_vec[i] = x.mul_by_sc(weight);
-        // Do not multiply y_vec with weights
-        y_vec[i] = embed_sharing(
-            party.gf4_triples_to_check.b[i],
-        );
-        let zs = embed_sharing(
-            party.gf4_triples_to_check.c[i],
-        );
-        z += zs.mul_by_sc(weight);
+        let (ai1, ai2) = party.gf4_triples_to_check.a_i[i].unpack();
+        let (aii1, aii2) = party.gf4_triples_to_check.a_ii[i].unpack();
+        let (bi1, bi2) = party.gf4_triples_to_check.b_i[i].unpack();
+        let (bii1, bii2) = party.gf4_triples_to_check.b_ii[i].unpack();
+        let (ci1, ci2) = party.gf4_triples_to_check.c_i[i].unpack();
+        let (cii1, cii2) = party.gf4_triples_to_check.c_ii[i].unpack();
+        x_vec[2 * i] = embed_sharing(ai1, aii1).mul_by_sc(weight);
+        y_vec[2 * i] = embed_sharing(bi1, bii1);
+        z += embed_sharing(ci1, cii1).mul_by_sc(weight);
+        weight *= r;
+        x_vec[2 * i + 1] = embed_sharing(ai2, aii2).mul_by_sc(weight);
+        y_vec[2 * i + 1] = embed_sharing(bi2, bii2);
+        z += embed_sharing(ci2, cii2).mul_by_sc(weight);
         weight *= r;
     }
     party.gf4_triples_to_check.shrink(0);
@@ -47,11 +45,11 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
 }
 
 /// Embed
-fn embed_sharing<F>(s: RssShare<F>) -> RssShare<GF2p64>
+fn embed_sharing<F>(si: F, sii: F) -> RssShare<GF2p64>
 where
     F: Field + Copy + GF2p64Subfield,
 {
-    RssShare::from(s.si.embed(), s.sii.embed())
+    RssShare::from(si.embed(), sii.embed())
 }
 
 /// Protocol to verify the component-wise multiplication triples
@@ -263,13 +261,20 @@ where
 #[cfg(test)]
 mod test {
 
+    use itertools::izip;
     use rand::{thread_rng, CryptoRng, Rng};
 
     use crate::{
         share::{
-            gf2p64::GF2p64, gf4::GF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, RssShare
+            gf2p64::GF2p64,
+            gf4::{BsGF4, GF4},
+            test::{assert_eq, consistent, secret_share, secret_share_vector},
+            Field, FieldRngExt, RssShare,
         },
-        wollut16_malsec::{mult_verification::verify_multiplication_triples, test::localhost_setup_wl16as, WL16ASParty},
+        wollut16_malsec::{
+            mult_verification::verify_multiplication_triples, test::localhost_setup_wl16as,
+            WL16ASParty,
+        },
     };
 
     use super::{lagrange_deg2, ss_to_rss_shares, verify_dot_product, weak_dot_prod, weak_mult};
@@ -424,21 +429,24 @@ mod test {
 
     #[test]
     fn test_mul_verify_correctness() {
+        let n = 31;
         let mut rng = thread_rng();
-        let a_vec: Vec<GF4> = gen_rand_vec::<_, GF4>(&mut rng, 32);
-        let b_vec: Vec<GF4> = gen_rand_vec::<_, GF4>(&mut rng, 32);
-        let c_vec: Vec<GF4> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let a_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let b_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let c_vec: Vec<BsGF4> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
         let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
         let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
         let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
-        let program = |a: Vec<RssShare<GF4>>, b: Vec<RssShare<GF4>>, c: Vec<RssShare<GF4>>| {
-            move |p: &mut WL16ASParty| {
-                p.gf4_triples_to_check.a = a;
-                p.gf4_triples_to_check.b = b;
-                p.gf4_triples_to_check.c = c;
-                verify_multiplication_triples(p).unwrap()
-            }
-        };
+        let program =
+            |a: Vec<RssShare<BsGF4>>, b: Vec<RssShare<BsGF4>>, c: Vec<RssShare<BsGF4>>| {
+                move |p: &mut WL16ASParty| {
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        p.gf4_triples_to_check
+                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                    });
+                    verify_multiplication_triples(p).unwrap()
+                }
+            };
         let (h1, h2, h3) = localhost_setup_wl16as(
             program(a1, b1, c1),
             program(a2, b2, c2),
@@ -456,25 +464,27 @@ mod test {
     fn test_mul_verify_soundness() {
         let n = 32;
         let mut rng = thread_rng();
-        let a_vec: Vec<GF4> = gen_rand_vec::<_, GF4>(&mut rng, n);
-        let b_vec: Vec<GF4> = gen_rand_vec::<_, GF4>(&mut rng, n);
-        let mut c_vec: Vec<GF4> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
-        let mut r = gen_rand_vec::<_, GF4>(&mut rng, 1)[0];
+        let a_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let b_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let mut c_vec: Vec<BsGF4> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let mut r = gen_rand_vec::<_, BsGF4>(&mut rng, 1)[0];
         if r.is_zero() {
-            r = GF4::ONE
+            r = BsGF4::ONE
         }
         c_vec[rng.gen_range(0..n)] += r;
         let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
         let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
         let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
-        let program = |a: Vec<RssShare<GF4>>, b: Vec<RssShare<GF4>>, c: Vec<RssShare<GF4>>| {
-            move |p: &mut WL16ASParty| {
-                p.gf4_triples_to_check.a = a;
-                p.gf4_triples_to_check.b = b;
-                p.gf4_triples_to_check.c = c;
-                verify_multiplication_triples(p).unwrap()
-            }
-        };
+        let program =
+            |a: Vec<RssShare<BsGF4>>, b: Vec<RssShare<BsGF4>>, c: Vec<RssShare<BsGF4>>| {
+                move |p: &mut WL16ASParty| {
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        p.gf4_triples_to_check
+                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                    });
+                    verify_multiplication_triples(p).unwrap()
+                }
+            };
         let (h1, h2, h3) = localhost_setup_wl16as(
             program(a1, b1, c1),
             program(a2, b2, c2),

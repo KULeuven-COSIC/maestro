@@ -379,7 +379,19 @@ mod test {
 
     use crate::share::{Field, FieldRngExt};
 
-    use super::GF4;
+    use super::{BsGF4, GF4};
+
+    #[test]
+    fn test_bsgf4_mul() {
+        let mut rng = thread_rng();
+        let a: Vec<GF4> = rng.generate(2);
+        let b: Vec<GF4> = rng.generate(2);
+        let c: Vec<GF4> = a.iter().zip(b.iter()).map(|(a, b)| *a * *b).collect();
+        let ap = BsGF4::new(a[0], a[1]);
+        let bp = BsGF4::new(b[0], b[1]);
+        let cp = ap * bp;
+        assert_eq!((c[0], c[1]), cp.unpack())
+    }
 
     #[test]
     fn test_debug_format() {

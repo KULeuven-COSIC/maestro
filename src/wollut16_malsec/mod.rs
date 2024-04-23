@@ -3,19 +3,20 @@
 use crate::{
     network::ConnectedParty,
     party::{broadcast::BroadcastContext, error::MpcResult, Party},
-    share::{gf4::GF4, Field, RssShare},
+    share::{gf4::BsGF4, Field},
     wollut16::RndOhvOutput,
 };
 
 mod mult_verification;
 mod offline;
+pub mod online;
 
 /// Party for WOLLUT16 with active security
 pub struct WL16ASParty {
     inner: Party,
     prep_ohv: Vec<RndOhvOutput>,
     // Multiplication triples that need checking at the end
-    gf4_triples_to_check: MulTripleVector<GF4>,
+    gf4_triples_to_check: MulTripleVector<BsGF4>,
     broadcast_context: BroadcastContext,
 }
 
@@ -32,34 +33,46 @@ impl WL16ASParty {
 
 struct MulTripleVector<F: Field> {
     // s.t. a*b = c
-    a: Vec<RssShare<F>>,
-    b: Vec<RssShare<F>>,
-    c: Vec<RssShare<F>>,
+    a_i: Vec<F>,
+    a_ii: Vec<F>,
+    b_i: Vec<F>,
+    b_ii: Vec<F>,
+    c_i: Vec<F>,
+    c_ii: Vec<F>,
 }
 
 impl<F: Field> MulTripleVector<F> {
     pub fn new() -> Self {
         Self {
-            a: Vec::new(),
-            b: Vec::new(),
-            c: Vec::new(),
+            a_i: Vec::new(),
+            a_ii: Vec::new(),
+            b_i: Vec::new(),
+            b_ii: Vec::new(),
+            c_i: Vec::new(),
+            c_ii: Vec::new(),
         }
     }
 
     pub fn len(&self) -> usize {
-        self.a.len()
+        self.a_i.len()
     }
 
     pub fn shrink(&mut self, new_length: usize) {
-        self.a.truncate(new_length);
-        self.b.truncate(new_length);
-        self.c.truncate(new_length);
+        self.a_i.truncate(new_length);
+        self.a_ii.truncate(new_length);
+        self.b_i.truncate(new_length);
+        self.b_ii.truncate(new_length);
+        self.c_i.truncate(new_length);
+        self.c_ii.truncate(new_length);
     }
 
-    pub fn push(&mut self, a: RssShare<F>, b: RssShare<F>, c: RssShare<F>) {
-        self.a.push(a);
-        self.b.push(b);
-        self.c.push(c);
+    pub fn push(&mut self, ai: F, aii: F, bi: F, bii: F, ci: F, cii: F) {
+        self.a_i.push(ai);
+        self.a_ii.push(aii);
+        self.b_i.push(bi);
+        self.b_ii.push(bii);
+        self.c_i.push(ci);
+        self.c_ii.push(cii);
     }
 }
 
