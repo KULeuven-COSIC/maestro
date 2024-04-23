@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::slice;
 use sha2::{Sha256, Digest};
-use sha2::digest::{FixedOutput, Update};
+use sha2::digest::FixedOutput;
 use crate::network::task::Direction;
 use crate::party::error::{MpcError, MpcResult};
 use crate::party::MainParty;

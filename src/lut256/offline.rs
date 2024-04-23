@@ -3,7 +3,7 @@ use std::iter;
 use itertools::{izip, repeat_n, Itertools};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-use crate::{chida, lut256::RndOhv, party::{error::MpcResult, ArithmeticBlackBox, MainParty, Party}, share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}};
+use crate::{chida, lut256::RndOhv, party::{error::MpcResult, MainParty, Party}, share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}};
 
 use super::RndOhv256Output;
 
@@ -176,7 +176,7 @@ mod test {
             assert!(bs == BsBool16::zero() || bs == BsBool16::one());
             bs
         }).collect_vec();
-        // println!("Case expected={}, reconstructed = {:?}", expected, reconstructed);
+        
         assert_eq!(reconstructed[expected], BsBool16::one());
         for i in 0..reconstructed.len() {
             if i != expected {

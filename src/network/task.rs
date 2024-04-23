@@ -81,10 +81,6 @@ impl<T> TaskQueue<T> {
                 self.el_count += 1;
             }
         }
-        // match direction {
-        //     Direction::Next => self.queue_next.push_back(t),
-        //     Direction::Previous => self.queue_prev.push_back(t),
-        // }
     }
 
     fn put_with_thread_id(&mut self, id: u64, t: T) {
@@ -106,10 +102,6 @@ impl<T> TaskQueue<T> {
             self.el_count -= 1;
         }
         popped
-        // match direction {
-        //     Direction::Next => self.queue_next.pop_front(),
-        //     Direction::Previous => self.queue_prev.pop_front(),
-        // }
     }
 
     pub fn pop_with_thread_id(&mut self, id: u64) -> Option<T> {
@@ -125,10 +117,6 @@ impl<T> TaskQueue<T> {
 
     pub fn peek(&mut self) -> Option<&mut T> {
         self.queue.front_mut()
-        // match direction {
-        //     Direction::Next => self.queue_next.front_mut(),
-        //     Direction::Previous => self.queue_prev.front_mut(),
-        // }
     }
 
     pub fn peek_or_peek_from_any_thread_id(&mut self) -> Option<&mut T> {
@@ -152,15 +140,7 @@ impl<T> TaskQueue<T> {
 
     pub fn is_empty(&self,) -> bool {
         self.el_count == 0
-        // self.queue_next.is_empty() && self.queue_prev.is_empty()
     }
-
-    // pub fn is_empty_for(&self, direction: Direction) -> bool {
-    //     match direction {
-    //         Direction::Next => self.queue_next.is_empty(),
-    //         Direction::Previous => self.queue_prev.is_empty(),
-    //     }
-    // }
 }
 
 impl Debug for Task {

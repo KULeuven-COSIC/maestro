@@ -7,10 +7,8 @@ mod thread_party;
 use std::borrow::Borrow;
 use std::io::{self, Write};
 use std::thread;
-use itertools::Itertools;
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use crate::network::task::{Direction, IoLayerOwned};
 use crate::network::{self, ConnectedParty};
@@ -114,10 +112,6 @@ pub trait Party {
 pub struct MainParty {
     pub i: usize,
     io: Option<IoLayerOwned>,
-    // /// Channel to player i+1
-    // pub comm_next: CommChannel,
-    // /// Channel to player i-1
-    // pub comm_prev: CommChannel,
     stats: CombinedCommStats,
     random_next: SharedRng,
     random_prev: SharedRng,
@@ -363,14 +357,6 @@ impl MainParty {
     pub fn run_in_threadpool_scoped<'scope, R: Send, F: FnOnce(&rayon::Scope<'scope>) -> R + Send>(&self, f: F) -> R {
         self.thread_pool.as_ref().expect("Thread pool not enabled").scope(f)
     }
-
-    // pub fn thread_pool_map(&mut self, ranges: Vec<(usize,usize)>) {
-    //     let ids = vec![1,2,3];
-    //     let tasks = vec![MyTask{ id: &ids[0]}, MyTask{ id: &ids[1]}];
-    //     let f: Vec<_> = tasks.into_par_iter().map(|t| t).collect();
-    //     let parties = self.create_thread_parties(ranges)
-    //         .into_par_iter().map(|tp| tp.task_size()).collect_vec_list();
-    // }
 }
 
 #[inline]

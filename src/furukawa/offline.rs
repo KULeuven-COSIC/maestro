@@ -1,4 +1,4 @@
-use std::{ops::AddAssign, time::Instant};
+use std::ops::AddAssign;
 
 use itertools::izip;
 use rand::{seq::SliceRandom, CryptoRng, RngCore};
@@ -25,7 +25,6 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
 {
     // choose params
     let pow = n.checked_next_power_of_two().expect("n too large");
-    println!("n={}, pow={}", n, pow);
     let (N, B) = 
         if pow <= (1 << 10) {
             (1<< 10, BUCKET_SIZE[0])
@@ -42,38 +41,38 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         };
     let C = B;
     let M = N*B+C;
-    // println!("N={}, B={}, M={}", N, B, M);
+    
     // generate multiplication triples optimistically
-    let mul_triples_time = Instant::now();
+    // let mul_triples_time = Instant::now();
     let (mut a, mut b, mut ci, mut cii) = if party.has_multi_threading() && M >= 2*party.num_worker_threads() {
         optimistic_mul_mt(party, M)?
     }else{
         optimistic_mul(party, M)?
     };
     party.io().wait_for_completion();
-    let mul_triples_time = mul_triples_time.elapsed();
+    // let mul_triples_time = mul_triples_time.elapsed();
 
     // obtain fresh global randomness
     let mut rng = GlobalRng::setup_global(party)?;
 
-    let shuffle_time = Instant::now();
+    // let shuffle_time = Instant::now();
     if party.has_multi_threading() && M >= 2*party.num_worker_threads() {
         shuffle_mt(party, rng.as_mut(), &mut a, &mut b, &mut ci, &mut cii)
     }else{
         shuffle(rng.as_mut(), &mut a, &mut b, &mut ci, &mut cii);
     }
-    let shuffle_time = shuffle_time.elapsed();
+    // let shuffle_time = shuffle_time.elapsed();
 
-    let open_check_time = Instant::now();
+    // let open_check_time = Instant::now();
     // open and check the first C triples
     let ok = open_and_check(party, &a[..C], &b[..C], &ci[..C], &cii[..C])?;
-    let open_check_time = open_check_time.elapsed();
+    // let open_check_time = open_check_time.elapsed();
     if !ok {
         println!("First C triples don't check out");
         return Err(MpcError::SacrificeError);
     }
 
-    let sacrifice_time = Instant::now();
+    // let sacrifice_time = Instant::now();
     let (mut ai, mut aii): (Vec<F>, Vec<F>) = a.into_iter().skip(C).map(|rss| (rss.si, rss.sii)).unzip();
     let (mut bi, mut bii): (Vec<F>, Vec<F>) = b.into_iter().skip(C).map(|rss| (rss.si, rss.sii)).unzip();
 
@@ -98,8 +97,8 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         ci: ci.into_iter().skip(C).take(n).collect(),
         cii: cii.into_iter().skip(C).take(n).collect()
     };
-    let sacrifice_time = sacrifice_time.elapsed();
-    println!("Bucket cut-and-choose: optimistic multiplication: {}s, shuffle: {}s, open: {}s, sacrifice: {}s", mul_triples_time.as_secs_f64(), shuffle_time.as_secs_f64(), open_check_time.as_secs_f64(), sacrifice_time.as_secs_f64());
+    // let sacrifice_time = sacrifice_time.elapsed();
+    // println!("Bucket cut-and-choose: optimistic multiplication: {}s, shuffle: {}s, open: {}s, sacrifice: {}s", mul_triples_time.as_secs_f64(), shuffle_time.as_secs_f64(), open_check_time.as_secs_f64(), sacrifice_time.as_secs_f64());
     Ok(correct_triples)
 }
 
@@ -384,13 +383,8 @@ where Sha256: FieldDigestExt<F>
         for _j in 0..sacrifice_bucket_size {
             let rho_times_sigma = party.constant(rho[bucket_idx] * sigma[bucket_idx]);
             let zero_i = ci_to_check[el_idx] + ci_to_sacrifice[bucket_idx] + sigma[bucket_idx] * ai_to_check[el_idx] + rho[bucket_idx] * bi_to_check[el_idx] + rho_times_sigma.si;
-            // if party.i == 0 {
-            //     zero_i += rho_times_sigma;
-            // }
             let zero_ii = cii_to_check[el_idx] + cii_to_sacrifice[bucket_idx] + sigma[bucket_idx] * aii_to_check[el_idx] + rho[bucket_idx] * bii_to_check[el_idx] + rho_times_sigma.sii;
-            // if party.i == 2 {
-            //     zero_ii += rho_times_sigma;
-            // }
+            
             // compare_view sends my prev_view to P+1 and compares it to that party's next_view
             // so we write zero_i to prev_view s.t. P+1 compares it to -zero_ii - zero_iii
             context.add_to_prev_view(&zero_i);

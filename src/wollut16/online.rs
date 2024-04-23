@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 use sha2::Sha256;
 use crate::{
-    aes::GF8InvBlackBox, network::task::{Direction, IoLayerOwned}, party::{error::MpcResult, ArithmeticBlackBox, MainParty, Party}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}
+    aes::GF8InvBlackBox, network::task::{Direction, IoLayerOwned}, party::{error::MpcResult, ArithmeticBlackBox, Party}, share::{gf4::{BsGF4, GF4}, gf8::GF8, wol::{wol_inv_map, wol_map}, Field, FieldDigestExt, FieldRngExt, RssShare}
 };
 
 #[cfg(feature = "verbose-timing")]
@@ -57,7 +57,7 @@ const GF4_BITSLICED_LUT: [[u16; 4]; 16] = [
 ];
 
 /// Placeholder for the LUT protocol
-pub fn LUT_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>,Vec<GF4>)> {
+pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>,Vec<GF4>)> {
     if party.prep_ohv.len() < v.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
     }
@@ -107,7 +107,7 @@ fn append(a: &[GF4], b: &[GF4]) -> Vec<GF4> {
 }
 
 /// Share conversion protocol <<x>> to [[x]]
-fn SS_to_RSS_layer(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: &mut [GF4]) -> MpcResult<()> {
+fn ss_to_rss_layer(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: &mut [GF4]) -> MpcResult<()> {
     debug_assert_eq!(xss_i.len(), x_i.len());
     debug_assert_eq!(xss_i.len(), x_ii.len());
     let alphas:Vec<GF4> = party.inner.generate_alpha(xss_i.len());
@@ -156,7 +156,7 @@ fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     let lut_layer_time = Instant::now();
 
     // Step 5: Compute replicated sharing of v inverse
-    let (v_inv_i, v_inv_ii) = LUT_layer(party, &v)?;
+    let (v_inv_i, v_inv_ii) = lut_layer(party, &v)?;
     #[cfg(feature = "verbose-timing")]
     PARTY_TIMER.lock().unwrap().report_time("gf8_inv_layer_lut", lut_layer_time.elapsed());
     #[cfg(feature = "verbose-timing")]
@@ -177,7 +177,7 @@ fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     // Step 7: Generate replicated sharing of a_h' and a_l'
     let mut a_h_a_l_i = vec![GF4::zero(); 2*n];
     let mut a_h_a_l_ii = vec![GF4::zero(); 2*n];
-    SS_to_RSS_layer(party, &append(&a_h_prime_ss, &a_l_prime_ss), &mut a_h_a_l_i, &mut a_h_a_l_ii)?;
+    ss_to_rss_layer(party, &append(&a_h_prime_ss, &a_l_prime_ss), &mut a_h_a_l_i, &mut a_h_a_l_ii)?;
 
     #[cfg(feature = "verbose-timing")]
     PARTY_TIMER.lock().unwrap().report_time("gf8_inv_layer_ss_to_rss", ss_rss_timer.elapsed());
@@ -471,9 +471,9 @@ mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
 
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, party::test::TestSetup, share::{gf4::GF4, gf8::GF8, test::{assert_eq, consistent, secret_share_vector}, Field, FieldRngExt, RssShare}, wollut16::{online::{gf8_inv_layer_opt, gf8_inv_layer_opt_mt, GF4_INV}, test::{localhost_setup_wl16, WL16Setup}, WL16Party}};
+    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, party::test::TestSetup, share::{gf4::GF4, gf8::GF8, test::{assert_eq, consistent, secret_share_vector}, Field, FieldRngExt, RssShare}, wollut16::{online::{gf8_inv_layer_opt, gf8_inv_layer_opt_mt, GF4_INV}, test::WL16Setup, WL16Party}};
 
-    use super::{gf8_inv_layer, LUT_layer};
+    use super::{gf8_inv_layer, lut_layer};
 
     fn secret_share_additive<R: Rng + CryptoRng, F: Field>(rng: &mut R, it: impl ExactSizeIterator<Item=F>) -> (Vec<F>, Vec<F>, Vec<F>)
     where R: FieldRngExt<F>
@@ -487,14 +487,14 @@ mod test {
     }
 
     #[test]
-    fn LUT_layer_correct() {
+    fn lut_layer_correct() {
         let inputs: Vec<_> = (0..16).map(|x| GF4::new(x)).collect();
         let mut rng = thread_rng();
         let (in1, in2, in3) = secret_share_additive::<_, GF4>(&mut rng, inputs.clone().into_iter());
         let program = |v: Vec<GF4>| {
             move |p: &mut WL16Party| {
                 p.prepare_rand_ohv(v.len()).unwrap();
-                let (si,sii) = LUT_layer(p, &v).unwrap();
+                let (si,sii) = lut_layer(p, &v).unwrap();
                 p.io().wait_for_completion();
                 si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si, sii)).collect_vec()
             }

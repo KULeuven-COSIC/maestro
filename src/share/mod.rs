@@ -7,7 +7,6 @@ pub mod bs_bool16;
 
 use std::borrow::Borrow;
 use std::fmt::Debug;
-use std::io;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self> + Clone + Copy + PartialEq + AddAssign { // + AsRef<[u8]>
@@ -24,11 +23,6 @@ pub trait Field: Default + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self
     fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
-}
-
-pub trait FieldVectorCommChannel<F: Field> {
-    fn write_vector(&mut self, vector: &[F]) -> io::Result<()>;
-    fn read_vector(&mut self, buffer: &mut [F]) -> io::Result<()>;
 }
 
 #[derive(Clone, Debug)]
@@ -137,9 +131,6 @@ pub mod test {
     pub fn random_secret_shared_vector<F: Field>(n: usize) -> (Vec<F>, Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)
     where ThreadRng: FieldRngExt<F>
     {
-        // let mut rng_seed = [0; 32];
-        // thread_rng().fill_bytes(&mut rng_seed);
-        // let mut rng = ChaCha20Rng::from_seed(rng_seed);
         let mut rng = thread_rng();
         let x: Vec<F> = FieldRngExt::generate(&mut rng, n);
         let (s1, s2, s3) = secret_share_vector(&mut rng, x.iter());

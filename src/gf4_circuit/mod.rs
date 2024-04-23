@@ -129,7 +129,7 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
         Ok(())
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-        if self.0.has_multi_threading() && si.len() > 2*self.0.num_worker_threads() {
+        if self.0.has_multi_threading() && si.len() >= 2*self.0.num_worker_threads() {
             gf8_inv_via_gf4_mul_opt_mt(self.0.as_party_mut(), si, sii)
         }else{
             gf8_inv_via_gf4_mul_opt(self.0.as_party_mut(), si, sii)

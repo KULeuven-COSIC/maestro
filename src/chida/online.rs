@@ -364,9 +364,7 @@ where ChaCha20Rng: FieldRngExt<F>
     for (i, alpha_i) in alphas.into_iter().enumerate() {
         ci[i] = ai[i] * bi[i] + ai[i] * bii[i] + aii[i] * bi[i] + alpha_i;
     }
-    // println!("Writing {} elements to comm_prev", ci.len());
     party.send_field::<F>(Direction::Previous, ci.iter(), ci.len());
-    // println!("Expecting {} elements from comm_next", cii.len());
     party.receive_field_slice(Direction::Next, cii).rcv()?;
     Ok(())
 }

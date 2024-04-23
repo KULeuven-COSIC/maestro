@@ -540,7 +540,6 @@ pub mod test {
 
         let program = |x: Vec<GF8>| {
             move |p: &mut FurukawaParty<GF8>| {
-                // let party_index = p.inner().i;
                 p.input_round(&x).unwrap()
             }
         };

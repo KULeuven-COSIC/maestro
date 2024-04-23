@@ -67,7 +67,7 @@ fn lut256_mt(party: &mut MainParty, si: &mut[GF8], sii: &mut[GF8], ciii: Vec<GF8
     debug_assert_eq!(si.len(), rnd_ohv.len());
     let ranges = party.split_range_equally(si.len());
     let chunk_size = ranges[0].1 - ranges[0].0;
-    // let thread_parties = party.create_thread_parties(ranges);
+    
     party.run_in_threadpool(|| {
         si.par_chunks_mut(chunk_size).zip_eq(sii.par_chunks_mut(chunk_size)).zip_eq(ciii.par_chunks(chunk_size)).zip_eq(rnd_ohv.par_chunks(chunk_size))
         .for_each(|(((si, sii), ciii), rnd_ohv)| {
