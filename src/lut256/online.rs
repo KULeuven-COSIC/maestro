@@ -2,16 +2,13 @@ use std::time::Instant;
 
 use itertools::izip;
 use rand_chacha::ChaCha20Rng;
+use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 use sha2::Sha256;
 
-use crate::{
-    aes::{self, GF8InvBlackBox},
-    network::task::{Direction, IoLayer},
-    party::{error::MpcResult, ArithmeticBlackBox},
-    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare},
-};
+use crate::{aes::{self, GF8InvBlackBox}, network::task::{Direction, IoLayerOwned}, party::{error::MpcResult, ArithmeticBlackBox, MainParty}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
-use super::{offline, LUT256Party};
+use super::{offline, LUT256Party, RndOhv256Output};
+
 
 impl GF8InvBlackBox for LUT256Party {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
@@ -19,9 +16,14 @@ impl GF8InvBlackBox for LUT256Party {
     }
 
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_rnd_ohv_ks = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
-        let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
-        let mut prep = offline::generate_rndohv256(&mut self.inner, n_rnd_ohv + n_rnd_ohv_ks)?;
+        let n_rnd_ohv_ks = 4*10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
+        let n_rnd_ohv = 16*10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
+        let n_prep = n_rnd_ohv + n_rnd_ohv_ks;
+        let mut prep = if self.inner.has_multi_threading() && 2*n_prep > self.inner.num_worker_threads()  {
+            offline::generate_rndohv256_mt(self.inner.as_party_mut(), n_prep)?
+        }else{
+            offline::generate_rndohv256(self.inner.as_party_mut(), n_prep)?
+        };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = prep;
         } else {
@@ -37,32 +39,51 @@ impl GF8InvBlackBox for LUT256Party {
         }
         let rnd_ohv = &self.prep_ohv[self.prep_ohv.len() - si.len()..];
         let rcv_ciii = self.io().receive_field(Direction::Previous, si.len());
-        let mut c: Vec<_> = si
-            .iter()
-            .zip(rnd_ohv)
-            .map(|(v, r)| *v + r.random_si)
-            .collect();
-        self.io().send_field::<GF8>(Direction::Next, &c, si.len());
-        izip!(c.iter_mut(), sii.iter(), rnd_ohv).for_each(|(c, sii, r)| *c += *sii + r.random_sii);
-
+        si.iter_mut().zip(rnd_ohv).for_each(|(v,r)| *v += r.random_si);
+        self.io().send_field::<GF8>(Direction::Next, si.iter(), si.len());
+        izip!(si.iter_mut(), sii.iter(), rnd_ohv).for_each(|(c, sii, r)| *c += *sii + r.random_sii);
+        
         let ciii = rcv_ciii.rcv()?;
         let now = Instant::now();
-        let (inv_si, inv_sii): (Vec<_>, Vec<_>) = izip!(c, ciii, rnd_ohv)
-            .map(|(c, ciii, ohv)| {
-                let c = (c + ciii).0 as usize;
-                (ohv.si.lut(c, &aes::INV_GF8), ohv.sii.lut(c, &aes::INV_GF8))
-            })
-            .unzip();
+
+        if self.inner.has_multi_threading() && 2*si.len() > self.inner.num_worker_threads() {
+            lut256_mt(self.inner.as_party_mut(), si, sii, ciii, rnd_ohv)?;
+        }else{
+            lut256(si, sii, &ciii, rnd_ohv);
+        }
+        
         let time = now.elapsed();
         self.lut_time += time;
         // remove used pre-processing material
-        self.prep_ohv.truncate(self.prep_ohv.len() - si.len());
-        // write out result
-        si.copy_from_slice(&inv_si);
-        sii.copy_from_slice(&inv_sii);
+        self.prep_ohv.truncate(self.prep_ohv.len()-si.len());
         self.io().wait_for_completion();
         Ok(())
     }
+}
+
+fn lut256_mt(party: &mut MainParty, si: &mut[GF8], sii: &mut[GF8], ciii: Vec<GF8>, rnd_ohv: &[RndOhv256Output]) -> MpcResult<()> {
+    debug_assert_eq!(si.len(), sii.len());
+    debug_assert_eq!(si.len(), ciii.len());
+    debug_assert_eq!(si.len(), rnd_ohv.len());
+    let ranges = party.split_range_equally(si.len());
+    let chunk_size = ranges[0].1 - ranges[0].0;
+    
+    party.run_in_threadpool(|| {
+        si.par_chunks_mut(chunk_size).zip_eq(sii.par_chunks_mut(chunk_size)).zip_eq(ciii.par_chunks(chunk_size)).zip_eq(rnd_ohv.par_chunks(chunk_size))
+        .for_each(|(((si, sii), ciii), rnd_ohv)| {
+            lut256(si, sii, ciii, rnd_ohv);
+        });
+        Ok(())
+    })
+}
+
+#[inline]
+fn lut256(si: &mut[GF8], sii: &mut[GF8], ciii: &[GF8], rnd_ohv: &[RndOhv256Output]) {
+    izip!(si.iter_mut(), sii.iter_mut(), ciii, rnd_ohv).for_each(|(si, sii, ciii,ohv)| {
+        let c = (*si+*ciii).0 as usize;
+        *si = ohv.si.lut(c, &aes::INV_GF8);
+        *sii = ohv.sii.lut(c, &aes::INV_GF8);
+    });
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for LUT256Party
@@ -77,7 +98,7 @@ where
         self.inner.pre_processing(n_multiplications)
     }
 
-    fn io(&self) -> &IoLayer {
+    fn io(&self) -> &IoLayerOwned {
         self.inner.io()
     }
 
@@ -134,21 +155,39 @@ mod test {
 
     #[test]
     fn sub_bytes() {
-        test_sub_bytes::<LUT256Setup, _>()
+        test_sub_bytes::<LUT256Setup,_>(None)
+    }
+
+    #[test]
+    fn sub_bytes_mt() {
+        const N_THREADS: usize = 3;
+        test_sub_bytes::<LUT256Setup,_>(Some(N_THREADS))
     }
 
     #[test]
     fn aes128_keyschedule_lut16() {
-        test_aes128_keyschedule_gf8::<LUT256Setup, _>()
+        test_aes128_keyschedule_gf8::<LUT256Setup, _>(None)
     }
 
     #[test]
     fn aes_128_no_keyschedule_lut16() {
-        test_aes128_no_keyschedule_gf8::<LUT256Setup, _>()
+        test_aes128_no_keyschedule_gf8::<LUT256Setup, _>(1, None)
+    }
+
+    #[test]
+    fn aes_128_no_keyschedule_lut16_mt() {
+        const N_THREADS: usize = 3;
+        test_aes128_no_keyschedule_gf8::<LUT256Setup, _>(100, Some(N_THREADS))
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_lut16() {
-        test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>()
+        test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>(1, None)
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_lut16_mt() {
+        const N_THREADS: usize = 3;
+        test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>(100, Some(N_THREADS))
     }
 }

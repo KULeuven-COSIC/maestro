@@ -8,7 +8,6 @@ pub mod wol;
 
 use std::borrow::Borrow;
 use std::fmt::Debug;
-use std::io;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 pub trait Field:
@@ -56,11 +55,6 @@ pub trait Invertible: Field {
 pub trait HasTwo: Field {
     /// Multiplicative Inverse (zero may map to zero)
     const TWO: Self;
-}
-
-pub trait FieldVectorCommChannel<F: Field> {
-    fn write_vector(&mut self, vector: &[F]) -> io::Result<()>;
-    fn read_vector(&mut self, buffer: &mut [F]) -> io::Result<()>;
 }
 
 #[derive(Clone, Debug)]
@@ -208,9 +202,6 @@ pub mod test {
     where
         ThreadRng: FieldRngExt<F>,
     {
-        // let mut rng_seed = [0; 32];
-        // thread_rng().fill_bytes(&mut rng_seed);
-        // let mut rng = ChaCha20Rng::from_seed(rng_seed);
         let mut rng = thread_rng();
         let x: Vec<F> = FieldRngExt::generate(&mut rng, n);
         let (s1, s2, s3) = secret_share_vector(&mut rng, x.iter());

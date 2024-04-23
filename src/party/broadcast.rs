@@ -1,12 +1,12 @@
-use crate::network::task::Direction;
-use crate::party::error::{MpcError, MpcResult};
-use crate::party::Party;
-use crate::share::{Field, FieldDigestExt, RssShare};
-use sha2::digest::FixedOutput;
-use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::slice;
+use sha2::{Sha256, Digest};
+use sha2::digest::FixedOutput;
+use crate::network::task::Direction;
+use crate::party::error::{MpcError, MpcResult};
+use crate::party::MainParty;
+use crate::share::{Field, FieldDigestExt, RssShare};
 
 pub struct BroadcastContext {
     view_next: Sha256,
@@ -74,16 +74,21 @@ impl BroadcastContext {
     {
         FieldDigestExt::update(&mut self.view_prev, slice::from_ref(el));
     }
+
+    pub fn join(contexts: Vec<Self>) -> Self {
+        let mut res = BroadcastContext::new();
+        contexts.into_iter().for_each(|context| {
+            let final_next = context.view_next.finalize();
+            let final_prev = context.view_prev.finalize();
+            Digest::update(&mut res.view_next, &final_next);
+            Digest::update(&mut res.view_prev, &final_prev);
+        });
+        res
+    }
 }
 
-impl Broadcast for Party {
-    fn broadcast_round_bytes(
-        &mut self,
-        context: &mut BroadcastContext,
-        buffer_next: &mut [u8],
-        buffer_prev: &mut [u8],
-        message: &[u8],
-    ) -> MpcResult<()> {
+impl Broadcast for MainParty {
+    fn broadcast_round_bytes(&mut self, context: &mut BroadcastContext, buffer_next: &mut [u8], buffer_prev: &mut[u8], message: &[u8]) -> MpcResult<()> {
         // first send to P+1
         self.io().send(Direction::Next, message.to_vec());
         // then send to P-1
@@ -249,11 +254,11 @@ mod test {
     use crate::network::task::Direction;
     use crate::party::broadcast::{Broadcast, BroadcastContext};
     use crate::party::error::MpcError;
-    use crate::party::test::localhost_setup;
-    use crate::party::Party;
+    use crate::party::MainParty;
+    use crate::party::test::{PartySetup, TestSetup};
+    use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
     use crate::share::gf8::GF8;
     use crate::share::test::secret_share;
-    use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
     use rand::thread_rng;
     use sha2::digest::FixedOutput;
     use sha2::{Digest, Sha256};
@@ -267,7 +272,7 @@ mod test {
         let x3 = rng.generate(N);
 
         let program = |msg: Vec<GF8>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let mut prev_buf = vec![GF8(0); N];
                 let mut next_buf = vec![GF8(0); N];
@@ -277,11 +282,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(
-            program(x1.clone()),
-            program(x2.clone()),
-            program(x3.clone()),
-        );
+        let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
         let ((c1, x13, x12), _) = h1.join().unwrap();
         let ((c2, x21, x23), _) = h2.join().unwrap();
         let ((c3, x32, x31), _) = h3.join().unwrap();
@@ -319,7 +320,7 @@ mod test {
         let x2 = rng.generate(N);
         let x3 = rng.generate(N);
         let program = |msg: Vec<GF8>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let mut prev_buf = vec![GF8(0); N];
                 let mut next_buf = vec![GF8(0); N];
@@ -328,11 +329,7 @@ mod test {
                 p.compare_view(context).unwrap();
             }
         };
-        let (h1, h2, h3) = localhost_setup(
-            program(x1.clone()),
-            program(x2.clone()),
-            program(x3.clone()),
-        );
+        let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
         h1.join().unwrap();
         h2.join().unwrap();
         h3.join().unwrap();
@@ -347,7 +344,7 @@ mod test {
             let x2 = rng.generate(N);
             let x3 = rng.generate(N);
             let program = |msg: Vec<GF8>| {
-                move |p: &mut Party| {
+                move |p: &mut MainParty| {
                     if p.i == cheater {
                         let mut context = BroadcastContext::new();
                         let mut prev_buf = vec![GF8(0); N];
@@ -383,11 +380,7 @@ mod test {
                     }
                 }
             };
-            let (h1, h2, h3) = localhost_setup(
-                program(x1.clone()),
-                program(x2.clone()),
-                program(x3.clone()),
-            );
+            let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
             h1.join().unwrap();
             h2.join().unwrap();
             h3.join().unwrap();
@@ -414,7 +407,7 @@ mod test {
         }
 
         let compute = |share: Vec<RssShare<GF8>>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let xi: Vec<_> = share.iter().map(|s| s.si.clone()).collect();
                 let xii: Vec<_> = share.iter().map(|s| s.sii.clone()).collect();
@@ -424,7 +417,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(compute(x1), compute(x2), compute(x3));
+        let (h1, h2, h3) = PartySetup::localhost_setup(compute(x1), compute(x2), compute(x3));
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -450,7 +443,7 @@ mod test {
         }
 
         let program = |x: Vec<RssShare<GF8>>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let open1 = p.open_rss_to(&mut context, &x[0..N], 0).unwrap();
                 let open2 = p.open_rss_to(&mut context, &x[N..2 * N], 1).unwrap();
@@ -477,7 +470,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(x1), program(x2), program(x3));
+        let (h1, h2, h3) = PartySetup::localhost_setup(program(x1), program(x2), program(x3));
         let (open1, _) = h1.join().unwrap();
         let (open2, _) = h2.join().unwrap();
         let (open3, _) = h3.join().unwrap();

@@ -2,7 +2,7 @@ use itertools::izip;
 
 use crate::{
     network::task::Direction,
-    party::error::MpcResult,
+    party::{error::MpcResult, Party},
     share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,

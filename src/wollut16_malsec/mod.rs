@@ -2,7 +2,7 @@
 
 use crate::{
     network::ConnectedParty,
-    party::{broadcast::BroadcastContext, error::MpcResult, Party},
+    party::{broadcast::BroadcastContext, error::MpcResult, MainParty},
     share::{gf4::BsGF4, Field},
     wollut16::RndOhvOutput,
 };
@@ -12,8 +12,8 @@ mod offline;
 pub mod online;
 
 /// Party for WOLLUT16 with active security
-pub struct WL16ASParty {
-    inner: Party,
+pub struct WL16ASParty{
+    inner: MainParty,
     prep_ohv: Vec<RndOhvOutput>,
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<BsGF4>,
@@ -21,8 +21,8 @@ pub struct WL16ASParty {
 }
 
 impl WL16ASParty {
-    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        Party::setup(connected).map(|party| Self {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             gf4_triples_to_check: MulTripleVector::new(),
@@ -87,58 +87,24 @@ mod test {
 
     use super::WL16ASParty;
 
-    pub fn localhost_setup_wl16as<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static,
-    >(
-        f1: F1,
-        f2: F2,
-        f3: F3,
-    ) -> (
-        JoinHandle<(T1, WL16ASParty)>,
-        JoinHandle<(T2, WL16ASParty)>,
-        JoinHandle<(T3, WL16ASParty)>,
-    ) {
-        fn adapter<T, Fx: FnOnce(&mut WL16ASParty) -> T>(
-            conn: ConnectedParty,
-            f: Fx,
-        ) -> (T, WL16ASParty) {
-            let mut party = WL16ASParty::setup(conn).unwrap();
+    pub fn localhost_setup_wl16as<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,WL16ASParty)>, JoinHandle<(T2,WL16ASParty)>, JoinHandle<(T3,WL16ASParty)>) {
+        fn adapter<T, Fx: FnOnce(&mut WL16ASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16ASParty) {
+            let mut party = WL16ASParty::setup(conn, n_worker_threads).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();
             (t, party)
         }
-        localhost_connect(
-            |conn_party| adapter(conn_party, f1),
-            |conn_party| adapter(conn_party, f2),
-            |conn_party| adapter(conn_party, f3),
-        )
+        localhost_connect(move |conn_party| adapter(conn_party, f1, n_worker_threads), move |conn_party| adapter(conn_party, f2, n_worker_threads), move |conn_party| adapter(conn_party, f3, n_worker_threads))
     }
 
     pub struct WL16ASSetup;
     impl TestSetup<WL16ASParty> for WL16ASSetup {
-        fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static,
-        >(
-            f1: F1,
-            f2: F2,
-            f3: F3,
-        ) -> (
-            std::thread::JoinHandle<(T1, WL16ASParty)>,
-            std::thread::JoinHandle<(T2, WL16ASParty)>,
-            std::thread::JoinHandle<(T3, WL16ASParty)>,
-        ) {
-            localhost_setup_wl16as(f1, f2, f3)
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (std::thread::JoinHandle<(T1,WL16ASParty)>, std::thread::JoinHandle<(T2,WL16ASParty)>, std::thread::JoinHandle<(T3,WL16ASParty)>) {
+            localhost_setup_wl16as(f1, f2, f3, None)
+        }
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,WL16ASParty)>, JoinHandle<(T2,WL16ASParty)>, JoinHandle<(T3,WL16ASParty)>) {
+            localhost_setup_wl16as(f1, f2, f3, Some(n_threads))
         }
     }
 }

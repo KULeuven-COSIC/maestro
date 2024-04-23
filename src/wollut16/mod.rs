@@ -4,14 +4,7 @@
 
 use std::time::Instant;
 
-use crate::{
-    aes::{self, GF8InvBlackBox},
-    benchmark::{BenchmarkProtocol, BenchmarkResult},
-    chida::ChidaParty,
-    network::{task::IoLayer, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox},
-    share::gf4::GF4,
-};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf4::GF4};
 
 pub mod offline;
 pub mod online;
@@ -40,11 +33,13 @@ pub struct RndOhvOutput {
 }
 
 impl WL16Party {
-    pub fn setup(connected: ConnectedParty) -> MpcResult<Self> {
-        ChidaParty::setup(connected).map(|party| Self {
-            inner: party,
-            prep_ohv: Vec::new(),
-            opt: true,
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads).map(|party| {
+            Self {
+                inner: party,
+                prep_ohv: Vec::new(),
+                opt: true,
+            }
         })
     }
 
@@ -52,7 +47,11 @@ impl WL16Party {
         if self.opt {
             n = if n % 2 == 0 { n } else { n + 1 };
         }
-        let mut new = offline::generate_random_ohv16(&mut self.inner, n)?;
+        let mut new = if self.inner.has_multi_threading() {
+            offline::generate_random_ohv16_mt(self.inner.as_party_mut(), n)?
+        }else{
+            offline::generate_random_ohv16(self.inner.as_party_mut(), n)?
+        };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;
         } else {
@@ -61,13 +60,13 @@ impl WL16Party {
         Ok(())
     }
 
-    pub fn io(&self) -> &IoLayer {
+    pub fn io(&self) -> &IoLayerOwned {
         <ChidaParty as ArithmeticBlackBox<GF4>>::io(&self.inner)
     }
 }
 
-pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize) {
-    let mut party = WL16Party::setup(connected).unwrap();
+pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
+    let mut party = WL16Party::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
     let start_prep = Instant::now();
     party.do_preprocessing(0, simd).unwrap();
@@ -109,8 +108,8 @@ impl BenchmarkProtocol for LUT16Benchmark {
     fn protocol_name(&self) -> String {
         "lut16".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult {
-        let mut party = WL16Party::setup(conn).unwrap();
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        let mut party = WL16Party::setup(conn, n_worker_threads).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
         println!("After setup");
         let start_prep = Instant::now();
@@ -192,58 +191,24 @@ mod test {
 
     use super::WL16Party;
 
-    pub fn localhost_setup_wl16<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static,
-    >(
-        f1: F1,
-        f2: F2,
-        f3: F3,
-    ) -> (
-        JoinHandle<(T1, WL16Party)>,
-        JoinHandle<(T2, WL16Party)>,
-        JoinHandle<(T3, WL16Party)>,
-    ) {
-        fn adapter<T, Fx: FnOnce(&mut WL16Party) -> T>(
-            conn: ConnectedParty,
-            f: Fx,
-        ) -> (T, WL16Party) {
-            let mut party = WL16Party::setup(conn).unwrap();
+    pub fn localhost_setup_wl16<T1: Send + 'static, F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,WL16Party)>, JoinHandle<(T2,WL16Party)>, JoinHandle<(T3,WL16Party)>) {
+        fn adapter<T, Fx: FnOnce(&mut WL16Party)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16Party) {
+            let mut party = WL16Party::setup(conn, n_worker_threads).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();
             (t, party)
         }
-        localhost_connect(
-            |conn_party| adapter(conn_party, f1),
-            |conn_party| adapter(conn_party, f2),
-            |conn_party| adapter(conn_party, f3),
-        )
+        localhost_connect(move |conn_party| adapter(conn_party, f1, n_worker_threads), move |conn_party| adapter(conn_party, f2, n_worker_threads), move |conn_party| adapter(conn_party, f3, n_worker_threads))
     }
 
     pub struct WL16Setup;
     impl TestSetup<WL16Party> for WL16Setup {
-        fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static,
-        >(
-            f1: F1,
-            f2: F2,
-            f3: F3,
-        ) -> (
-            std::thread::JoinHandle<(T1, WL16Party)>,
-            std::thread::JoinHandle<(T2, WL16Party)>,
-            std::thread::JoinHandle<(T3, WL16Party)>,
-        ) {
-            localhost_setup_wl16(f1, f2, f3)
+        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (std::thread::JoinHandle<(T1,WL16Party)>, std::thread::JoinHandle<(T2,WL16Party)>, std::thread::JoinHandle<(T3,WL16Party)>) {
+            localhost_setup_wl16(f1, f2, f3, None)
+        }
+        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,WL16Party)>, JoinHandle<(T2,WL16Party)>, JoinHandle<(T3,WL16Party)>) {
+            localhost_setup_wl16(f1, f2, f3, Some(n_threads))
         }
     }
 }

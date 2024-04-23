@@ -22,7 +22,7 @@ pub struct BenchmarkResult {
 
 pub trait BenchmarkProtocol {
     fn protocol_name(&self) -> String;
-    fn run(&self, conn: ConnectedParty, simd: usize) -> BenchmarkResult;
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult;
 }
 
 pub struct AggregatedBenchmarkResult {
@@ -37,23 +37,12 @@ pub struct AggregatedBenchmarkResult {
 
 const WAIT_BETWEEN_SEC: u64 = 2;
 
-fn benchmark(
-    party_index: usize,
-    config: &Config,
-    iterations: usize,
-    simd: usize,
-    protocol: &Box<dyn BenchmarkProtocol>,
-) -> AggregatedBenchmarkResult {
+fn benchmark(party_index: usize, config: &Config, iterations: usize, simd: usize, n_worker_threads: Option<usize>, protocol: &Box<dyn BenchmarkProtocol>) -> AggregatedBenchmarkResult {
     let mut agg = AggregatedBenchmarkResult::new();
     for i in 0..iterations {
-        println!("Iteration {}", i + 1);
-        let conn = ConnectedParty::bind_and_connect(
-            party_index,
-            config.clone(),
-            Some(Duration::from_secs(60)),
-        )
-        .unwrap();
-        let res = protocol.run(conn, simd);
+        println!("Iteration {}", i+1);
+        let conn = ConnectedParty::bind_and_connect(party_index, config.clone(), Some(Duration::from_secs(60))).unwrap();
+        let res = protocol.run(conn, simd, n_worker_threads);
         agg.update(res);
         thread::sleep(Duration::from_secs(WAIT_BETWEEN_SEC));
     }
@@ -61,18 +50,11 @@ fn benchmark(
     agg
 }
 
-pub fn benchmark_protocols(
-    party_index: usize,
-    config: &Config,
-    iterations: usize,
-    simd: usize,
-    protocols: Vec<Box<dyn BenchmarkProtocol>>,
-    output: PathBuf,
-) -> io::Result<()> {
+pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usize, simd: usize, n_worker_threads: Option<usize>, protocols: Vec<Box<dyn BenchmarkProtocol>>, output: PathBuf) -> io::Result<()> {
     let mut results = Vec::new();
     for prot in &protocols {
         println!("Benchmarking {}", prot.protocol_name());
-        let agg = benchmark(party_index, config, iterations, simd, &prot);
+        let agg = benchmark(party_index, config, iterations, simd, n_worker_threads, &prot);
         results.push(agg);
         println!("Finished benchmark for {}", prot.protocol_name());
     }
@@ -83,7 +65,7 @@ pub fn benchmark_protocols(
     );
     // header
     let mut writer = BufWriter::new(File::create(output)?);
-    writeln!(&mut writer, "protocol,simd,pre-processing-time,online-time,pre-processing-bytes-sent-to-next,pre-processing-bytes-received-from-next,pre-processing-bytes-rounds-next,pre-processing-bytes-sent-to-prev,pre-processing-bytes-received-from-prev,pre-processing-bytes-rounds-prev, online-sent-to-next,online-bytes-received-from-next,online-bytes-rounds-next,online-bytes-sent-to-prev,online-bytes-received-from-prev,online-bytes-rounds-prev")?;
+    writeln!(&mut writer, "protocol,simd,pre-processing-time,online-time,pre-processing-bytes-sent-to-next,pre-processing-bytes-received-from-next,pre-processing-bytes-rounds-next,pre-processing-bytes-sent-to-prev,pre-processing-bytes-received-from-prev,pre-processing-bytes-rounds-prev,online-bytes-sent-to-next,online-bytes-received-from-next,online-bytes-rounds-next,online-bytes-sent-to-prev,online-bytes-received-from-prev,online-bytes-rounds-prev")?;
     for (agg, prot) in results.into_iter().zip(protocols) {
         agg.write_to_csv(&mut writer, &prot.protocol_name(), &simd.to_string())?;
     }

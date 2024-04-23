@@ -1,6 +1,5 @@
-use crate::network::CommChannel;
 use crate::share::gf8_tables;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, FieldVectorCommChannel};
+use crate::share::{Field, FieldDigestExt, FieldRngExt};
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
 use std::borrow::Borrow;
@@ -208,28 +207,5 @@ impl<D: Digest> FieldDigestExt<GF8> for D {
         for x in message {
             self.update(&[x.0]);
         }
-    }
-}
-
-// https://docs.rs/bytemuck/latest/bytemuck/
-// https://docs.rs/safe-transmute/latest/safe_transmute/trivial/trait.TriviallyTransmutable.html
-// https://docs.rs/pod/latest/pod/trait.Pod.html#method.from_byte_slice
-
-impl FieldVectorCommChannel<GF8> for CommChannel {
-    fn write_vector(&mut self, vector: &[GF8]) -> std::io::Result<()> {
-        let mut buf = vec![0; vector.len()];
-        for i in 0..vector.len() {
-            buf[i] = vector[i].0;
-        }
-        self.write(&mut buf)
-    }
-
-    fn read_vector(&mut self, buffer: &mut [GF8]) -> std::io::Result<()> {
-        let mut buf = vec![0; buffer.len()];
-        self.read(&mut buf)?;
-        for i in 0..buffer.len() {
-            buffer[i] = GF8(buf[i]);
-        }
-        Ok(())
     }
 }

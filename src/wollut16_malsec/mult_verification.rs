@@ -5,7 +5,7 @@ use sha2::Sha256;
 
 use crate::{
     network::task::Direction,
-    party::{broadcast::Broadcast, error::MpcResult},
+    party::{broadcast::Broadcast, error::MpcResult, Party},
     share::{
         gf2p64::{GF2p64, GF2p64Subfield},
         Field, FieldDigestExt, FieldRngExt, HasTwo, Invertible, RssShare,
@@ -302,7 +302,7 @@ mod test {
             }
         };
         let (h1, h2, h3) =
-            localhost_setup_wl16as(program(a1, b1), program(a2, b2), program(a3, b3));
+            localhost_setup_wl16as(program(a1, b1), program(a2, b2), program(a3, b3), None);
         let (c1, _) = h1.join().unwrap();
         let (c2, _) = h2.join().unwrap();
         let (c3, _) = h3.join().unwrap();
@@ -329,7 +329,7 @@ mod test {
             }
         };
         let (h1, h2, h3) =
-            localhost_setup_wl16as(program(a1, b1), program(a2, b2), program(a3, b3));
+            localhost_setup_wl16as(program(a1, b1), program(a2, b2), program(a3, b3),None,);
         let (c1, _) = h1.join().unwrap();
         let (c2, _) = h2.join().unwrap();
         let (c3, _) = h3.join().unwrap();
@@ -357,6 +357,7 @@ mod test {
             program(h01, h11, h21, x),
             program(h02, h12, h22, x),
             program(h03, h13, h23, x),
+            None,
         );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
@@ -384,6 +385,7 @@ mod test {
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
+            None,
         );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
@@ -418,6 +420,7 @@ mod test {
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
+            None,
         );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
@@ -451,6 +454,7 @@ mod test {
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
+            None,
         );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
@@ -489,6 +493,7 @@ mod test {
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
+            None,
         );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();

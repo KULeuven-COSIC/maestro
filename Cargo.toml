@@ -24,6 +24,7 @@ oneshot = "0.1.6"
 itertools = "0.12.1"
 criterion = {version ="0.4", optional = true }
 lazy_static = {version = "1.4.0" }
+rayon = "1.10.0"
 
 [dev-dependencies]
 # serial_test = "*"
