@@ -108,7 +108,7 @@ fn lut16_bitsliced_sbox_benchmark(n_rep: usize, batch: usize) -> LUTBenchResult 
                 let inputs2 = p.generate_alpha(batch);
                 let inputs3 = p.generate_alpha(batch);
                 let prep_now = Instant::now();
-                let rnd_ohv = wollut16::offline::generate_random_ohv16(p, batch).unwrap();
+                let rnd_ohv = wollut16::offline::generate_random_ohv16(p.as_party_mut(), batch).unwrap();
                 prep_times.push(prep_now.elapsed());
                 let online_now = Instant::now();
                 let res = wollut16::online::lut_with_rnd_ohv_bitsliced(
