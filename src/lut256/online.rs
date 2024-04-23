@@ -5,9 +5,9 @@ use rand_chacha::ChaCha20Rng;
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, network::task::{Direction, IoLayerOwned}, party::{error::MpcResult, ArithmeticBlackBox, MainParty}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::GF8InvBlackBox, network::task::{Direction, IoLayerOwned}, party::{error::MpcResult, ArithmeticBlackBox, MainParty}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
-use super::{offline, LUT256Party, RndOhv256Output};
+use super::{lut256_tables, offline, LUT256Party, RndOhv256Output};
 
 
 impl GF8InvBlackBox for LUT256Party {
@@ -81,8 +81,8 @@ fn lut256_mt(party: &mut MainParty, si: &mut[GF8], sii: &mut[GF8], ciii: Vec<GF8
 fn lut256(si: &mut[GF8], sii: &mut[GF8], ciii: &[GF8], rnd_ohv: &[RndOhv256Output]) {
     izip!(si.iter_mut(), sii.iter_mut(), ciii, rnd_ohv).for_each(|(si, sii, ciii,ohv)| {
         let c = (*si+*ciii).0 as usize;
-        *si = ohv.si.lut(c, &aes::INV_GF8);
-        *sii = ohv.sii.lut(c, &aes::INV_GF8);
+        *si = ohv.si.lut(c, &lut256_tables::GF8_INV_BITSLICED_LUT);
+        *sii = ohv.sii.lut(c, &lut256_tables::GF8_INV_BITSLICED_LUT);
     });
 }
 
@@ -146,10 +146,10 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        aes::test::{
+        aes::{self, test::{
             test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
             test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
-        },
+        }},
         lut256::test::LUT256Setup,
     };
 
@@ -165,29 +165,67 @@ mod test {
     }
 
     #[test]
-    fn aes128_keyschedule_lut16() {
+    fn aes128_keyschedule_lut256() {
         test_aes128_keyschedule_gf8::<LUT256Setup, _>(None)
     }
 
     #[test]
-    fn aes_128_no_keyschedule_lut16() {
+    fn aes_128_no_keyschedule_lut256() {
         test_aes128_no_keyschedule_gf8::<LUT256Setup, _>(1, None)
     }
 
     #[test]
-    fn aes_128_no_keyschedule_lut16_mt() {
+    fn aes_128_no_keyschedule_lut256_mt() {
         const N_THREADS: usize = 3;
         test_aes128_no_keyschedule_gf8::<LUT256Setup, _>(100, Some(N_THREADS))
     }
 
     #[test]
-    fn inv_aes128_no_keyschedule_lut16() {
+    fn inv_aes128_no_keyschedule_lut256() {
         test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>(1, None)
     }
 
     #[test]
-    fn inv_aes128_no_keyschedule_lut16_mt() {
+    fn inv_aes128_no_keyschedule_lut2566_mt() {
         const N_THREADS: usize = 3;
         test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>(100, Some(N_THREADS))
+    }
+
+    #[test]
+    fn create_table() {
+        fn set_bit(vec: &mut [u64; 4], index: usize, b: u8) {
+            let b = b as u64;
+            if index < 64 {
+                vec[0] |= (b & 0x1) << index;
+            }else if index < 128 {
+                vec[1] |= (b & 0x1) << (index-64);
+            }else if index < 192 {
+                vec[2] |= (b & 0x1) << (index-128);
+            }else{
+                vec[3] |= (b & 0x1) << (index-192);
+            }
+        }
+
+        let mut table = [[[0u64; 4]; 8]; 256];
+        for offset in 0..256 {
+            for j in 0..8 {
+                let mut entry = [0u64; 4];
+                for i in 0..256 {
+                    let b = (aes::INV_GF8[offset ^ i] >> j) & 0x1;
+                    set_bit(&mut entry, i, b);
+                    if offset == 0 && j == 0 && i == 1 {
+                        println!("b = {}; lookup={}", b, aes::INV_GF8[(offset ^ i) as usize]);
+                        println!("entry = {:?}", entry);
+                    }
+                }
+                table[offset as usize][j] = entry;
+            }
+        }
+
+        println!("const GF8_BITSLICED_LUT: [[[u64; 4]; 8]; 256] = [");
+        for i in 0..256 {
+            println!("\t{:?},", table[i]);
+        }
+        println!("];");
     }
 }

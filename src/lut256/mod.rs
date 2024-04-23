@@ -4,10 +4,12 @@ use std::time::{Duration, Instant};
 use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf8::GF8};
 mod online;
 mod offline;
+mod lut256_tables;
+
 
 /// a random one-hot vector of size 256
 #[derive(Clone, Copy)]
-pub struct RndOhv([u8; 256]);
+pub struct RndOhv([u64; 4]);
 
 // Party for LUT-256
 pub struct LUT256Party {
@@ -46,14 +48,21 @@ impl LUT256Party {
 }
 
 impl RndOhv {
-    pub fn new(table: [u8; 256]) -> Self {
+    pub fn new(table: [u64; 4]) -> Self {
         Self(table)
     }
 
-    pub fn lut(&self, offset: usize, table: &[u8]) -> GF8 {
+    pub fn lut(&self, offset: usize, table: &[[[u64; 4]; 8]; 256]) -> GF8 {
+        let table = &table[offset];
         let mut res = 0u8;
-        for i in 0..table.len() {
-            res ^= self.0[i] & table[i ^ offset];
+        for i in 0..8 {
+            let bit_table = &table[i];
+            let part_0 = self.0[0] & bit_table[0];
+            let part_1 = self.0[1] & bit_table[1];
+            let part_2 = self.0[2] & bit_table[2];
+            let part_3 = self.0[3] & bit_table[3];
+            let bit = part_0.count_ones() ^ part_1.count_ones() ^ part_2.count_ones() ^ part_3.count_ones();
+            res |= ((bit & 0x1) << i) as u8;
         }
         GF8(res)
     }
