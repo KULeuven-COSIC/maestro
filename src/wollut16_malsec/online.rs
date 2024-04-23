@@ -1,5 +1,8 @@
 use itertools::izip;
 
+#[cfg(feature = "verbose-timing")]
+use {std::time::Instant, crate::party::PARTY_TIMER};
+
 use crate::{
     network::task::Direction,
     party::{error::MpcResult, Party},

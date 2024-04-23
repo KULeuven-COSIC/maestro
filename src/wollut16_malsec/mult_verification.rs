@@ -267,7 +267,7 @@ mod test {
     use crate::{
         share::{
             gf2p64::GF2p64,
-            gf4::{BsGF4, GF4},
+            gf4::BsGF4,
             test::{assert_eq, consistent, secret_share, secret_share_vector},
             Field, FieldRngExt, RssShare,
         },
