@@ -14,9 +14,10 @@ use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 use super::aes::VectorAesState;
 use super::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
 
-
 impl<F: Field> ArithmeticBlackBox<F> for ChidaParty
-where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
+where
+    ChaCha20Rng: FieldRngExt<F>,
+    Sha256: FieldDigestExt<F>,
 {
     type Rng = ChaCha20Rng;
     type Digest = Sha256;
@@ -42,17 +43,32 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     }
 
     // all parties input the same number of inputs
-    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    fn input_round(
+        &mut self,
+        my_input: &[F],
+    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         input_round(&mut self.0, my_input)
     }
 
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
+    fn mul(
+        &mut self,
+        ci: &mut [F],
+        cii: &mut [F],
+        ai: &[F],
+        aii: &[F],
+        bi: &[F],
+        bii: &[F],
+    ) -> MpcResult<()> {
         mul(&mut self.0, ci, cii, ai, aii, bi, bii)
     }
 
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
         debug_assert_eq!(si.len(), sii.len());
-        let rss: Vec<_> = si.iter().zip(sii).map(|(si,sii)| RssShare::from(*si, *sii)).collect();
+        let rss: Vec<_> = si
+            .iter()
+            .zip(sii)
+            .map(|(si, sii)| RssShare::from(*si, *sii))
+            .collect();
         output_round(&mut self.0, &rss, &rss, &rss)
     }
 
@@ -82,8 +98,10 @@ impl GF8InvBlackBox for ChidaBenchmarkParty {
     }
 }
 
-impl<F: Field> ArithmeticBlackBox<F> for ChidaBenchmarkParty 
-where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
+impl<F: Field> ArithmeticBlackBox<F> for ChidaBenchmarkParty
+where
+    ChaCha20Rng: FieldRngExt<F>,
+    Sha256: FieldDigestExt<F>,
 {
     type Rng = ChaCha20Rng;
     type Digest = Sha256;
@@ -109,11 +127,22 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     }
 
     // all parties input the same number of inputs
-    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    fn input_round(
+        &mut self,
+        my_input: &[F],
+    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         self.inner.input_round(my_input)
     }
 
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
+    fn mul(
+        &mut self,
+        ci: &mut [F],
+        cii: &mut [F],
+        ai: &[F],
+        aii: &[F],
+        bi: &[F],
+        bii: &[F],
+    ) -> MpcResult<()> {
         self.inner.mul(ci, cii, ai, aii, bi, bii)
     }
 
@@ -127,11 +156,15 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
 }
 
 // the straight-forward gf8 inversion using 4 multiplication and only squaring (see Chida et al. "High-Throughput Secure AES Computation" in WAHC'18 [Figure 6])
-pub fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+pub fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(
+    party: &mut Protocol,
+    si: &mut [GF8],
+    sii: &mut [GF8],
+) -> MpcResult<()> {
     let n = si.len();
     // this is not yet the multiplication that chida et al use
     let x2 = (square_layer(si), square_layer(sii)); //square(&states);
-    // x^3 = x^2 * x
+                                                    // x^3 = x^2 * x
     let mut x3 = (vec![GF8(0); n], vec![GF8(0); n]); //VectorAesState::new(states.n);
     party.mul(&mut x3.0, &mut x3.1, si, sii, &x2.0, &x2.1)?;
 
@@ -141,9 +174,16 @@ pub fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si
     let x12_x12 = (append(&x12.0, &x12.0), append(&x12.1, &x12.1));
     let x3_x2 = (append(&x3.0, &x2.0), append(&x3.1, &x2.1));
 
-    let mut x15_x14 = (vec![GF8(0); 2*n], vec![GF8(0); 2*n]); // VectorAesState::new(x12_x12.n);
-    // x^15 = x^12 * x^3 and x^14 = x^12 * x^2 in one round
-    party.mul(&mut x15_x14.0, &mut x15_x14.1, &x12_x12.0, &x12_x12.1, &x3_x2.0, &x3_x2.1)?;
+    let mut x15_x14 = (vec![GF8(0); 2 * n], vec![GF8(0); 2 * n]); // VectorAesState::new(x12_x12.n);
+                                                                  // x^15 = x^12 * x^3 and x^14 = x^12 * x^2 in one round
+    party.mul(
+        &mut x15_x14.0,
+        &mut x15_x14.1,
+        &x12_x12.0,
+        &x12_x12.1,
+        &x3_x2.0,
+        &x3_x2.1,
+    )?;
 
     // x^15 square in-place x^240 = (x^15)^16
     for i in 0..n {
@@ -152,7 +192,14 @@ pub fn gf8_inv_layer<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, si
     }
     // x^254 = x^240 * x^14
     // write directly to output buffers si,sii
-    party.mul(si, sii, &x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..])
+    party.mul(
+        si,
+        sii,
+        &x15_x14.0[..n],
+        &x15_x14.1[..n],
+        &x15_x14.0[n..],
+        &x15_x14.1[n..],
+    )
 }
 
 fn gf8_inv_layer_opt(party: &mut MainParty, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
@@ -199,7 +246,7 @@ fn gf8_inv_layer_opt_party<P: Party>(party: &mut P, si: &mut [GF8], sii: &mut [G
     }
     for i in 0..n {
         let tmp = x3i[i] + x3ii[i];
-        x14x15ii[n+i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
+        x14x15ii[n + i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
     }
     // send to P+1
     party.send_field::<GF8>(Direction::Next, &x14x15ii, 2*n);
@@ -236,22 +283,39 @@ fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
 pub fn input_round<F: Field>(party: &mut MainParty, input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> where ChaCha20Rng: FieldRngExt<F> {
     let n = input.len();
     // create 3n random elements
-    let random = party.generate_random(3*n);
-    let my_random = output_round(party, &random[..n], &random[n..2*n], &random[2*n..])?;
+    let random = party.generate_random(3 * n);
+    let my_random = output_round(party, &random[..n], &random[n..2 * n], &random[2 * n..])?;
 
     let (mut pi_random, pii_random, mut piii_random) = match party.i {
-        0 => (random[..n].to_vec(), random[n..2*n].to_vec(), random[2*n..].to_vec()),
-        1 => (random[n..2*n].to_vec(), random[2*n..].to_vec(), random[..n].to_vec()),
-        2 => (random[2*n..].to_vec(), random[..n].to_vec(), random[n..2*n].to_vec()),
+        0 => (
+            random[..n].to_vec(),
+            random[n..2 * n].to_vec(),
+            random[2 * n..].to_vec(),
+        ),
+        1 => (
+            random[n..2 * n].to_vec(),
+            random[2 * n..].to_vec(),
+            random[..n].to_vec(),
+        ),
+        2 => (
+            random[2 * n..].to_vec(),
+            random[..n].to_vec(),
+            random[n..2 * n].to_vec(),
+        ),
         _ => unreachable!(),
     };
 
-    izip!(pi_random.iter_mut(), input, my_random).for_each(|(pi_random, inp, rand)| pi_random.sii += *inp - rand);
+    izip!(pi_random.iter_mut(), input, my_random)
+        .for_each(|(pi_random, inp, rand)| pi_random.sii += *inp - rand);
 
     // send sii to P+1
-    party.io().send_field::<F>(Direction::Next, pi_random.iter().map(|rss| &rss.sii), n);
+    party
+        .io()
+        .send_field::<F>(Direction::Next, pi_random.iter().map(|rss| &rss.sii), n);
     // receive si from P-1
-    let rcv_prev_si = party.io().receive_field(Direction::Previous, piii_random.len());
+    let rcv_prev_si = party
+        .io()
+        .receive_field(Direction::Previous, piii_random.len());
 
     let my_input = pi_random;
     let next_input = pii_random;
@@ -275,27 +339,50 @@ pub fn input_round<F: Field>(party: &mut MainParty, input: &[F]) -> MpcResult<(V
 pub fn input_round_aes_states(party: &mut MainParty, input: Vec<Vec<GF8>>) -> MpcResult<(VectorAesState, VectorAesState, VectorAesState)> {
     let n = input.len();
     // create 3n*16 random elements
-    let random = party.generate_random(3*16*n);
-    let my_random = output_round(party, &random[..n*16], &random[n*16..2*n*16], &random[2*n*16..])?;
+    let random = party.generate_random(3 * 16 * n);
+    let my_random = output_round(
+        party,
+        &random[..n * 16],
+        &random[n * 16..2 * n * 16],
+        &random[2 * n * 16..],
+    )?;
 
     let (mut pi_random, pii_random, mut piii_random) = match party.i {
-        0 => (random[..n*16].to_vec(), random[n*16..2*n*16].to_vec(), random[2*n*16..].to_vec()),
-        1 => (random[n*16..2*n*16].to_vec(), random[2*n*16..].to_vec(), random[..n*16].to_vec()),
-        2 => (random[2*n*16..].to_vec(), random[..n*16].to_vec(), random[n*16..2*n*16].to_vec()),
+        0 => (
+            random[..n * 16].to_vec(),
+            random[n * 16..2 * n * 16].to_vec(),
+            random[2 * n * 16..].to_vec(),
+        ),
+        1 => (
+            random[n * 16..2 * n * 16].to_vec(),
+            random[2 * n * 16..].to_vec(),
+            random[..n * 16].to_vec(),
+        ),
+        2 => (
+            random[2 * n * 16..].to_vec(),
+            random[..n * 16].to_vec(),
+            random[n * 16..2 * n * 16].to_vec(),
+        ),
         _ => unreachable!(),
     };
 
-    for (i,input_block) in input.into_iter().enumerate() {
+    for (i, input_block) in input.into_iter().enumerate() {
         debug_assert_eq!(input_block.len(), 16);
         for j in 0..16 {
-            pi_random[16*i+j].sii += input_block[j] - my_random[16*i+j];
+            pi_random[16 * i + j].sii += input_block[j] - my_random[16 * i + j];
         }
     }
 
     // send sii to P+1
-    party.io().send_field::<GF8>(Direction::Next, pi_random.iter().map(|rss| &rss.sii), 16*n);
+    party.io().send_field::<GF8>(
+        Direction::Next,
+        pi_random.iter().map(|rss| &rss.sii),
+        16 * n,
+    );
     // receive si from P-1
-    let rcv_prev_si = party.io().receive_field(Direction::Previous, piii_random.len());
+    let rcv_prev_si = party
+        .io()
+        .receive_field(Direction::Previous, piii_random.len());
 
     let my_input = pi_random;
     let next_input = pii_random;
@@ -324,29 +411,54 @@ pub fn output_round<F: Field>(party: &mut MainParty, to_p1: &[RssShare<F>], to_p
     let (my, siii) = match party.i {
         0 => {
             // send my share to P2
-            party.io().send_field::<F>(Direction::Next, to_p2.iter().map(|rss| &rss.si), to_p2.len());
+            party.io().send_field::<F>(
+                Direction::Next,
+                to_p2.iter().map(|rss| &rss.si),
+                to_p2.len(),
+            );
             // receive s3 from P3
-            let s3 = party.io().receive_field(Direction::Previous, to_p1.len()).rcv()?;
+            let s3 = party
+                .io()
+                .receive_field(Direction::Previous, to_p1.len())
+                .rcv()?;
             (to_p1, s3)
-        },
+        }
         1 => {
             // send my share to P3
-            party.io().send_field::<F>(Direction::Next, to_p3.iter().map(|rss| &rss.si), to_p3.len());
+            party.io().send_field::<F>(
+                Direction::Next,
+                to_p3.iter().map(|rss| &rss.si),
+                to_p3.len(),
+            );
             // receive s1 from P1
-            let s1 = party.io().receive_field(Direction::Previous, to_p2.len()).rcv()?;
+            let s1 = party
+                .io()
+                .receive_field(Direction::Previous, to_p2.len())
+                .rcv()?;
             (to_p2, s1)
-        },
+        }
         2 => {
             // send my share to P1
-            party.io().send_field::<F>(Direction::Next, to_p1.iter().map(|rss| &rss.si), to_p1.len());
+            party.io().send_field::<F>(
+                Direction::Next,
+                to_p1.iter().map(|rss| &rss.si),
+                to_p1.len(),
+            );
             // receive s2 from P2
-            let s2 = party.io().receive_field(Direction::Previous, to_p3.len()).rcv()?;
+            let s2 = party
+                .io()
+                .receive_field(Direction::Previous, to_p3.len())
+                .rcv()?;
             (to_p3, s2)
-        },
+        }
         _ => unreachable!(),
     };
     debug_assert_eq!(my.len(), siii.len());
-    let sum = my.into_iter().zip(siii).map(|(rss, siii)| rss.si + rss.sii + siii).collect();
+    let sum = my
+        .into_iter()
+        .zip(siii)
+        .map(|(rss, siii)| rss.si + rss.sii + siii)
+        .collect();
     party.io().wait_for_completion();
     Ok(sum)
 }
@@ -382,16 +494,23 @@ where ChaCha20Rng: FieldRngExt<F>
 pub mod test {
     use std::thread::JoinHandle;
 
-    use rand::thread_rng;
-    use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes};
-    use crate::chida::online::{input_round, input_round_aes_states, mul, output_round, VectorAesState};
+    use crate::aes::test::{
+        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
+        test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
+    };
+    use crate::chida::online::{
+        input_round, input_round_aes_states, mul, output_round, VectorAesState,
+    };
     use crate::chida::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
     use crate::network::ConnectedParty;
     use crate::party::MainParty;
     use crate::party::test::{localhost_connect, PartySetup, TestSetup};
     use crate::share::gf8::GF8;
+    use crate::share::test::{
+        assert_eq, consistent, random_secret_shared_vector, secret_share_vector,
+    };
     use crate::share::{FieldRngExt, RssShare};
-    use crate::share::test::{assert_eq, consistent, random_secret_shared_vector, secret_share_vector};
+    use rand::thread_rng;
 
     use super::square_layer;
 
@@ -449,8 +568,8 @@ pub mod test {
     fn square_gf8() {
         let x = (0..256).map(|i| GF8(i as u8)).collect::<Vec<_>>();
         let sq = square_layer(&x);
-        for (x,x2) in x.into_iter().zip(sq) {
-            assert_eq!(x*x, x2);
+        for (x, x2) in x.into_iter().zip(sq) {
+            assert_eq!(x * x, x2);
         }
     }
 
@@ -464,11 +583,14 @@ pub mod test {
             move |p: &mut MainParty| {
                 let mut ci = vec![GF8(0); a.len()];
                 let mut cii = vec![GF8(0); a.len()];
-                let (ai, aii): (Vec<_>, Vec<_>) = a.into_iter().map(|r|(r.si, r.sii)).unzip();
-                let (bi, bii): (Vec<_>, Vec<_>) = b.into_iter().map(|r|(r.si, r.sii)).unzip();
+                let (ai, aii): (Vec<_>, Vec<_>) = a.into_iter().map(|r| (r.si, r.sii)).unzip();
+                let (bi, bii): (Vec<_>, Vec<_>) = b.into_iter().map(|r| (r.si, r.sii)).unzip();
                 mul(p, &mut ci, &mut cii, &ai, &aii, &bi, &bii).unwrap();
                 assert_eq!(ci.len(), cii.len());
-                ci.into_iter().zip(cii).map(|(ci, cii)| RssShare::from(ci, cii)).collect::<Vec<_>>()
+                ci.into_iter()
+                    .zip(cii)
+                    .map(|(ci, cii)| RssShare::from(ci, cii))
+                    .collect::<Vec<_>>()
             }
         };
 
@@ -519,21 +641,21 @@ pub mod test {
     fn input_aesstate() {
         const N: usize = 10;
         let mut rng = thread_rng();
-        let in1 = rng.generate(16*N);
-        let in2 = rng.generate(16*N);
-        let in3 = rng.generate(16*N);
+        let in1 = rng.generate(16 * N);
+        let in2 = rng.generate(16 * N);
+        let in3 = rng.generate(16 * N);
         let program = |my_input: Vec<GF8>| {
             move |p: &mut MainParty| {
                 let mut v = Vec::with_capacity(N);
                 for i in 0..N {
                     let mut block = Vec::with_capacity(16);
                     for j in 0..16 {
-                        block.push(my_input[16*i+j]);
+                        block.push(my_input[16 * i + j]);
                     }
                     v.push(block);
                 }
-                let (a,b,c) = input_round_aes_states(p, v).unwrap();
-                (a,b,c)
+                let (a, b, c) = input_round_aes_states(p, v).unwrap();
+                (a, b, c)
             }
         };
         let (h1, h2, h3) = PartySetup::localhost_setup(program(in1.clone()), program(in2.clone()), program(in3.clone()));
@@ -541,15 +663,23 @@ pub mod test {
         let ((a2, b2, c2), _) = h2.join().unwrap();
         let ((a3, b3, c3), _) = h3.join().unwrap();
 
-        fn check(expected_input: Vec<GF8>, x1: VectorAesState, x2: VectorAesState, x3: VectorAesState) {
+        fn check(
+            expected_input: Vec<GF8>,
+            x1: VectorAesState,
+            x2: VectorAesState,
+            x3: VectorAesState,
+        ) {
             let x1 = x1.to_bytes();
             let x2 = x2.to_bytes();
             let x3 = x3.to_bytes();
             assert_eq!(expected_input.len(), x1.len());
             assert_eq!(expected_input.len(), x2.len());
             assert_eq!(expected_input.len(), x3.len());
-            
-            for (input, (x1, (x2, x3))) in expected_input.into_iter().zip(x1.into_iter().zip(x2.into_iter().zip(x3))) {
+
+            for (input, (x1, (x2, x3))) in expected_input
+                .into_iter()
+                .zip(x1.into_iter().zip(x2.into_iter().zip(x3)))
+            {
                 consistent(&x1, &x2, &x3);
                 assert_eq(x1, x2, x3, input);
             }
@@ -578,12 +708,20 @@ pub mod test {
         let ((a2, b2, c2), _) = h2.join().unwrap();
         let ((a3, b3, c3), _) = h3.join().unwrap();
 
-        fn check(expected_input: Vec<GF8>, x1: Vec<RssShare<GF8>>, x2: Vec<RssShare<GF8>>, x3: Vec<RssShare<GF8>>) {
+        fn check(
+            expected_input: Vec<GF8>,
+            x1: Vec<RssShare<GF8>>,
+            x2: Vec<RssShare<GF8>>,
+            x3: Vec<RssShare<GF8>>,
+        ) {
             assert_eq!(expected_input.len(), x1.len());
             assert_eq!(expected_input.len(), x2.len());
             assert_eq!(expected_input.len(), x3.len());
-            
-            for (input, (x1, (x2, x3))) in expected_input.into_iter().zip(x1.into_iter().zip(x2.into_iter().zip(x3))) {
+
+            for (input, (x1, (x2, x3))) in expected_input
+                .into_iter()
+                .zip(x1.into_iter().zip(x2.into_iter().zip(x3)))
+            {
                 consistent(&x1, &x2, &x3);
                 assert_eq(x1, x2, x3, input);
             }

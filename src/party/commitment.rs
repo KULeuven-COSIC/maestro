@@ -1,6 +1,6 @@
-use rand::{CryptoRng, Rng};
-use sha2::{Sha256, Digest};
 use crate::party::error::{MpcError, MpcResult};
+use rand::{CryptoRng, Rng};
+use sha2::{Digest, Sha256};
 
 const COMMITMENT_SEC_PARAM: usize = 128 / 8;
 const SHA256_OUTPUT_SIZE: usize = 256 / 8;
@@ -35,9 +35,9 @@ pub fn open(commitment: &[u8], msg: &[u8]) -> MpcResult<()> {
 
 #[cfg(test)]
 mod test {
-    use rand::thread_rng;
     use crate::party::commitment::{commit, open};
     use crate::party::error::MpcError;
+    use rand::thread_rng;
 
     #[test]
     fn correctness() {
@@ -60,7 +60,7 @@ mod test {
         message[5] ^= 0x4;
         if let Err(MpcError::CommitmentError) = open(&commitment, &message) {
             // ok
-        }else{
+        } else {
             panic!()
         }
 
@@ -69,7 +69,7 @@ mod test {
         commitment[3] ^= 0x80;
         if let Err(MpcError::CommitmentError) = open(&commitment, &message) {
             // ok
-        }else{
+        } else {
             panic!()
         }
     }

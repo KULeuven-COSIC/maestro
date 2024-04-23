@@ -34,10 +34,15 @@ pub fn gf4_circuit_benchmark(connected: ConnectedParty, simd: usize, n_worker_th
     let online_comm_stats = party.io().reset_comm_stats();
     let _ = aes::output(&mut party.0, output).unwrap();
     party.0.teardown().unwrap();
-    
+
     println!("Finished benchmark");
-    
-    println!("Party {}: GF(2^4) circuit with SIMD={} took {}s", party.0.party_index(), simd, duration.as_secs_f64());
+
+    println!(
+        "Party {}: GF(2^4) circuit with SIMD={} took {}s",
+        party.0.party_index(),
+        simd,
+        duration.as_secs_f64()
+    );
     println!("Setup:");
     setup_comm_stats.print_comm_statistics(party.0.party_index());
     println!("Pre-Processing:");
@@ -71,13 +76,21 @@ impl BenchmarkProtocol for GF4CircuitBenchmark {
         println!("After output");
         party.0.teardown().unwrap();
         println!("After teardown");
-        
-        BenchmarkResult::new(Duration::from_secs(0), duration, CombinedCommStats::empty(), online_comm_stats, party.0.get_additional_timers())
+
+        BenchmarkResult::new(
+            Duration::from_secs(0),
+            duration,
+            CombinedCommStats::empty(),
+            online_comm_stats,
+            party.0.get_additional_timers(),
+        )
     }
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty
-where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
+where
+    ChaCha20Rng: FieldRngExt<F>,
+    Sha256: FieldDigestExt<F>,
 {
     type Rng = ChaCha20Rng;
     type Digest = Sha256;
@@ -103,11 +116,22 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     }
 
     // all parties input the same number of inputs
-    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    fn input_round(
+        &mut self,
+        my_input: &[F],
+    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         self.0.input_round(my_input)
     }
 
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
+    fn mul(
+        &mut self,
+        ci: &mut [F],
+        cii: &mut [F],
+        ai: &[F],
+        aii: &[F],
+        bi: &[F],
+        bii: &[F],
+    ) -> MpcResult<()> {
         self.0.mul(ci, cii, ai, aii, bi, bii)
     }
 
@@ -137,13 +161,17 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
     }
 }
 
-fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(party: &mut P, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(
+    party: &mut P,
+    si: &mut [GF8],
+    sii: &mut [GF8],
+) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     let n = si.len();
     // Step 1: WOL-conversion
-    let (ah_i, mut al_i): (Vec<GF4>,Vec<GF4>) = si.iter().map(wol_map).unzip();
-    let (ah_ii, mut al_ii): (Vec<GF4>,Vec<GF4>) = sii.iter().map(wol_map).unzip();
-    
+    let (ah_i, mut al_i): (Vec<GF4>, Vec<GF4>) = si.iter().map(wol_map).unzip();
+    let (ah_ii, mut al_ii): (Vec<GF4>, Vec<GF4>) = sii.iter().map(wol_map).unzip();
+
     // compute v^2 = (e*ah^2 + (ah*al) + al^2)^2
     let mut vi = vec![GF4::default(); n];
     let mut vii = vec![GF4::default(); n];
@@ -152,7 +180,7 @@ fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(party: &mut P, si: &mut [GF8]
         *dst += ah.square().mul_e() + al.square();
         *dst = dst.square();
     });
-    izip!(vii.iter_mut(), &ah_ii, &al_ii).for_each(|(dst, ah, al)|  {
+    izip!(vii.iter_mut(), &ah_ii, &al_ii).for_each(|(dst, ah, al)| {
         *dst += ah.square().mul_e() + al.square();
         *dst = dst.square();
     });
@@ -160,7 +188,7 @@ fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(party: &mut P, si: &mut [GF8]
     // compute v^-1 via v^2 * v^4 * v^8
     let mut vp4_si = vi.iter().map(GF4::square).collect_vec();
     let mut vp4_sii = vii.iter().map(GF4::square).collect_vec();
-    
+
     let mut vp6_si = vec![GF4::default(); n];
     let mut vp6_sii = vec![GF4::default(); n];
     party.mul(&mut vp6_si, &mut vp6_sii, &vi, &vii, &vp4_si, &vp4_sii)?;
@@ -172,22 +200,43 @@ fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(party: &mut P, si: &mut [GF8]
 
     let mut v_inv_i = vi;
     let mut v_inv_ii = vii;
-    party.mul(&mut v_inv_i, &mut v_inv_ii, &vp6_si, &vp6_sii, &vp8_si, &vp8_sii)?;
+    party.mul(
+        &mut v_inv_i,
+        &mut v_inv_ii,
+        &vp6_si,
+        &vp6_sii,
+        &vp8_si,
+        &vp8_sii,
+    )?;
 
     // compute bh = ah * v_inv and bl = (ah + al) * v_inv
-    let mut bh_bl_i = vec![GF4::default(); 2*n];
-    let mut bh_bl_ii = vec![GF4::default(); 2*n];
+    let mut bh_bl_i = vec![GF4::default(); 2 * n];
+    let mut bh_bl_ii = vec![GF4::default(); 2 * n];
 
     let v_inv_v_inv_i = append(&v_inv_i, &v_inv_i);
     let v_inv_v_inv_ii = append(&v_inv_ii, &v_inv_ii);
-    al_i.iter_mut().zip(ah_i.iter()).for_each(|(dst, ah)| *dst += *ah);
-    al_ii.iter_mut().zip(ah_ii.iter()).for_each(|(dst, ah)| *dst += *ah);
+    al_i.iter_mut()
+        .zip(ah_i.iter())
+        .for_each(|(dst, ah)| *dst += *ah);
+    al_ii
+        .iter_mut()
+        .zip(ah_ii.iter())
+        .for_each(|(dst, ah)| *dst += *ah);
     let ah_al_i = append(&ah_i, &al_i);
     let ah_al_ii = append(&ah_ii, &al_ii);
-    party.mul(&mut bh_bl_i, &mut bh_bl_ii, &ah_al_i, &ah_al_ii, &v_inv_v_inv_i, &v_inv_v_inv_ii)?;
+    party.mul(
+        &mut bh_bl_i,
+        &mut bh_bl_ii,
+        &ah_al_i,
+        &ah_al_ii,
+        &v_inv_v_inv_i,
+        &v_inv_v_inv_ii,
+    )?;
 
-    izip!(si.iter_mut(), &bh_bl_i[..n], &bh_bl_i[n..]).for_each(|(si, bh, bl)| *si = wol_inv_map(bh, bl));
-    izip!(sii.iter_mut(), &bh_bl_ii[..n], &bh_bl_ii[n..]).for_each(|(sii, bh, bl)| *sii = wol_inv_map(bh, bl));
+    izip!(si.iter_mut(), &bh_bl_i[..n], &bh_bl_i[n..])
+        .for_each(|(si, bh, bl)| *si = wol_inv_map(bh, bl));
+    izip!(sii.iter_mut(), &bh_bl_ii[..n], &bh_bl_ii[n..])
+        .for_each(|(sii, bh, bl)| *sii = wol_inv_map(bh, bl));
 
     Ok(())
 }
@@ -215,11 +264,11 @@ fn gf8_inv_via_gf4_mul_opt_mt(party: &mut MainParty, si: &mut [GF8], sii: &mut [
 
 fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(party: &mut P, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
-    
+
     // Step 1: WOL-conversion
     let (ah_i, mut al_i) = wol_bitslice_gf4(si);
     let (ah_ii, mut al_ii) = wol_bitslice_gf4(sii);
-    
+
     let n = ah_i.len();
 
     // compute v^2 = (e*ah^2 + (ah*al) + al^2)^2
@@ -230,7 +279,7 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(party: &mut P, si: &mut [GF8], sii:
         *dst += ah.square_mul_e() + al.square();
         *dst = dst.square();
     });
-    izip!(vii.iter_mut(), &ah_ii, &al_ii).for_each(|(dst, ah, al)|  {
+    izip!(vii.iter_mut(), &ah_ii, &al_ii).for_each(|(dst, ah, al)| {
         *dst += ah.square_mul_e() + al.square();
         *dst = dst.square();
     });
@@ -238,7 +287,7 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(party: &mut P, si: &mut [GF8], sii:
     // compute v^-1 via v^2 * v^4 * v^8
     let mut vp4_si = vi.iter().map(|x| x.square()).collect_vec();
     let mut vp4_sii = vii.iter().map(|x| x.square()).collect_vec();
-    
+
     let mut vp6_si = vec![BsGF4::default(); n];
     let mut vp6_sii = vec![BsGF4::default(); n];
     chida::online::mul_no_sync(party, &mut vp6_si, &mut vp6_sii, &vi, &vii, &vp4_si, &vp4_sii)?;
@@ -253,13 +302,18 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(party: &mut P, si: &mut [GF8], sii:
     chida::online::mul_no_sync(party, &mut v_inv_i, &mut v_inv_ii, &vp6_si, &vp6_sii, &vp8_si, &vp8_sii)?;
 
     // compute bh = ah * v_inv and bl = (ah + al) * v_inv
-    let mut bh_bl_i = vec![BsGF4::default(); 2*n];
-    let mut bh_bl_ii = vec![BsGF4::default(); 2*n];
+    let mut bh_bl_i = vec![BsGF4::default(); 2 * n];
+    let mut bh_bl_ii = vec![BsGF4::default(); 2 * n];
 
     let v_inv_v_inv_i = append(&v_inv_i, &v_inv_i);
     let v_inv_v_inv_ii = append(&v_inv_ii, &v_inv_ii);
-    al_i.iter_mut().zip(ah_i.iter()).for_each(|(dst, ah)| *dst += *ah);
-    al_ii.iter_mut().zip(ah_ii.iter()).for_each(|(dst, ah)| *dst += *ah);
+    al_i.iter_mut()
+        .zip(ah_i.iter())
+        .for_each(|(dst, ah)| *dst += *ah);
+    al_ii
+        .iter_mut()
+        .zip(ah_ii.iter())
+        .for_each(|(dst, ah)| *dst += *ah);
     let ah_al_i = append(&ah_i, &al_i);
     let ah_al_ii = append(&ah_ii, &al_ii);
     chida::online::mul_no_sync(party, &mut bh_bl_i, &mut bh_bl_ii, &ah_al_i, &ah_al_ii, &v_inv_v_inv_i, &v_inv_v_inv_ii)?;
@@ -273,7 +327,7 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(party: &mut P, si: &mut [GF8], sii:
 /// Concatenates two vectors
 #[inline]
 fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
-    let mut res = vec![F::zero(); a.len() + b.len()];
+    let mut res = vec![F::ZERO; a.len() + b.len()];
     res[..a.len()].copy_from_slice(a);
     res[a.len()..].copy_from_slice(b);
     res
@@ -283,7 +337,14 @@ fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
 mod test {
     use std::thread::JoinHandle;
 
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, network::ConnectedParty, party::test::{localhost_connect, TestSetup}};
+    use crate::{
+        aes::test::{
+            test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
+            test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
+        },
+        network::ConnectedParty,
+        party::test::{localhost_connect, TestSetup},
+    };
 
     use super::GF4CircuitSemihonestParty;
 

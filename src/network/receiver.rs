@@ -2,10 +2,10 @@ use std::marker::PhantomData;
 
 use crate::share::Field;
 #[cfg(feature = "verbose-timing")]
-use {std::time::Instant, crate::network::task::IO_TIMER};
+use {crate::network::task::IO_TIMER, std::time::Instant};
 
 #[must_use]
-pub struct FieldVectorReceiver<F: Field>{
+pub struct FieldVectorReceiver<F: Field> {
     inner: oneshot::Receiver<Vec<u8>>,
     expected_len: usize,
     phantom: PhantomData<F>,
@@ -13,7 +13,11 @@ pub struct FieldVectorReceiver<F: Field>{
 
 impl<F: Field> FieldVectorReceiver<F> {
     pub fn new(inner: oneshot::Receiver<Vec<u8>>, expected_len: usize) -> Self {
-        Self {inner, expected_len, phantom: PhantomData}
+        Self {
+            inner,
+            expected_len,
+            phantom: PhantomData,
+        }
     }
 
     pub fn rcv(self) -> Result<Vec<F>, oneshot::RecvError> {
@@ -33,21 +37,21 @@ impl<F: Field> FieldVectorReceiver<F> {
                 }
                 #[cfg(not(feature = "verbose-timing"))]
                 Ok(F::from_byte_vec(bytes, self.expected_len))
-            },
-            Err(err) => Err(err)
+            }
+            Err(err) => Err(err),
         }
     }
 }
 
 #[must_use]
-pub struct FieldSliceReceiver<'a, F: Field>{
+pub struct FieldSliceReceiver<'a, F: Field> {
     inner: oneshot::Receiver<Vec<u8>>,
     slice: &'a mut [F],
 }
 
 impl<'a, F: Field> FieldSliceReceiver<'a, F> {
     pub fn new(inner: oneshot::Receiver<Vec<u8>>, slice: &'a mut [F]) -> Self {
-        Self {inner, slice}
+        Self { inner, slice }
     }
 
     pub fn rcv(mut self) -> Result<(), oneshot::RecvError> {
@@ -67,8 +71,8 @@ impl<'a, F: Field> FieldSliceReceiver<'a, F> {
                 }
                 #[cfg(not(feature = "verbose-timing"))]
                 Ok(F::from_byte_slice(bytes, &mut self.slice))
-            },
-            Err(err) => Err(err)
+            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -76,12 +80,12 @@ impl<'a, F: Field> FieldSliceReceiver<'a, F> {
 #[must_use]
 pub struct SliceReceiver<'a> {
     inner: oneshot::Receiver<Vec<u8>>,
-    slice: &'a mut [u8]
+    slice: &'a mut [u8],
 }
 
 impl<'a> SliceReceiver<'a> {
     pub fn new(inner: oneshot::Receiver<Vec<u8>>, slice: &'a mut [u8]) -> Self {
-        Self {inner, slice}
+        Self { inner, slice }
     }
 
     pub fn rcv(self) -> Result<(), oneshot::RecvError> {
@@ -95,8 +99,8 @@ impl<'a> SliceReceiver<'a> {
                     IO_TIMER.lock().unwrap().report_time("io", io_end);
                 }
                 Ok(self.slice.copy_from_slice(&bytes))
-            },
-            Err(err) => Err(err)
+            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -108,7 +112,7 @@ pub struct VecReceiver {
 
 impl VecReceiver {
     pub fn new(inner: oneshot::Receiver<Vec<u8>>) -> Self {
-        Self {inner}
+        Self { inner }
     }
 
     pub fn recv(self) -> Result<Vec<u8>, oneshot::RecvError> {
@@ -122,8 +126,8 @@ impl VecReceiver {
                     IO_TIMER.lock().unwrap().report_time("io", io_end);
                 }
                 Ok(bytes)
-            },
-            Err(err) => Err(err)
+            }
+            Err(err) => Err(err),
         }
     }
 }

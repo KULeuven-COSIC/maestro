@@ -172,7 +172,7 @@ mod test {
             assert_eq!(o1.alpha.len(), o2.alpha.len());
             assert_eq!(o2.alpha.len(), o3.alpha.len());
             for (alpha1, alpha2, alpha3) in izip!(o1.alpha, o2.alpha, o3.alpha) {
-                assert_eq!(GF8::zero(), alpha1 + alpha2 + alpha3);
+                assert_eq!(GF8::ZERO, alpha1 + alpha2 + alpha3);
             }
 
             assert_eq!(o1.random.len(), o2.random.len());

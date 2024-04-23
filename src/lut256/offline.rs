@@ -40,14 +40,16 @@ fn generate_ohv256_output<P: Party>(party: &mut P, bits: Vec<Vec<RssShare<BsBool
     let rand = un_bitslice8(&bits);
     let ohv256 = generate_ohv(party, bits, 256)?;
     let output = un_bitslice(&ohv256);
-    Ok(rand.into_iter().zip(output.into_iter()).map(|(rand_rss, (ohv_si, ohv_sii))| {
-        RndOhv256Output {
+    Ok(rand
+        .into_iter()
+        .zip(output.into_iter())
+        .map(|(rand_rss, (ohv_si, ohv_sii))| RndOhv256Output {
             random_si: rand_rss.si,
             random_sii: rand_rss.sii,
             si: ohv_si,
             sii: ohv_sii,
-        }
-    }).collect())
+        })
+        .collect())
 }
 
 /// bits are in lsb-first order
@@ -55,25 +57,36 @@ fn generate_ohv<P: Party>(party: &mut P, mut bits: Vec<Vec<RssShare<BsBool16>>>,
     if n == 2 {
         debug_assert_eq!(bits.len(), 1);
         let b = bits[0].clone();
-        let b_prime = b.iter().map(|rss| *rss + party.constant(BsBool16::one())).collect();
+        let b_prime = b
+            .iter()
+            .map(|rss| *rss + party.constant(BsBool16::ONE))
+            .collect();
         Ok(vec![b_prime, b])
-    }else{
-        let msb = bits.remove(bits.len()-1);
-        let f = generate_ohv(party, bits, n/2)?;
+    } else {
+        let msb = bits.remove(bits.len() - 1);
+        let f = generate_ohv(party, bits, n / 2)?;
         // Mult
-        let e_rest = simple_mul(party, &msb, &f[..=f.len()-2])?;
+        let e_rest = simple_mul(party, &msb, &f[..=f.len() - 2])?;
         let mut sum_e = Vec::with_capacity(msb.len());
         for i in 0..msb.len() {
-            let mut sum = RssShare::from(BsBool16::zero(), BsBool16::zero());
+            let mut sum = RssShare::from(BsBool16::ZERO, BsBool16::ZERO);
             e_rest.iter().for_each(|v| sum += v[i]);
             sum_e.push(sum);
         }
         let mut e_last = sum_e;
-        e_last.iter_mut().zip(msb).for_each(|(e_sum, v_k)| *e_sum = v_k - *e_sum);
+        e_last
+            .iter_mut()
+            .zip(msb)
+            .for_each(|(e_sum, v_k)| *e_sum = v_k - *e_sum);
         let mut res = Vec::with_capacity(n);
-        izip!(f, e_rest.iter().chain(iter::once(&e_last))).for_each(|(f,e)| {
+        izip!(f, e_rest.iter().chain(iter::once(&e_last))).for_each(|(f, e)| {
             debug_assert_eq!(f.len(), e.len());
-            res.push(f.into_iter().zip(e).map(|(el_f, el_e)| el_f - *el_e).collect_vec());
+            res.push(
+                f.into_iter()
+                    .zip(e)
+                    .map(|(el_f, el_e)| el_f - *el_e)
+                    .collect_vec(),
+            );
         });
         res.extend(e_rest.into_iter().chain(iter::once(e_last)));
         Ok(res)
@@ -85,30 +98,37 @@ fn simple_mul<P: Party>(party: &mut P, msb: &Vec<RssShare<BsBool16>>, other: &[V
     let aii = repeat_n(msb, other.len()).flat_map(|rss_vec| rss_vec.iter().map(|rss|rss.sii)).collect_vec();
     let bi = other.iter().flat_map(|rss_vec| rss_vec.iter().map(|rss|rss.si)).collect_vec();
     let bii = other.iter().flat_map(|rss_vec| rss_vec.iter().map(|rss|rss.sii)).collect_vec();
-    let mut ci = vec![BsBool16::zero(); other.len() * msb.len()];
-    let mut cii = vec![BsBool16::zero(); other.len() * msb.len()];
+    let mut ci = vec![BsBool16::ZERO; other.len() * msb.len()];
+    let mut cii = vec![BsBool16::ZERO; other.len() * msb.len()];
     chida::online::mul_no_sync(party, &mut ci, &mut cii, &ai, &aii, &bi, &bii)?;
     let drain_ci = ci.into_iter();
     let drain_cii = cii.into_iter();
-    let res = izip!(drain_ci.chunks(msb.len()).into_iter(), drain_cii.chunks(msb.len()).into_iter()).map(|(ci, cii)| {
-        izip!(ci,cii).map(|(si, sii)| RssShare::from(si,sii)).collect_vec()
-    }).collect_vec();
+    let res = izip!(
+        drain_ci.chunks(msb.len()).into_iter(),
+        drain_cii.chunks(msb.len()).into_iter()
+    )
+    .map(|(ci, cii)| {
+        izip!(ci, cii)
+            .map(|(si, sii)| RssShare::from(si, sii))
+            .collect_vec()
+    })
+    .collect_vec();
     Ok(res)
 }
 
-fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv,RndOhv)> {
+fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv, RndOhv)> {
     debug_assert_eq!(bs.len(), 256);
-    let mut rnd_ohv_res = vec![([0u64; 4],[0u64; 4]); 16*bs[0].len()];
+    let mut rnd_ohv_res = vec![([0u64; 4], [0u64; 4]); 16 * bs[0].len()];
     for k in 0..16 {
-        let mut res = vec![(0u16,0u16); 16*bs[0].len()];
+        let mut res = vec![(0u16, 0u16); 16 * bs[0].len()];
         for i in 0..16 {
-            let bit = &bs[16*k+i];
+            let bit = &bs[16 * k + i];
             for j in 0..bit.len() {
                 let si = bit[j].si.as_u16();
                 let sii = bit[j].sii.as_u16();
                 for k in 0..16 {
-                    res[16*j+k].0 |= ((si >> k) & 0x1) << i;
-                    res[16*j+k].1 |= ((sii >> k) & 0x1) << i;
+                    res[16 * j + k].0 |= ((si >> k) & 0x1) << i;
+                    res[16 * j + k].1 |= ((sii >> k) & 0x1) << i;
                 }
             }
         }
@@ -128,26 +148,31 @@ fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv,RndOhv)> {
             }
         });
     }
-    rnd_ohv_res.into_iter().map(|(ohv_si, ohv_sii)| (RndOhv::new(ohv_si), RndOhv::new(ohv_sii))).collect()
+    rnd_ohv_res
+        .into_iter()
+        .map(|(ohv_si, ohv_sii)| (RndOhv::new(ohv_si), RndOhv::new(ohv_sii)))
+        .collect()
 }
 
 fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {
     debug_assert_eq!(bs.len(), 8);
-    let mut res = vec![(0u8, 0u8); bs[0].len()*16];
+    let mut res = vec![(0u8, 0u8); bs[0].len() * 16];
     for i in 0..8 {
         let bit = &bs[i];
         for j in 0..bit.len() {
             for k in 0..16 {
-                let mut si = res[16*j+k].0;
-                let mut sii = res[16*j+k].1;
+                let mut si = res[16 * j + k].0;
+                let mut sii = res[16 * j + k].1;
                 si |= (((bit[j].si.as_u16() >> k) & 0x1) << i) as u8;
                 sii |= (((bit[j].sii.as_u16() >> k) & 0x1) << i) as u8;
-                res[16*j+k].0 = si;
-                res[16*j+k].1 = sii;
+                res[16 * j + k].0 = si;
+                res[16 * j + k].1 = sii;
             }
         }
     }
-    res.into_iter().map(|(si,sii)| RssShare::from(GF8(si), GF8(sii))).collect()
+    res.into_iter()
+        .map(|(si, sii)| RssShare::from(GF8(si), GF8(sii)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -159,8 +184,16 @@ mod test {
 
     use super::{generate_ohv, un_bitslice8};
 
-    fn secret_share_vecvec<R: Rng + CryptoRng, F: Field>(rng: &mut R, v: &Vec<Vec<F>>) -> (Vec<Vec<RssShare<F>>>, Vec<Vec<RssShare<F>>>, Vec<Vec<RssShare<F>>>)
-    where R: FieldRngExt<F>
+    fn secret_share_vecvec<R: Rng + CryptoRng, F: Field>(
+        rng: &mut R,
+        v: &Vec<Vec<F>>,
+    ) -> (
+        Vec<Vec<RssShare<F>>>,
+        Vec<Vec<RssShare<F>>>,
+        Vec<Vec<RssShare<F>>>,
+    )
+    where
+        R: FieldRngExt<F>,
     {
         let mut s1 = Vec::with_capacity(v.len());
         let mut s2 = Vec::with_capacity(v.len());
@@ -175,21 +208,26 @@ mod test {
     }
 
     // ohv bits are in lsb-first order
-    fn check_ohv_correct(ohv_bits1: &[RssShare<BsBool16>], ohv_bits2: &[RssShare<BsBool16>], ohv_bits3: &[RssShare<BsBool16>], expected: usize) {
+    fn check_ohv_correct(
+        ohv_bits1: &[RssShare<BsBool16>],
+        ohv_bits2: &[RssShare<BsBool16>],
+        ohv_bits3: &[RssShare<BsBool16>],
+        expected: usize,
+    ) {
         assert_eq!(ohv_bits1.len(), ohv_bits2.len());
         assert_eq!(ohv_bits1.len(), ohv_bits3.len());
         let reconstructed = izip!(ohv_bits1, ohv_bits2, ohv_bits3).map(|(b1, b2, b3)| {
             consistent(b1, b2, b3);
             let bs = b1.si + b2.si + b3.si;
             // this check only works of bs = 0xffff or 0x0000
-            assert!(bs == BsBool16::zero() || bs == BsBool16::one());
+            assert!(bs == BsBool16::ZERO || bs == BsBool16::ONE);
             bs
         }).collect_vec();
         
-        assert_eq!(reconstructed[expected], BsBool16::one());
+        assert_eq!(reconstructed[expected], BsBool16::ONE);
         for i in 0..reconstructed.len() {
             if i != expected {
-                assert_eq!(reconstructed[i], BsBool16::zero());
+                assert_eq!(reconstructed[i], BsBool16::ZERO);
             }
         }
     }
@@ -207,14 +245,38 @@ mod test {
     #[test]
     fn test_unbitslice8() {
         let input = vec![
-            vec![BsBool16::new(0b1010_1010_1010_1010), BsBool16::new(0b1010_1010_1010_1010)],
-            vec![BsBool16::new(0b1100_1100_1100_1100), BsBool16::new(0b1100_1100_1100_1100)],
-            vec![BsBool16::new(0b1111_0000_1111_0000), BsBool16::new(0b1111_0000_1111_0000)],
-            vec![BsBool16::new(0b1111_1111_0000_0000), BsBool16::new(0b1111_1111_0000_0000)],
-            vec![BsBool16::new(0b0000_0000_0000_0000), BsBool16::new(0b1111_1111_1111_1111)],
-            vec![BsBool16::new(0b0000_0000_0000_0000), BsBool16::new(0b0000_0000_0000_0000)],
-            vec![BsBool16::new(0b0000_0000_0000_0000), BsBool16::new(0b0000_0000_0000_0000)],
-            vec![BsBool16::new(0b0000_0000_0000_0000), BsBool16::new(0b0000_0000_0000_0000)],
+            vec![
+                BsBool16::new(0b1010_1010_1010_1010),
+                BsBool16::new(0b1010_1010_1010_1010),
+            ],
+            vec![
+                BsBool16::new(0b1100_1100_1100_1100),
+                BsBool16::new(0b1100_1100_1100_1100),
+            ],
+            vec![
+                BsBool16::new(0b1111_0000_1111_0000),
+                BsBool16::new(0b1111_0000_1111_0000),
+            ],
+            vec![
+                BsBool16::new(0b1111_1111_0000_0000),
+                BsBool16::new(0b1111_1111_0000_0000),
+            ],
+            vec![
+                BsBool16::new(0b0000_0000_0000_0000),
+                BsBool16::new(0b1111_1111_1111_1111),
+            ],
+            vec![
+                BsBool16::new(0b0000_0000_0000_0000),
+                BsBool16::new(0b0000_0000_0000_0000),
+            ],
+            vec![
+                BsBool16::new(0b0000_0000_0000_0000),
+                BsBool16::new(0b0000_0000_0000_0000),
+            ],
+            vec![
+                BsBool16::new(0b0000_0000_0000_0000),
+                BsBool16::new(0b0000_0000_0000_0000),
+            ],
         ];
         let mut rng = thread_rng();
         let shares = secret_share_vecvec(&mut rng, &input);
@@ -224,17 +286,17 @@ mod test {
         assert_eq!(output1.len(), 32);
         assert_eq!(output2.len(), 32);
         assert_eq!(output3.len(), 32);
-        izip!(output1, output2, output3).enumerate().for_each(|(i, (o1, o2, o3))| {
-            consistent(&o1, &o2, &o3);
-            assert_eq(o1, o2, o3, GF8(i as u8));
-        });
+        izip!(output1, output2, output3)
+            .enumerate()
+            .for_each(|(i, (o1, o2, o3))| {
+                consistent(&o1, &o2, &o3);
+                assert_eq(o1, o2, o3, GF8(i as u8));
+            });
     }
 
     #[test]
     fn generate_ohv2() {
-        let input = vec![
-            vec![BsBool16::zero(), BsBool16::one()],
-        ];
+        let input = vec![vec![BsBool16::ZERO, BsBool16::ONE]];
         let mut rng = thread_rng();
         let shares = secret_share_vecvec(&mut rng, &input);
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
@@ -242,7 +304,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 2).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -257,7 +320,7 @@ mod test {
         let shares1 = transpose(ohv1);
         let shares2 = transpose(ohv2);
         let shares3 = transpose(ohv3);
-        let expected = [0,1];
+        let expected = [0, 1];
         izip!(shares1, shares2, shares3, expected).for_each(|(s1, s2, s3, expected)| {
             check_ohv_correct(&s1, &s2, &s3, expected);
         });
@@ -266,8 +329,8 @@ mod test {
     #[test]
     fn generate_ohv4() {
         let input = vec![
-            vec![BsBool16::zero(), BsBool16::one(), BsBool16::zero(), BsBool16::one()],
-            vec![BsBool16::zero(), BsBool16::zero(), BsBool16::one(), BsBool16::one()],
+            vec![BsBool16::ZERO, BsBool16::ONE, BsBool16::ZERO, BsBool16::ONE],
+            vec![BsBool16::ZERO, BsBool16::ZERO, BsBool16::ONE, BsBool16::ONE],
         ];
         let mut rng = thread_rng();
         let shares = secret_share_vecvec(&mut rng, &input);
@@ -276,7 +339,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 4).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -291,7 +355,7 @@ mod test {
         let shares1 = transpose(ohv1);
         let shares2 = transpose(ohv2);
         let shares3 = transpose(ohv3);
-        let expected = [0,1,2,3];
+        let expected = [0, 1, 2, 3];
         izip!(shares1, shares2, shares3, expected).for_each(|(s1, s2, s3, expected)| {
             check_ohv_correct(&s1, &s2, &s3, expected);
         });
@@ -300,9 +364,36 @@ mod test {
     #[test]
     fn generate_ohv8() {
         let input = vec![
-            vec![BsBool16::zero(), BsBool16::one(), BsBool16::zero(), BsBool16::one(), BsBool16::zero(), BsBool16::one(), BsBool16::zero(), BsBool16::one()],
-            vec![BsBool16::zero(), BsBool16::zero(), BsBool16::one(), BsBool16::one(), BsBool16::zero(), BsBool16::zero(), BsBool16::one(), BsBool16::one()],
-            vec![BsBool16::zero(), BsBool16::zero(), BsBool16::zero(), BsBool16::zero(), BsBool16::one(), BsBool16::one(), BsBool16::one(), BsBool16::one()],
+            vec![
+                BsBool16::ZERO,
+                BsBool16::ONE,
+                BsBool16::ZERO,
+                BsBool16::ONE,
+                BsBool16::ZERO,
+                BsBool16::ONE,
+                BsBool16::ZERO,
+                BsBool16::ONE,
+            ],
+            vec![
+                BsBool16::ZERO,
+                BsBool16::ZERO,
+                BsBool16::ONE,
+                BsBool16::ONE,
+                BsBool16::ZERO,
+                BsBool16::ZERO,
+                BsBool16::ONE,
+                BsBool16::ONE,
+            ],
+            vec![
+                BsBool16::ZERO,
+                BsBool16::ZERO,
+                BsBool16::ZERO,
+                BsBool16::ZERO,
+                BsBool16::ONE,
+                BsBool16::ONE,
+                BsBool16::ONE,
+                BsBool16::ONE,
+            ],
         ];
         let mut rng = thread_rng();
         let shares = secret_share_vecvec(&mut rng, &input);
@@ -311,7 +402,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 8).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -326,7 +418,7 @@ mod test {
         let shares1 = transpose(ohv1);
         let shares2 = transpose(ohv2);
         let shares3 = transpose(ohv3);
-        let expected = [0,1,2,3,4,5,6,7];
+        let expected = [0, 1, 2, 3, 4, 5, 6, 7];
         izip!(shares1, shares2, shares3, expected).for_each(|(s1, s2, s3, expected)| {
             check_ohv_correct(&s1, &s2, &s3, expected);
         });
@@ -341,9 +433,9 @@ mod test {
         for i in 0..n {
             for j in 0..k {
                 let el = if ((i >> j) & 0x1) == 0x1 {
-                    BsBool16::one()
-                }else{
-                    BsBool16::zero()
+                    BsBool16::ONE
+                } else {
+                    BsBool16::ZERO
                 };
                 bits[j].push(el);
             }
@@ -361,7 +453,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 16).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -392,7 +485,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 32).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -423,7 +517,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 64).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -454,7 +549,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 128).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -485,7 +581,8 @@ mod test {
                 generate_ohv(p.as_party_mut(), share, 256).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
@@ -532,22 +629,30 @@ mod test {
                 generate_ohv256_output(p.as_party_mut(), share).unwrap()
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
         let (ohv1, _) = h1.join().unwrap();
         let (ohv2, _) = h2.join().unwrap();
         let (ohv3, _) = h3.join().unwrap();
-        assert_eq!(ohv1.len(), 256*16);
-        assert_eq!(ohv2.len(), 256*16);
-        assert_eq!(ohv3.len(), 256*16);
+        assert_eq!(ohv1.len(), 256 * 16);
+        assert_eq!(ohv2.len(), 256 * 16);
+        assert_eq!(ohv3.len(), 256 * 16);
         let expected = (0..256).flat_map(|i| repeat_n(i, 16));
         izip!(ohv1, ohv2, ohv3, expected).for_each(|(s1, s2, s3, expected)| {
-            consistent(&RssShare::from(s1.random_si, s1.random_sii), &RssShare::from(s2.random_si, s2.random_sii), &RssShare::from(s3.random_si, s3.random_sii));
+            consistent(
+                &RssShare::from(s1.random_si, s1.random_sii),
+                &RssShare::from(s2.random_si, s2.random_sii),
+                &RssShare::from(s3.random_si, s3.random_sii),
+            );
             // check consistency of bitvec
             assert_eq!(s1.sii.0, s2.si.0);
             assert_eq!(s2.sii.0, s3.si.0);
             assert_eq!(s3.sii.0, s1.si.0);
             // random GF8 reconstructs to expected
-            assert_eq!(s1.random_si + s2.random_si + s3.random_si, GF8(expected as u8));
+            assert_eq!(
+                s1.random_si + s2.random_si + s3.random_si,
+                GF8(expected as u8)
+            );
             // reconstructed bitvec has correct bit set
             reconstruct_and_check_rndohv(s1.si, s2.si, s3.si, expected as u8);
         });
@@ -569,7 +674,11 @@ mod test {
         assert_eq!(ohv2.len(), N);
         assert_eq!(ohv3.len(), N);
         izip!(ohv1, ohv2, ohv3).for_each(|(s1, s2, s3)| {
-            consistent(&RssShare::from(s1.random_si, s1.random_sii), &RssShare::from(s2.random_si, s2.random_sii), &RssShare::from(s3.random_si, s3.random_sii));
+            consistent(
+                &RssShare::from(s1.random_si, s1.random_sii),
+                &RssShare::from(s2.random_si, s2.random_sii),
+                &RssShare::from(s3.random_si, s3.random_sii),
+            );
             // check consistency of bitvec
             assert_eq!(s1.sii.0, s2.si.0);
             assert_eq!(s2.sii.0, s3.si.0);
@@ -584,12 +693,12 @@ mod test {
     #[test]
     fn test_generate_ohv_input() {
         assert_eq!(generate_ohv_input(1, 2), vec![
-            vec![BsBool16::zero(), BsBool16::one()],
+            vec![BsBool16::ZERO, BsBool16::ONE],
         ]);
         assert_eq!(generate_ohv_input(3, 8), vec![
-            vec![BsBool16::zero(), BsBool16::one(), BsBool16::zero(), BsBool16::one(), BsBool16::zero(), BsBool16::one(), BsBool16::zero(), BsBool16::one()],
-            vec![BsBool16::zero(), BsBool16::zero(), BsBool16::one(), BsBool16::one(), BsBool16::zero(), BsBool16::zero(), BsBool16::one(), BsBool16::one()],
-            vec![BsBool16::zero(), BsBool16::zero(), BsBool16::zero(), BsBool16::zero(), BsBool16::one(), BsBool16::one(), BsBool16::one(), BsBool16::one()],
+            vec![BsBool16::ZERO, BsBool16::ONE, BsBool16::ZERO, BsBool16::ONE, BsBool16::ZERO, BsBool16::ONE, BsBool16::ZERO, BsBool16::ONE],
+            vec![BsBool16::ZERO, BsBool16::ZERO, BsBool16::ONE, BsBool16::ONE, BsBool16::ZERO, BsBool16::ZERO, BsBool16::ONE, BsBool16::ONE],
+            vec![BsBool16::ZERO, BsBool16::ZERO, BsBool16::ZERO, BsBool16::ZERO, BsBool16::ONE, BsBool16::ONE, BsBool16::ONE, BsBool16::ONE],
         ]);
     }
 

@@ -26,7 +26,7 @@ impl GF8InvBlackBox for LUT256Party {
         };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = prep;
-        }else{
+        } else {
             self.prep_ohv.append(&mut prep);
         }
         Ok(())
@@ -37,7 +37,7 @@ impl GF8InvBlackBox for LUT256Party {
         if self.prep_ohv.len() < si.len() {
             panic!("Not enough pre-processed random one-hot vectors available. Use LUT256Party::prepare_rand_ohv to generate them.");
         }
-        let rnd_ohv = &self.prep_ohv[self.prep_ohv.len()-si.len()..];
+        let rnd_ohv = &self.prep_ohv[self.prep_ohv.len() - si.len()..];
         let rcv_ciii = self.io().receive_field(Direction::Previous, si.len());
         si.iter_mut().zip(rnd_ohv).for_each(|(v,r)| *v += r.random_si);
         self.io().send_field::<GF8>(Direction::Next, si.iter(), si.len());
@@ -87,7 +87,9 @@ fn lut256(si: &mut[GF8], sii: &mut[GF8], ciii: &[GF8], rnd_ohv: &[RndOhv256Outpu
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for LUT256Party
-where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
+where
+    ChaCha20Rng: FieldRngExt<F>,
+    Sha256: FieldDigestExt<F>,
 {
     type Rng = ChaCha20Rng;
     type Digest = Sha256;
@@ -113,11 +115,22 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
     }
 
     // all parties input the same number of inputs
-    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    fn input_round(
+        &mut self,
+        my_input: &[F],
+    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         self.inner.input_round(my_input)
     }
 
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
+    fn mul(
+        &mut self,
+        ci: &mut [F],
+        cii: &mut [F],
+        ai: &[F],
+        aii: &[F],
+        bi: &[F],
+        bii: &[F],
+    ) -> MpcResult<()> {
         self.inner.mul(ci, cii, ai, aii, bi, bii)
     }
 
@@ -132,7 +145,13 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
 
 #[cfg(test)]
 mod test {
-    use crate::{aes::{self, test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}}, lut256::test::LUT256Setup};
+    use crate::{
+        aes::{self, test::{
+            test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
+            test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
+        }},
+        lut256::test::LUT256Setup,
+    };
 
     #[test]
     fn sub_bytes() {

@@ -6,7 +6,6 @@ use rand_chacha::ChaCha20Rng;
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 use sha2::Sha256;
 use rand::Rng;
-
 use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, MainParty, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 use super::MulTripleVector;
@@ -16,7 +15,7 @@ const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];
 
 /// Returns `n` multiplication triples that are checked for correctness using bucket cut-and-choose.
 /// This implementation has a fixed soundness of 40-bit.
-/// 
+///
 /// Note that unless `n` is a power of 2 larger or equal to 2^10, this function will generate more triples but only return exactly `n`.
 /// Depending on `next_power_of_two(n)`, different bucket sizes are chosen internally.
 #[allow(non_snake_case)]
@@ -95,7 +94,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         bi: bi.into_iter().take(n).collect(),
         bii: bii.into_iter().take(n).collect(),
         ci: ci.into_iter().skip(C).take(n).collect(),
-        cii: cii.into_iter().skip(C).take(n).collect()
+        cii: cii.into_iter().skip(C).take(n).collect(),
     };
     // let sacrifice_time = sacrifice_time.elapsed();
     // println!("Bucket cut-and-choose: optimistic multiplication: {}s, shuffle: {}s, open: {}s, sacrifice: {}s", mul_triples_time.as_secs_f64(), shuffle_time.as_secs_f64(), open_check_time.as_secs_f64(), sacrifice_time.as_secs_f64());
@@ -164,14 +163,17 @@ fn shuffle<R: RngCore + CryptoRng, F: Field>(rng: &mut R, a: &mut [RssShare<F>],
     }
 
     // generate the random tape first
-    let tape: Vec<_> = (1..a.len()).rev().map(|i| {
-        // random number from 0 to i (inclusive)
-        if i < (core::u32::MAX as usize) {
-            rng.gen_range(0..=i as u32) as usize
-        } else {
-            rng.gen_range(0..=i)
-        }
-    }).collect();
+    let tape: Vec<_> = (1..a.len())
+        .rev()
+        .map(|i| {
+            // random number from 0 to i (inclusive)
+            if i < (core::u32::MAX as usize) {
+                rng.gen_range(0..=i as u32) as usize
+            } else {
+                rng.gen_range(0..=i)
+            }
+        })
+        .collect();
 
     // apply to a, b, ci, and cii
     shuffle_from_random_tape(&tape, a);
@@ -201,21 +203,27 @@ fn open_and_check<F: Field + PartialEq + Copy>(party: &mut MainParty, a: &[RssSh
     debug_assert_eq!(a.len(), ci.len());
     debug_assert_eq!(a.len(), cii.len());
 
-    let rcv = party.io().receive_field(Direction::Next, 3*a.len());
-    let aii_bii_cii = a.iter().map(|rss| &rss.sii)
+    let rcv = party.io().receive_field(Direction::Next, 3 * a.len());
+    let aii_bii_cii = a
+        .iter()
+        .map(|rss| &rss.sii)
         .chain(b.iter().map(|rss| &rss.sii))
         .chain(cii);
-    party.io().send_field::<F>(Direction::Previous, aii_bii_cii, a.len()+b.len()+cii.len());
+    party.io().send_field::<F>(
+        Direction::Previous,
+        aii_bii_cii,
+        a.len() + b.len() + cii.len(),
+    );
 
     let aiii_biii_ciii = rcv.rcv()?;
     // check that all are correct
     for i in 0..a.len() {
         let ai = a[i].si + a[i].sii + aiii_biii_ciii[i];
-        let bi = b[i].si + b[i].sii + aiii_biii_ciii[a.len()+i];
-        let ci = ci[i] + cii[i] + aiii_biii_ciii[2*a.len()+i];
+        let bi = b[i].si + b[i].sii + aiii_biii_ciii[a.len() + i];
+        let ci = ci[i] + cii[i] + aiii_biii_ciii[2 * a.len() + i];
         if ai * bi != ci {
             party.io().wait_for_completion();
-            return Ok(false)
+            return Ok(false);
         }
     }
     party.io().wait_for_completion();
@@ -223,13 +231,13 @@ fn open_and_check<F: Field + PartialEq + Copy>(party: &mut MainParty, a: &[RssSh
 }
 
 /// Computes the sacrificing one triple for another step with support for checking one triple by sacrificing multiple other triples (e.g. a bucket).
-/// 
+///
 /// Parameters
 ///  - `n` denotes the number of triples to check
 ///  - `sacrifice_bucket_size` denotes the number of triples to sacrifice for **each** triple that is checked.
 ///  - `ai_to_check`, `aii_to_check`, `bi_to_check`, `bii_to_check`, `ci_to_check` and `cii_to_check` are slices of length `n` that contain the multiplication triple to check.
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
-/// 
+///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
 pub fn sacrifice<F: Field + Copy + AddAssign>(party: &mut MainParty, n: usize, sacrifice_bucket_size: usize, 
     ai_to_check: &[F], aii_to_check: &[F], bi_to_check: &[F], bii_to_check: &[F], ci_to_check: &[F], cii_to_check: &[F],
@@ -321,15 +329,19 @@ where Sha256: FieldDigestExt<F>
     debug_assert_eq!(n, bii_to_check.len());
     debug_assert_eq!(n, ci_to_check.len());
     debug_assert_eq!(n, cii_to_check.len());
-    debug_assert_eq!(n*sacrifice_bucket_size, ai_to_sacrifice.len());
-    debug_assert_eq!(n*sacrifice_bucket_size, aii_to_sacrifice.len());
-    debug_assert_eq!(n*sacrifice_bucket_size, bi_to_sacrifice.len());
-    debug_assert_eq!(n*sacrifice_bucket_size, bii_to_sacrifice.len());
-    debug_assert_eq!(n*sacrifice_bucket_size, ci_to_sacrifice.len());
-    debug_assert_eq!(n*sacrifice_bucket_size, cii_to_sacrifice.len());
+    debug_assert_eq!(n * sacrifice_bucket_size, ai_to_sacrifice.len());
+    debug_assert_eq!(n * sacrifice_bucket_size, aii_to_sacrifice.len());
+    debug_assert_eq!(n * sacrifice_bucket_size, bi_to_sacrifice.len());
+    debug_assert_eq!(n * sacrifice_bucket_size, bii_to_sacrifice.len());
+    debug_assert_eq!(n * sacrifice_bucket_size, ci_to_sacrifice.len());
+    debug_assert_eq!(n * sacrifice_bucket_size, cii_to_sacrifice.len());
 
     #[inline]
-    fn add_to_bucket<F: Field + Copy + AddAssign>(bucket: &mut[F], el: &[F], sacrifice_bucket_size: usize) {
+    fn add_to_bucket<F: Field + Copy + AddAssign>(
+        bucket: &mut [F],
+        el: &[F],
+        sacrifice_bucket_size: usize,
+    ) {
         debug_assert_eq!(bucket.len(), el.len() * sacrifice_bucket_size);
         let mut bucket_idx = 0;
         for el_idx in 0..el.len() {
@@ -366,14 +378,27 @@ where Sha256: FieldDigestExt<F>
         add_to_bucket(bi_to_sacrifice, bi_to_check, sacrifice_bucket_size);
         bi_to_sacrifice
     };
-    
+
     let rho_iii_sigma_iii = rcv_rho_iii_sigma_iii.rcv()?;
     let rho = {
-        izip!(rho_i.iter_mut(), rho_ii.as_ref().iter(), rho_iii_sigma_iii.iter().take(n*sacrifice_bucket_size)).for_each(|(si, sii, siii)| *si += *sii + *siii);
+        izip!(
+            rho_i.iter_mut(),
+            rho_ii.as_ref().iter(),
+            rho_iii_sigma_iii.iter().take(n * sacrifice_bucket_size)
+        )
+        .for_each(|(si, sii, siii)| *si += *sii + *siii);
         rho_i
     };
     let sigma = {
-        izip!(sigma_i.iter_mut(), sigma_ii.as_ref().iter(), rho_iii_sigma_iii.into_iter().skip(n*sacrifice_bucket_size).take(n*sacrifice_bucket_size)).for_each(|(si, sii, siii)| *si += *sii + siii);
+        izip!(
+            sigma_i.iter_mut(),
+            sigma_ii.as_ref().iter(),
+            rho_iii_sigma_iii
+                .into_iter()
+                .skip(n * sacrifice_bucket_size)
+                .take(n * sacrifice_bucket_size)
+        )
+        .for_each(|(si, sii, siii)| *si += *sii + siii);
         sigma_i
     };
 
@@ -389,7 +414,7 @@ where Sha256: FieldDigestExt<F>
             // so we write zero_i to prev_view s.t. P+1 compares it to -zero_ii - zero_iii
             context.add_to_prev_view(&zero_i);
             context.add_to_next_view(&(-zero_i - zero_ii));
-            
+
             bucket_idx += 1;
         }
     }
@@ -412,28 +437,44 @@ pub mod test {
         assert_eq!(triples.cii.len(), len);
     }
 
-    fn into_rss<'a: 'b, 'b: 'a, F: Field>(si: &'a[F], sii: &'b[F]) -> impl Iterator<Item=RssShare<F>> + 'a + 'b {
-        si.iter().zip_eq(sii).map(|(si, sii)| RssShare::from(si.clone(), sii.clone()))
+    fn into_rss<'a: 'b, 'b: 'a, F: Field>(
+        si: &'a [F],
+        sii: &'b [F],
+    ) -> impl Iterator<Item = RssShare<F>> + 'a + 'b {
+        si.iter()
+            .zip_eq(sii)
+            .map(|(si, sii)| RssShare::from(si.clone(), sii.clone()))
     }
 
     #[test]
     fn correct_gf8_triples() {
         const N: usize = 1 << 10; // create 2^10 triples
-        // generate N triples with soundness 2^-40
-        let ((triples1, triples2, triples3), _) = simple_localhost_setup(|p| {
-            bucket_cut_and_choose::<GF8>(p, N).unwrap()
-        });
+                                  // generate N triples with soundness 2^-40
+        let ((triples1, triples2, triples3), _) =
+            simple_localhost_setup(|p| bucket_cut_and_choose::<GF8>(p, N).unwrap());
 
         check_len(&triples1, N);
         check_len(&triples2, N);
         check_len(&triples3, N);
         // check consistent
-        izip!(into_rss(&triples1.ai, &triples1.aii), into_rss(&triples2.ai, &triples2.aii), into_rss(&triples3.ai, &triples3.aii))
-            .for_each(|(a1, a2, a3)| consistent(&a1, &a2, &a3));
-        izip!(into_rss(&triples1.bi, &triples1.bii), into_rss(&triples2.bi, &triples2.bii), into_rss(&triples3.bi, &triples3.bii))
-            .for_each(|(b1, b2, b3)| consistent(&b1, &b2, &b3));
-        izip!(into_rss(&triples1.ci, &triples1.cii), into_rss(&triples2.ci, &triples2.cii), into_rss(&triples3.ci, &triples3.cii))
-            .for_each(|(c1, c2, c3)| consistent(&c1, &c2, &c3));
+        izip!(
+            into_rss(&triples1.ai, &triples1.aii),
+            into_rss(&triples2.ai, &triples2.aii),
+            into_rss(&triples3.ai, &triples3.aii)
+        )
+        .for_each(|(a1, a2, a3)| consistent(&a1, &a2, &a3));
+        izip!(
+            into_rss(&triples1.bi, &triples1.bii),
+            into_rss(&triples2.bi, &triples2.bii),
+            into_rss(&triples3.bi, &triples3.bii)
+        )
+        .for_each(|(b1, b2, b3)| consistent(&b1, &b2, &b3));
+        izip!(
+            into_rss(&triples1.ci, &triples1.cii),
+            into_rss(&triples2.ci, &triples2.cii),
+            into_rss(&triples3.ci, &triples3.cii)
+        )
+        .for_each(|(c1, c2, c3)| consistent(&c1, &c2, &c3));
 
 
         // check correct

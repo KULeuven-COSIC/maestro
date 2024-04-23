@@ -1,10 +1,10 @@
 //! This module implements the maliciously-secure MPC protocol by Furukawa et al., "High-Throughput Secure Three-Party Computation for Malicious Adversaries and an Honest Majority " (https://eprint.iacr.org/2016/944).
-//! 
+//!
 //! In the pre-processing phase, multiplication triples are generated and checked via bucket cut-and-choose.
 //! The online phase proceeds like the semi-honest variant but before outputs are revealed, a post-sacrificing step checks
 //! the validity of all multiplications that are computed in the online phase before.
-//! 
-//! This module notably contains 
+//!
+//! This module notably contains
 //!   - [furukawa_benchmark] that implements the AES benchmark
 //!   - [FurukawaParty] the party wrapper for the protocol. [FurukawaParty] also implements [ArithmeticBlackBox]
 
@@ -40,9 +40,9 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threa
     let post_sacrifice_duration = start.elapsed();
     let _ = aes::output(&mut party, output).unwrap();
     party.inner.teardown().unwrap();
-    
+
     println!("Finished benchmark");
-    
+
     println!("Party {}: Furukawa et al. with SIMD={} took {}s (pre-processing), {}s (online), {}s (post-sacrifice), {}s (total)", party.inner.i, simd, prep_duration.as_secs_f64(), online_duration.as_secs_f64(), post_sacrifice_duration.as_secs_f64(), (prep_duration+online_duration+post_sacrifice_duration).as_secs_f64());
     println!("Setup:");
     setup_comm_stats.print_comm_statistics(party.inner.i);
@@ -86,8 +86,14 @@ impl BenchmarkProtocol for MalChidaBenchmark {
         println!("After output");
         party.inner.teardown().unwrap();
         println!("After teardown");
-        
-        BenchmarkResult::new(prep_duration, online_duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
+
+        BenchmarkResult::new(
+            prep_duration,
+            online_duration,
+            prep_comm_stats,
+            online_comm_stats,
+            party.inner.get_additional_timers(),
+        )
     }
 }
 
@@ -98,12 +104,19 @@ struct MulTripleVector<F> {
     bi: Vec<F>,
     bii: Vec<F>,
     ci: Vec<F>,
-    cii: Vec<F>
+    cii: Vec<F>,
 }
 
 impl<F: Clone> MulTripleVector<F> {
     pub fn new() -> Self {
-        Self { ai: Vec::new(), aii: Vec::new(), bi: Vec::new(), bii: Vec::new(), ci: Vec::new(), cii: Vec::new() }
+        Self {
+            ai: Vec::new(),
+            aii: Vec::new(),
+            bi: Vec::new(),
+            bii: Vec::new(),
+            ci: Vec::new(),
+            cii: Vec::new(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -174,7 +187,7 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         self.pre_processing = Some(offline::bucket_cut_and_choose(&mut self.inner, n_mults)?);
         Ok(())
     }
-    
+
     pub fn start_input_phase(&mut self) -> InputPhase<F> {
         InputPhase::new(self)
     }
@@ -182,30 +195,33 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
     pub fn inner(&self) -> &MainParty {
         &self.inner
     }
-    
+
     #[inline]
     pub fn public_constant(&self, c: F) -> RssShare<F> {
         match self.inner.i {
-            0 => RssShare::from(c, F::zero()),
-            1 => RssShare::from(F::zero(), F::zero()),
-            2 => RssShare::from(F::zero(), c),
-            _ => unreachable!()
+            0 => RssShare::from(c, F::ZERO),
+            1 => RssShare::from(F::ZERO, F::ZERO),
+            2 => RssShare::from(F::ZERO, c),
+            _ => unreachable!(),
         }
     }
 
     pub fn mul(&mut self, ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<(Vec<F>, Vec<F>)>
-    where F: Copy
+    where
+        F: Copy,
     {
         debug_assert_eq!(ai.len(), aii.len());
         debug_assert_eq!(ai.len(), bi.len());
         debug_assert_eq!(ai.len(), bii.len());
-    
+
         let ci: Vec<_> = izip!(self.inner.generate_alpha(ai.len()), ai, aii, bi, bii)
             .map(|(alpha_j, ai_j, aii_j, bi_j, bii_j)| {
                 alpha_j + *ai_j * *bi_j + *ai_j * *bii_j + *aii_j * *bi_j
             })
             .collect();
-        self.inner.io().send_field::<F>(Direction::Previous, ci.iter(), ci.len());
+        self.inner
+            .io()
+            .send_field::<F>(Direction::Previous, ci.iter(), ci.len());
         let rcv_cii = self.inner.io().receive_field(Direction::Next, ci.len());
         // note down the observed multiplication triple
         // first the ones we already have
@@ -223,13 +239,16 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
 
     pub fn verify_multiplications(&mut self) -> MpcResult<()> {
         // check all recorded multiplications
-        println!("post-sacrifice: checking {} multiplications", self.triples_to_check.len());
+        println!(
+            "post-sacrifice: checking {} multiplications",
+            self.triples_to_check.len()
+        );
         if self.triples_to_check.len() > 0 {
             let prep = self.pre_processing.as_mut().expect("No pre-processed multiplication triples found. Use prepare_multiplications to generate them before the output phase");
             if prep.len() < self.triples_to_check.len() {
                 panic!("Not enough pre-processed multiplication triples left: Required {} but found only {}", self.triples_to_check.len(), prep.len());
             }
-            
+
             let leftover = prep.len() - self.triples_to_check.len();
             let err = if self.inner.has_multi_threading() && self.triples_to_check.len() > self.inner.num_worker_threads() {
                 offline::sacrifice_mt(&mut self.inner, self.triples_to_check.len(), 1, &self.triples_to_check.ai, &self.triples_to_check.aii, &self.triples_to_check.bi, &self.triples_to_check.bii, &self.triples_to_check.ci, &self.triples_to_check.cii, &mut prep.ai[leftover..], &mut prep.aii[leftover..], &mut prep.bi[leftover..], &mut prep.bii[leftover..], &mut prep.ci[leftover..], &mut prep.cii[leftover..])
@@ -239,18 +258,23 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
             // purge the sacrificed triples
             if leftover > 0 {
                 prep.shrink(leftover);
-            }else{
+            } else {
                 self.pre_processing = None;
             }
             self.triples_to_check.clear();
             err // return the sacrifice error
-        }else{
+        } else {
             Ok(())
         }
-        
     }
 
-    pub fn output_phase<T, OF: FnOnce(&mut OutputPhase<F>) -> MpcResult<T>>(&mut self, block: OF) -> MpcResult<T> where F: AddAssign {
+    pub fn output_phase<T, OF: FnOnce(&mut OutputPhase<F>) -> MpcResult<T>>(
+        &mut self,
+        block: OF,
+    ) -> MpcResult<T>
+    where
+        F: AddAssign,
+    {
         self.verify_multiplications()?;
 
         // now the output phase can begin
@@ -259,12 +283,11 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         phase.end_output_phase()?;
         Ok(res)
     }
-
 }
 
 pub struct InputPhase<'a, F: Field + Sync + Send> {
     party: &'a mut FurukawaParty<F>,
-    context: BroadcastContext
+    context: BroadcastContext,
 }
 
 impl<'a, F: Field + Sync + Send> InputPhase<'a, F>
@@ -279,27 +302,53 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
 
     pub fn my_input(&mut self, input: &[F]) -> MpcResult<Vec<RssShare<F>>> {
         let a = self.party.inner.generate_random(input.len());
-        let b = self.party.inner.open_rss_to(&mut self.context, &a, self.party.inner.i)?;
+        let b = self
+            .party
+            .inner
+            .open_rss_to(&mut self.context, &a, self.party.inner.i)?;
         let mut b = b.unwrap(); // this is safe since we open to party.i
         for i in 0..b.len() {
             b[i] = b[i].clone() + input[i].clone();
         }
-        self.party.inner.broadcast_round(&mut self.context, &mut [], &mut [], b.as_slice())?;
-        Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| self.party.public_constant(bi) - ai).collect())
+        self.party
+            .inner
+            .broadcast_round(&mut self.context, &mut [], &mut [], b.as_slice())?;
+        Ok(a.into_iter()
+            .zip(b.into_iter())
+            .map(|(ai, bi)| self.party.public_constant(bi) - ai)
+            .collect())
     }
 
-    pub fn other_input(&mut self, input_party: usize, n_inputs: usize) -> MpcResult<Vec<RssShare<F>>> {
+    pub fn other_input(
+        &mut self,
+        input_party: usize,
+        n_inputs: usize,
+    ) -> MpcResult<Vec<RssShare<F>>> {
         assert_ne!(self.party.inner.i, input_party);
         let a = self.party.inner.generate_random(n_inputs);
-        let b = self.party.inner.open_rss_to(&mut self.context, &a, input_party)?;
+        let b = self
+            .party
+            .inner
+            .open_rss_to(&mut self.context, &a, input_party)?;
         debug_assert!(b.is_none());
-        let mut b = vec![F::zero(); n_inputs];
+        let mut b = vec![F::ZERO; n_inputs];
         match (self.party.inner.i, input_party) {
-            (0,2) | (1,0) | (2,1) => self.party.inner.broadcast_round(&mut self.context, &mut [], &mut b, &[])?,
-            (0,1) | (1,2) | (2,0) => self.party.inner.broadcast_round(&mut self.context, &mut b, &mut [], &[])?,
+            (0, 2) | (1, 0) | (2, 1) => {
+                self.party
+                    .inner
+                    .broadcast_round(&mut self.context, &mut [], &mut b, &[])?
+            }
+            (0, 1) | (1, 2) | (2, 0) => {
+                self.party
+                    .inner
+                    .broadcast_round(&mut self.context, &mut b, &mut [], &[])?
+            }
             _ => unreachable!(),
         }
-        Ok(a.into_iter().zip(b.into_iter()).map(|(ai,bi)| self.party.public_constant(bi) - ai).collect())
+        Ok(a.into_iter()
+            .zip(b.into_iter())
+            .map(|(ai, bi)| self.party.public_constant(bi) - ai)
+            .collect())
     }
 
     pub fn end_input_phase(self) -> MpcResult<()> {
@@ -324,8 +373,14 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F> {
 
     pub fn output_to(&mut self, to_party: usize, si: &[F], sii: &[F]) -> MpcResult<Option<Vec<F>>> {
         debug_assert_eq!(si.len(), sii.len());
-        let rss: Vec<_> = si.iter().zip(sii).map(|(si,sii)| RssShare::from(si.clone(), sii.clone())).collect();
-        self.party.inner.open_rss_to(&mut self.context, &rss, to_party)
+        let rss: Vec<_> = si
+            .iter()
+            .zip(sii)
+            .map(|(si, sii)| RssShare::from(si.clone(), sii.clone()))
+            .collect();
+        self.party
+            .inner
+            .open_rss_to(&mut self.context, &rss, to_party)
     }
 
     pub fn output(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
@@ -363,32 +418,43 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
         self.inner.generate_alpha(n)
     }
 
-    fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    fn input_round(
+        &mut self,
+        my_input: &[F],
+    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
         let party_index = self.inner.i;
         let mut input_phase = self.start_input_phase();
 
         let in1 = if party_index == 0 {
             input_phase.my_input(my_input)
-        }else{
+        } else {
             input_phase.other_input(0, my_input.len())
         }?;
 
         let in2 = if party_index == 1 {
             input_phase.my_input(my_input)
-        }else{
+        } else {
             input_phase.other_input(1, my_input.len())
         }?;
 
         let in3 = if party_index == 2 {
             input_phase.my_input(my_input)
-        }else{
+        } else {
             input_phase.other_input(2, my_input.len())
         }?;
         input_phase.end_input_phase()?;
         Ok((in1, in2, in3))
     }
 
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
+    fn mul(
+        &mut self,
+        ci: &mut [F],
+        cii: &mut [F],
+        ai: &[F],
+        aii: &[F],
+        bi: &[F],
+        bii: &[F],
+    ) -> MpcResult<()> {
         let (vci, vcii) = self.mul(ai, aii, bi, bii)?;
         ci.copy_from_slice(&vci);
         cii.copy_from_slice(&vcii);
@@ -396,9 +462,7 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
     }
 
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
-        self.output_phase(|of| {
-            of.output(si, sii)
-        })
+        self.output_phase(|of| of.output(si, sii))
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
@@ -435,8 +499,8 @@ impl GF8InvBlackBox for FurukawaParty<GF8> {
         }
     }
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_muls_ks = 4*10*4 * n_keys; // 4 S-boxes per round, 10 rounds, 4 multiplications per S-box
-        let n_muls_blocks = 16*10*4 * n_blocks; // 16 S-boxes per round, 10 rounds, 4 multiplications per S-box
+        let n_muls_ks = 4 * 10 * 4 * n_keys; // 4 S-boxes per round, 10 rounds, 4 multiplications per S-box
+        let n_muls_blocks = 16 * 10 * 4 * n_blocks; // 16 S-boxes per round, 10 rounds, 4 multiplications per S-box
         self.prepare_multiplications(n_muls_ks + n_muls_blocks)
     }
 }
@@ -491,15 +555,22 @@ fn gf8_inv_layer_threadparty(party: &mut ThreadParty<MulTripleVector<GF8>>, si: 
 pub mod test {
     use std::thread::JoinHandle;
 
-    use rand::thread_rng;
-    use rand_chacha::ChaCha20Rng;
-    use sha2::Sha256;
-    use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8};
+    use crate::aes::test::{
+        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
+        test_inv_aes128_no_keyschedule_gf8,
+    };
     use crate::party::test::TestSetup;
     use crate::party::ArithmeticBlackBox;
     use crate::share::test::{assert_eq, consistent};
+    use rand::thread_rng;
+    use rand_chacha::ChaCha20Rng;
+    use sha2::Sha256;
 
-    use crate::{network::ConnectedParty, party::test::localhost_connect, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+    use crate::{
+        network::ConnectedParty,
+        party::test::localhost_connect,
+        share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare},
+    };
 
     use super::FurukawaParty;
 
@@ -549,11 +620,19 @@ pub mod test {
         let ((x12, x22, x32), _) = h2.join().unwrap();
         let ((x13, x23, x33), _) = h3.join().unwrap();
 
-        fn check(x: Vec<GF8>, share1: Vec<RssShare<GF8>>, share2: Vec<RssShare<GF8>>, share3: Vec<RssShare<GF8>>) {
+        fn check(
+            x: Vec<GF8>,
+            share1: Vec<RssShare<GF8>>,
+            share2: Vec<RssShare<GF8>>,
+            share3: Vec<RssShare<GF8>>,
+        ) {
             assert_eq!(x.len(), share1.len());
             assert_eq!(x.len(), share2.len());
             assert_eq!(x.len(), share3.len());
-            for (xi, (s1, (s2, s3))) in x.into_iter().zip(share1.into_iter().zip(share2.into_iter().zip(share3))) {
+            for (xi, (s1, (s2, s3))) in x
+                .into_iter()
+                .zip(share1.into_iter().zip(share2.into_iter().zip(share3)))
+            {
                 consistent(&s1, &s2, &s3);
                 assert_eq(s1, s2, s3, xi);
             }

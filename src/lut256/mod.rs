@@ -48,7 +48,6 @@ impl LUT256Party {
 }
 
 impl RndOhv {
-
     pub fn new(table: [u64; 4]) -> Self {
         Self(table)
     }
@@ -87,10 +86,16 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads
     let online_comm_stats = party.io().reset_comm_stats();
     let _ = aes::output(&mut party.inner, output).unwrap();
     party.inner.teardown().unwrap();
-    
+
     println!("Finished benchmark");
-    
-    println!("Party {}: LUT-256 with SIMD={} took {}s (pre-processing) and {}s (online phase)", party.inner.party_index(), simd, prep_duration.as_secs_f64(), duration.as_secs_f64());
+
+    println!(
+        "Party {}: LUT-256 with SIMD={} took {}s (pre-processing) and {}s (online phase)",
+        party.inner.party_index(),
+        simd,
+        prep_duration.as_secs_f64(),
+        duration.as_secs_f64()
+    );
     println!("LUT time: {}s", party.lut_time.as_secs_f64());
     println!("Setup:");
     setup_comm_stats.print_comm_statistics(party.inner.party_index());
@@ -129,8 +134,14 @@ impl BenchmarkProtocol for LUT256Benchmark {
         println!("After output");
         party.inner.teardown().unwrap();
         println!("After teardown");
-        
-        BenchmarkResult::new(prep_duration, duration, prep_comm_stats, online_comm_stats, party.inner.get_additional_timers())
+
+        BenchmarkResult::new(
+            prep_duration,
+            duration,
+            prep_comm_stats,
+            online_comm_stats,
+            party.inner.get_additional_timers(),
+        )
     }
 }
 
@@ -138,8 +149,10 @@ impl BenchmarkProtocol for LUT256Benchmark {
 mod test {
     use std::thread::JoinHandle;
 
-
-    use crate::{network::ConnectedParty, party::test::{localhost_connect, TestSetup}};
+    use crate::{
+        network::ConnectedParty,
+        party::test::{localhost_connect, TestSetup},
+    };
 
     use super::LUT256Party;
 
