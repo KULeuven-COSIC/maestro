@@ -1,6 +1,6 @@
+pub mod broadcast;
 mod commitment;
 pub mod correlated_randomness;
-pub mod broadcast;
 pub mod error;
 mod thread_party;
 
@@ -15,10 +15,10 @@ use crate::network::{self, ConnectedParty};
 use crate::party::correlated_randomness::SharedRng;
 use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
 
+use self::error::MpcResult;
+use std::time::Duration;
 #[cfg(feature = "verbose-timing")]
 use {std::{collections::HashMap, sync::Mutex}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
-use std::time::Duration;
-use self::error::MpcResult;
 pub use self::thread_party::ThreadParty;
 
 #[derive(Clone, Copy)]
@@ -41,7 +41,7 @@ impl CommStats {
         Self {
             bytes_received,
             bytes_sent,
-            rounds
+            rounds,
         }
     }
 
@@ -67,15 +67,34 @@ impl CombinedCommStats {
     }
 
     pub fn print_comm_statistics(&self, i: usize) {
-        let p_next = ((i+1) % 3) + 1;
-        let p_prev = ((3 + i-1) % 3) + 1;
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_next, self.next.bytes_sent, self.next.bytes_received, self.next.rounds);
-        println!("Communication to P{}: {} bytes sent, {} bytes received, {} rounds", p_prev, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds);
-        println!("Total communication: {} bytes send, {} bytes received", self.next.bytes_sent + self.prev.bytes_sent, self.next.bytes_received + self.prev.bytes_received);
+        let p_next = ((i + 1) % 3) + 1;
+        let p_prev = ((3 + i - 1) % 3) + 1;
+        println!(
+            "Communication to P{}: {} bytes sent, {} bytes received, {} rounds",
+            p_next, self.next.bytes_sent, self.next.bytes_received, self.next.rounds
+        );
+        println!(
+            "Communication to P{}: {} bytes sent, {} bytes received, {} rounds",
+            p_prev, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds
+        );
+        println!(
+            "Total communication: {} bytes send, {} bytes received",
+            self.next.bytes_sent + self.prev.bytes_sent,
+            self.next.bytes_received + self.prev.bytes_received
+        );
     }
 
     pub fn write_to_csv<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        write!(writer, "{},{},{},{},{},{}", self.next.bytes_sent, self.next.bytes_received, self.next.rounds, self.prev.bytes_sent, self.prev.bytes_received, self.prev.rounds)?;
+        write!(
+            writer,
+            "{},{},{},{},{},{}",
+            self.next.bytes_sent,
+            self.next.bytes_received,
+            self.next.rounds,
+            self.prev.bytes_sent,
+            self.prev.bytes_received,
+            self.prev.rounds
+        )?;
         Ok(())
     }
 }
@@ -92,7 +111,15 @@ pub trait ArithmeticBlackBox<F: Field> {
     
     fn input_round(&mut self, my_input: &[F]) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
     fn constant(&self, value: F) -> RssShare<F>;
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()>;
+    fn mul(
+        &mut self,
+        ci: &mut [F],
+        cii: &mut [F],
+        ai: &[F],
+        aii: &[F],
+        bi: &[F],
+        bii: &[F],
+    ) -> MpcResult<()>;
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
     fn finalize(&mut self) -> MpcResult<()>;
 }
@@ -130,21 +157,27 @@ impl MainParty {
 
         let (rand_next, rand_prev) = match party.i {
             0 => {
-                let rand01 = SharedRng::setup_pairwise(&mut rng, &mut party.comm_next, 0, 1).unwrap();
-                let rand02 = SharedRng::setup_pairwise(&mut rng, &mut party.comm_prev, 0, 2).unwrap();
+                let rand01 =
+                    SharedRng::setup_pairwise(&mut rng, &mut party.comm_next, 0, 1).unwrap();
+                let rand02 =
+                    SharedRng::setup_pairwise(&mut rng, &mut party.comm_prev, 0, 2).unwrap();
                 (rand01, rand02)
             }
             1 => {
-                let rand01 = SharedRng::setup_pairwise(&mut rng, &mut party.comm_prev, 1, 0).unwrap();
-                let rand12 = SharedRng::setup_pairwise(&mut rng, &mut party.comm_next, 1, 2).unwrap();
+                let rand01 =
+                    SharedRng::setup_pairwise(&mut rng, &mut party.comm_prev, 1, 0).unwrap();
+                let rand12 =
+                    SharedRng::setup_pairwise(&mut rng, &mut party.comm_next, 1, 2).unwrap();
                 (rand12, rand01)
             }
             2 => {
-                let rand02 = SharedRng::setup_pairwise(&mut rng, &mut party.comm_next, 2, 0).unwrap();
-                let rand12 = SharedRng::setup_pairwise(&mut rng, &mut party.comm_prev, 2, 1).unwrap();
+                let rand02 =
+                    SharedRng::setup_pairwise(&mut rng, &mut party.comm_next, 2, 0).unwrap();
+                let rand12 =
+                    SharedRng::setup_pairwise(&mut rng, &mut party.comm_prev, 2, 1).unwrap();
                 (rand02, rand12)
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         };
 
         Ok(Self {
@@ -267,13 +300,13 @@ impl MainParty {
         {
             println!("Verbose timing data:");
             let mut guard = IO_TIMER.lock().unwrap();
-            let mut kv: Vec<(String,Duration)> = guard.times.drain().collect();
+            let mut kv: Vec<(String, Duration)> = guard.times.drain().collect();
             drop(guard);
             let mut guard = PARTY_TIMER.lock().unwrap();
             kv.extend(guard.times.drain());
             drop(guard);
 
-            kv.sort_by_key(|(k,_)| k.clone());
+            kv.sort_by_key(|(k, _)| k.clone());
             return kv;
         }
         #[cfg(not(feature = "verbose-timing"))]
@@ -378,11 +411,11 @@ where R: FieldRngExt<F>
 #[inline]
 fn constant<F: Field>(i: usize, value: F) -> RssShare<F> {
     if i == 0 {
-        RssShare::from(value, F::zero())
+        RssShare::from(value, F::ZERO)
     }else if i == 2 {
-        RssShare::from(F::zero(), value)
+        RssShare::from(F::ZERO, value)
     }else{
-        RssShare::from(F::zero(), F::zero())
+        RssShare::from(F::ZERO, F::ZERO)
     }
 }
 
@@ -426,7 +459,7 @@ lazy_static! {
 
 #[cfg(feature = "verbose-timing")]
 pub struct Timer {
-    times: HashMap<String, Duration>
+    times: HashMap<String, Duration>,
 }
 
 #[cfg(feature = "verbose-timing")]
@@ -447,9 +480,13 @@ impl Timer {
     }
 }
 
-
 #[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
+    use crate::network::task::Direction;
+    use crate::network::{Config, ConnectedParty, CreatedParty};
+    use crate::party::correlated_randomness::SharedRng;
+    use rand::RngCore;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use std::fs::File;
     use std::io::BufReader;
     use std::net::{IpAddr, Ipv4Addr};
@@ -457,11 +494,6 @@ pub mod test {
     use std::str::FromStr;
     use std::thread;
     use std::thread::JoinHandle;
-    use rand::RngCore;
-    use rustls::pki_types::{PrivateKeyDer, CertificateDer};
-    use crate::network::task::Direction;
-    use crate::network::{Config, ConnectedParty, CreatedParty};
-    use crate::party::correlated_randomness::SharedRng;
     use crate::party::MainParty;
 
     const TEST_KEY_DIR: &str = "keys";
@@ -477,25 +509,30 @@ pub mod test {
         }
 
         fn load_key(name: &str) -> PrivateKeyDer<'static> {
-            let mut reader = BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
-            let key = rustls_pemfile::private_key(&mut reader).expect(&format!("Cannot read private key in {}", name))
-            .expect(&format!("No private key in {}", name));
+            let mut reader =
+                BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
+            let key = rustls_pemfile::private_key(&mut reader)
+                .expect(&format!("Cannot read private key in {}", name))
+                .expect(&format!("No private key in {}", name));
             return key;
         }
 
         fn load_cert(name: &str) -> CertificateDer<'static> {
-            let mut reader = BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
-            let cert: Vec<_> = rustls_pemfile::certs(&mut reader).map(|r|r.expect(&format!("Cannot read certificate in {}", name))).collect();
+            let mut reader =
+                BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
+            let cert: Vec<_> = rustls_pemfile::certs(&mut reader)
+                .map(|r| r.expect(&format!("Cannot read certificate in {}", name)))
+                .collect();
             assert_eq!(cert.len(), 1);
             let cert = cert[0].clone();
             return cert;
         }
-        
+
         return (
             (load_key("p1.key"), load_cert("p1.pem")),
             (load_key("p2.key"), load_cert("p2.pem")),
             (load_key("p3.key"), load_cert("p3.pem")),
-        )
+        );
     }
 
     pub trait TestSetup<P> {
@@ -503,8 +540,21 @@ pub mod test {
         fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut P) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut P) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut P) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,P)>, JoinHandle<(T2,P)>, JoinHandle<(T3,P)>);
     }
 
-    pub fn localhost_connect<T1: Send + 'static, F1: Send + FnOnce(ConnectedParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(ConnectedParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(ConnectedParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<T1>, JoinHandle<T2>, JoinHandle<T3>) {
-        let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
+    pub fn localhost_connect<
+        T1: Send + 'static,
+        F1: Send + FnOnce(ConnectedParty) -> T1 + 'static,
+        T2: Send + 'static,
+        F2: Send + FnOnce(ConnectedParty) -> T2 + 'static,
+        T3: Send + 'static,
+        F3: Send + FnOnce(ConnectedParty) -> T3 + 'static,
+    >(
+        f1: F1,
+        f2: F2,
+        f3: F3,
+    ) -> (JoinHandle<T1>, JoinHandle<T2>, JoinHandle<T3>) {
+        let addr: Vec<Ipv4Addr> = (0..3)
+            .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
+            .collect();
         let party1 = CreatedParty::bind(0, IpAddr::V4(addr[0]), 0).unwrap();
         let party2 = CreatedParty::bind(1, IpAddr::V4(addr[1]), 0).unwrap();
         let party3 = CreatedParty::bind(2, IpAddr::V4(addr[2]), 0).unwrap();
@@ -526,38 +576,51 @@ pub mod test {
         // println!("Ports: {:?}", ports);
 
         let party1 = {
-            let config = Config::new( addr, ports.clone(), certificates.clone(), pk1, sk1);
-            thread::Builder::new().name("party1".to_string()).spawn(move || {
-                // println!("P1 running");
-                let party1 = party1.connect(config, None).unwrap();
-                // println!("P1 connected");
-                let res = f1(party1);
-                res
-            }).unwrap()
+            let config = Config::new(addr, ports.clone(), certificates.clone(), pk1, sk1);
+            thread::Builder::new()
+                .name("party1".to_string())
+                .spawn(move || {
+                    // println!("P1 running");
+                    let party1 = party1.connect(config, None).unwrap();
+                    // println!("P1 connected");
+                    let res = f1(party1);
+                    res
+                })
+                .unwrap()
         };
 
         let party2 = {
-            let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
+            let addr: Vec<Ipv4Addr> = (0..3)
+                .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
+                .collect();
             let config = Config::new(addr, ports.clone(), certificates.clone(), pk2, sk2);
-            thread::Builder::new().name("party2".to_string()).spawn(move || {
-                // println!("P2 running");
-                let party2 = party2.connect(config, None).unwrap();
-                // println!("P2 connected");
-                let res = f2(party2);
-                res
-            }).unwrap()
+            thread::Builder::new()
+                .name("party2".to_string())
+                .spawn(move || {
+                    // println!("P2 running");
+                    let party2 = party2.connect(config, None).unwrap();
+                    // println!("P2 connected");
+                    let res = f2(party2);
+                    res
+                })
+                .unwrap()
         };
 
         let party3 = {
-            let addr: Vec<Ipv4Addr> = (0..3).map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap()).collect();
+            let addr: Vec<Ipv4Addr> = (0..3)
+                .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
+                .collect();
             let config = Config::new(addr, ports, certificates, pk3, sk3);
-            thread::Builder::new().name("party3".to_string()).spawn(move || {
-                // println!("P3 running");
-                let party3 = party3.connect(config, None).unwrap();
-                // println!("P3 connected");
-                let res = f3(party3);
-                res
-            }).unwrap()
+            thread::Builder::new()
+                .name("party3".to_string())
+                .spawn(move || {
+                    // println!("P3 running");
+                    let party3 = party3.connect(config, None).unwrap();
+                    // println!("P3 connected");
+                    let res = f3(party3);
+                    res
+                })
+                .unwrap()
         };
 
         (party1, party2, party3)
@@ -606,7 +669,7 @@ pub mod test {
         let (t1, p1) = h1.join().unwrap();
         let (t2, p2) = h2.join().unwrap();
         let (t3, p3) = h3.join().unwrap();
-        ((t1, t2, t3), (p1,p2,p3))
+        ((t1, t2, t3), (p1, p2, p3))
     }
 
     #[test]
@@ -637,9 +700,12 @@ pub mod test {
 
     #[test]
     fn correct_party_setup() {
-        let (_, (mut p1, mut p2, mut p3)) = simple_localhost_setup(|_|());
+        let (_, (mut p1, mut p2, mut p3)) = simple_localhost_setup(|_| ());
         // check correlated randomness
-        fn assert_common_randomness(shared_random1: &mut SharedRng, shared_random2: &mut SharedRng) {
+        fn assert_common_randomness(
+            shared_random1: &mut SharedRng,
+            shared_random2: &mut SharedRng,
+        ) {
             let mut expected = [0u8; 100];
             let mut actual = [0u8; 100];
             shared_random1.as_mut().fill_bytes(&mut expected);
