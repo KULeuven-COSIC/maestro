@@ -373,7 +373,7 @@ impl MulAssign for GF2p64 {
 )))]
 impl InnerProduct for GF2p64 {
     fn inner_product(a: &[Self], b: &[Self]) -> Self {
-        Self::fall_back_inner_product(a, b)
+        Self::fallback_inner_product(a, b)
     }
 
     fn weak_inner_product(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
@@ -732,9 +732,25 @@ mod test {
     use rand::thread_rng;
 
     use crate::share::{
-        gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, test::random_secret_shared_vector, Field,
+        gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field,
         FieldRngExt, InnerProduct, Invertible,
     };
+
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    use crate::share::test::random_secret_shared_vector;
 
     use super::GF2p64;
 
@@ -838,6 +854,20 @@ mod test {
         )
     }
 
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
     #[test]
     fn test_weak_ip_consistency() {
         let (_, a, b, _) = random_secret_shared_vector(32);
