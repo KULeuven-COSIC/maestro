@@ -22,7 +22,12 @@ pub struct BenchmarkResult {
 
 pub trait BenchmarkProtocol {
     fn protocol_name(&self) -> String;
-    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult;
+    fn run(
+        &self,
+        conn: ConnectedParty,
+        simd: usize,
+        n_worker_threads: Option<usize>,
+    ) -> BenchmarkResult;
 }
 
 pub struct AggregatedBenchmarkResult {
@@ -37,11 +42,23 @@ pub struct AggregatedBenchmarkResult {
 
 const WAIT_BETWEEN_SEC: u64 = 2;
 
-fn benchmark(party_index: usize, config: &Config, iterations: usize, simd: usize, n_worker_threads: Option<usize>, protocol: &Box<dyn BenchmarkProtocol>) -> AggregatedBenchmarkResult {
+fn benchmark(
+    party_index: usize,
+    config: &Config,
+    iterations: usize,
+    simd: usize,
+    n_worker_threads: Option<usize>,
+    protocol: &Box<dyn BenchmarkProtocol>,
+) -> AggregatedBenchmarkResult {
     let mut agg = AggregatedBenchmarkResult::new();
     for i in 0..iterations {
-        println!("Iteration {}", i+1);
-        let conn = ConnectedParty::bind_and_connect(party_index, config.clone(), Some(Duration::from_secs(60))).unwrap();
+        println!("Iteration {}", i + 1);
+        let conn = ConnectedParty::bind_and_connect(
+            party_index,
+            config.clone(),
+            Some(Duration::from_secs(60)),
+        )
+        .unwrap();
         let res = protocol.run(conn, simd, n_worker_threads);
         agg.update(res);
         thread::sleep(Duration::from_secs(WAIT_BETWEEN_SEC));
@@ -50,11 +67,26 @@ fn benchmark(party_index: usize, config: &Config, iterations: usize, simd: usize
     agg
 }
 
-pub fn benchmark_protocols(party_index: usize, config: &Config, iterations: usize, simd: usize, n_worker_threads: Option<usize>, protocols: Vec<Box<dyn BenchmarkProtocol>>, output: PathBuf) -> io::Result<()> {
+pub fn benchmark_protocols(
+    party_index: usize,
+    config: &Config,
+    iterations: usize,
+    simd: usize,
+    n_worker_threads: Option<usize>,
+    protocols: Vec<Box<dyn BenchmarkProtocol>>,
+    output: PathBuf,
+) -> io::Result<()> {
     let mut results = Vec::new();
     for prot in &protocols {
         println!("Benchmarking {}", prot.protocol_name());
-        let agg = benchmark(party_index, config, iterations, simd, n_worker_threads, &prot);
+        let agg = benchmark(
+            party_index,
+            config,
+            iterations,
+            simd,
+            n_worker_threads,
+            &prot,
+        );
         results.push(agg);
         println!("Finished benchmark for {}", prot.protocol_name());
     }

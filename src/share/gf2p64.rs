@@ -11,7 +11,10 @@ use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
 
-use super::{gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare};
+use super::{
+    gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible,
+    RssShare,
+};
 
 /// An element of `GF(2^64) := GF(2)[X] / X^64+X^4+X^3+X+1`
 ///
@@ -89,7 +92,7 @@ impl GF2p64 {
         target_feature = "sse2",
         target_feature = "pclmulqdq"
     ))]
-    fn clmul_u64(&self, other: &Self) -> (u64,u64) {
+    fn clmul_u64(&self, other: &Self) -> (u64, u64) {
         use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
 
         let mut word = 0u64;
@@ -103,16 +106,16 @@ impl GF2p64 {
 
         let word = cc[0];
         let carry = cc[1];
-        (word, carry)        
-    }   
+        (word, carry)
+    }
 
     #[cfg(all(
         feature = "clmul",
         target_arch = "aarch64",
         target_feature = "neon",
         target_feature = "aes"
-    ))] 
-    fn clmul_u64(&self, other: &Self) -> (u64,u64) {
+    ))]
+    fn clmul_u64(&self, other: &Self) -> (u64, u64) {
         use std::arch::aarch64::vmull_p64;
         let clmul: u128 = unsafe { vmull_p64(self.0, other.0) };
         let word = clmul as u64;
@@ -136,13 +139,13 @@ impl GF2p64 {
         )
     ))]
     pub fn mul_clmul_u64(&self, other: &Self) -> Self {
-        let (word,carry) = Self::clmul_u64(&self, other);
+        let (word, carry) = Self::clmul_u64(&self, other);
         Self::propagate_carries(word, carry)
     }
 
     /// Inner product using basic multiplication
     pub fn fallback_inner_product(a: &[Self], b: &[Self]) -> Self {
-        a.iter().zip(b).fold(Self::ZERO, |s, (a,b)| s + *a * *b)
+        a.iter().zip(b).fold(Self::ZERO, |s, (a, b)| s + *a * *b)
     }
 
     /// Inner product using CLMUL with delayed carry propagation
@@ -161,9 +164,9 @@ impl GF2p64 {
         )
     ))]
     pub fn clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
-        let (word,carry) = a.iter().zip(b).fold((0u64,0u64), |(wrd,car), (a,b)| {
-            let (w,c) = Self::clmul_u64(a, b);
-            (wrd ^ w, car ^c)
+        let (word, carry) = a.iter().zip(b).fold((0u64, 0u64), |(wrd, car), (a, b)| {
+            let (w, c) = Self::clmul_u64(a, b);
+            (wrd ^ w, car ^ c)
         });
         Self::propagate_carries(word, carry)
     }
@@ -191,17 +194,13 @@ impl GF2p64 {
         )
     ))]
     pub fn clmul_weak_inner_product(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self {
-        let (word,carry) = a.iter().zip(b).fold((0u64,0u64), |(wrd,car), (a,b)| {
-            let (w1,c1) = Self::clmul_u64(&a.si, &b.si);
-            let (w2,c2) = Self::clmul_u64(&(a.si+a.sii), &(b.si+b.sii));
+        let (word, carry) = a.iter().zip(b).fold((0u64, 0u64), |(wrd, car), (a, b)| {
+            let (w1, c1) = Self::clmul_u64(&a.si, &b.si);
+            let (w2, c2) = Self::clmul_u64(&(a.si + a.sii), &(b.si + b.sii));
             (wrd ^ w1 ^ w2, car ^ c1 ^ c2)
         });
         Self::propagate_carries(word, carry)
     }
-
-
-
-
 }
 
 impl Field for GF2p64 {
@@ -287,7 +286,6 @@ impl Add for GF2p64 {
 }
 
 impl AddAssign for GF2p64 {
-
     #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0;
@@ -374,9 +372,8 @@ impl MulAssign for GF2p64 {
     )
 )))]
 impl InnerProduct for GF2p64 {
-
     fn inner_product(a: &[Self], b: &[Self]) -> Self {
-        Self::fall_back_inner_product(a,b)
+        Self::fall_back_inner_product(a, b)
     }
 
     fn weak_inner_product(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
@@ -400,13 +397,12 @@ impl InnerProduct for GF2p64 {
 ))]
 impl InnerProduct for GF2p64 {
     fn inner_product(a: &[Self], b: &[Self]) -> Self {
-        Self::clmul_inner_product(a,b)
+        Self::clmul_inner_product(a, b)
     }
 
     fn weak_inner_product(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
         Self::clmul_weak_inner_product(a, b)
     }
-
 }
 
 impl Debug for GF2p64 {
@@ -735,7 +731,10 @@ impl GF2p64Subfield for GF4 {
 mod test {
     use rand::thread_rng;
 
-    use crate::share::{gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, test::random_secret_shared_vector, Field, FieldRngExt, InnerProduct, Invertible};
+    use crate::share::{
+        gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, test::random_secret_shared_vector, Field,
+        FieldRngExt, InnerProduct, Invertible,
+    };
 
     use super::GF2p64;
 
@@ -823,19 +822,9 @@ mod test {
 
     #[test]
     fn test_fall_back_inner_product() {
-        let a = vec![
-            GF2p64(0x1),
-            GF2p64(0x1),
-            GF2p64(0x4),
-            GF2p64(0x8),
-        ];
-        let b = vec![
-            GF2p64(0x1),
-            GF2p64(0x2),
-            GF2p64(0x1),
-            GF2p64(0x1),
-        ];
-        assert_eq!(GF2p64::fallback_inner_product(&a, &b),GF2p64(0xf))
+        let a = vec![GF2p64(0x1), GF2p64(0x1), GF2p64(0x4), GF2p64(0x8)];
+        let b = vec![GF2p64(0x1), GF2p64(0x2), GF2p64(0x1), GF2p64(0x1)];
+        assert_eq!(GF2p64::fallback_inner_product(&a, &b), GF2p64(0xf))
     }
 
     #[test]
@@ -843,12 +832,18 @@ mod test {
         let mut rng = thread_rng();
         let a: Vec<GF2p64> = rng.generate(29);
         let b: Vec<GF2p64> = rng.generate(29);
-        assert_eq!(GF2p64::fallback_inner_product(&a, &b),GF2p64::inner_product(&a, &b))
+        assert_eq!(
+            GF2p64::fallback_inner_product(&a, &b),
+            GF2p64::inner_product(&a, &b)
+        )
     }
 
     #[test]
-    fn test_weak_ip_consistency(){
-        let (_,a,b,_) = random_secret_shared_vector(32);
-        assert_eq!(GF2p64::fallback_weak_ip(&a, &b),GF2p64::clmul_weak_inner_product(&a, &b))
+    fn test_weak_ip_consistency() {
+        let (_, a, b, _) = random_secret_shared_vector(32);
+        assert_eq!(
+            GF2p64::fallback_weak_ip(&a, &b),
+            GF2p64::clmul_weak_inner_product(&a, &b)
+        )
     }
 }

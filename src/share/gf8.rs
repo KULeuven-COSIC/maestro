@@ -78,9 +78,7 @@ impl Add for GF8 {
     }
 }
 
-
 impl AddAssign for GF8 {
-
     #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0;

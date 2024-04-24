@@ -213,7 +213,6 @@ impl Add for GF4 {
 }
 
 impl AddAssign for GF4 {
-
     #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0;

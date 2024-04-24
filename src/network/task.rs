@@ -1,4 +1,15 @@
-use std::{borrow::Borrow, cell::OnceCell, collections::{BTreeMap, VecDeque}, fmt::Debug, io::{self, ErrorKind, Read, Write}, sync::{mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError}, Mutex}, thread::{self, JoinHandle}};
+use std::{
+    borrow::Borrow,
+    cell::OnceCell,
+    collections::{BTreeMap, VecDeque},
+    fmt::Debug,
+    io::{self, ErrorKind, Read, Write},
+    sync::{
+        mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError},
+        Mutex,
+    },
+    thread::{self, JoinHandle},
+};
 
 use crate::{party::CombinedCommStats, share::Field};
 use itertools::Itertools;
@@ -16,9 +27,16 @@ pub enum Direction {
 }
 
 pub enum Task {
-    Write { thread_id: Option<u64>,data: Vec<u8>},
-    Read { thread_id: Option<u64>, length: usize, mailback: oneshot::Sender<Vec<u8>> },
-    Sync { 
+    Write {
+        thread_id: Option<u64>,
+        data: Vec<u8>,
+    },
+    Read {
+        thread_id: Option<u64>,
+        length: usize,
+        mailback: oneshot::Sender<Vec<u8>>,
+    },
+    Sync {
         /// if true, write comm stats to [IO_COMM_STATS] and reset the stats
         write_comm_stats: bool,
     },
@@ -61,7 +79,7 @@ impl WriteTask {
 
 struct TaskQueue<T> {
     queue: VecDeque<T>,
-    queue_thread_id: BTreeMap<u64,VecDeque<T>>,
+    queue_thread_id: BTreeMap<u64, VecDeque<T>>,
     el_count: usize,
 }
 
@@ -108,14 +126,17 @@ impl<T> TaskQueue<T> {
     }
 
     pub fn pop_with_thread_id(&mut self, id: u64) -> Option<T> {
-        self.queue_thread_id.get_mut(&id).map(|q| {
-            let popped = q.pop_front();
-            if popped.is_some() {
-                // we actually removed an element
-                self.el_count -= 1;
-            }
-            popped
-        }).flatten()
+        self.queue_thread_id
+            .get_mut(&id)
+            .map(|q| {
+                let popped = q.pop_front();
+                if popped.is_some() {
+                    // we actually removed an element
+                    self.el_count -= 1;
+                }
+                popped
+            })
+            .flatten()
     }
 
     pub fn peek(&mut self) -> Option<&mut T> {
@@ -125,7 +146,7 @@ impl<T> TaskQueue<T> {
     pub fn peek_or_peek_from_any_thread_id(&mut self) -> Option<&mut T> {
         if !self.queue.is_empty() {
             self.queue.front_mut()
-        }else {
+        } else {
             // pick any element from queue_thread_id
             if let Some(mut entry) = self.queue_thread_id.first_entry() {
                 let queue = entry.get_mut();
@@ -135,13 +156,13 @@ impl<T> TaskQueue<T> {
                 }
                 self.queue.push_back(next_element);
                 self.queue.front_mut()
-            }else{
+            } else {
                 None
             }
         }
     }
 
-    pub fn is_empty(&self,) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.el_count == 0
     }
 }
@@ -149,8 +170,12 @@ impl<T> TaskQueue<T> {
 impl Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Task::Read { thread_id, length, .. } => write!(f, "Read({:?}, len={})", thread_id, length),
-            Task::Write { thread_id, data } => write!(f, "Write({:?}, len={})", thread_id, data.len()),
+            Task::Read {
+                thread_id, length, ..
+            } => write!(f, "Read({:?}, len={})", thread_id, length),
+            Task::Write { thread_id, data } => {
+                write!(f, "Write({:?}, len={})", thread_id, data.len())
+            }
             Task::Sync { .. } => write!(f, "Sync"),
         }
     }
@@ -164,12 +189,24 @@ impl Debug for ReadTask {
 
 impl<T: Debug> Debug for TaskQueue<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let queue = self.queue.iter().map(|task| format!("{:?}", task)).join(", ");
-        let queue_threadid = self.queue_thread_id.iter().map(|(id,queue)| {
-            let queue = queue.iter().map(|task| format!("{:?}", task)).join(", ");
-            format!("key={}, queue=[{}]", id, queue)
-        }).join(", ");
-        write!(f, "TaskQueue: queue=[{}], queue_thread_id=[{}]", queue, queue_threadid)
+        let queue = self
+            .queue
+            .iter()
+            .map(|task| format!("{:?}", task))
+            .join(", ");
+        let queue_threadid = self
+            .queue_thread_id
+            .iter()
+            .map(|(id, queue)| {
+                let queue = queue.iter().map(|task| format!("{:?}", task)).join(", ");
+                format!("key={}, queue=[{}]", id, queue)
+            })
+            .join(", ");
+        write!(
+            f,
+            "TaskQueue: queue=[{}], queue_thread_id=[{}]",
+            queue, queue_threadid
+        )
     }
 }
 
@@ -205,7 +242,7 @@ struct IoThreadContext {
     state: State,
 }
 
-const U64_BYTE_SIZE: usize = (u64::BITS/8) as usize;
+const U64_BYTE_SIZE: usize = (u64::BITS / 8) as usize;
 
 impl IoThreadContext {
     pub fn new(
@@ -239,11 +276,19 @@ impl IoThreadContext {
                             if self.state.is_working() {
                                 // try to write
                                 if !self.write_queue.is_empty() {
-                                    Self::non_blocking_write(&mut self.comm, &mut self.write_queue)?;
+                                    Self::non_blocking_write(
+                                        &mut self.comm,
+                                        &mut self.write_queue,
+                                    )?;
                                 }
                                 // try to read
                                 if !self.read_queue.is_empty() {
-                                    Self::non_blocking_read(&mut self.comm, &mut self.read_queue, &mut thread_id_buf, &mut thread_id_buf_offset)?;
+                                    Self::non_blocking_read(
+                                        &mut self.comm,
+                                        &mut self.read_queue,
+                                        &mut thread_id_buf,
+                                        &mut thread_id_buf_offset,
+                                    )?;
                                 }
                                 if self.write_queue.is_empty()
                                     && self.read_queue.is_empty()
@@ -285,7 +330,12 @@ impl IoThreadContext {
                             Self::non_blocking_write(&mut self.comm, &mut self.write_queue)?;
                         }
                         if !self.read_queue.is_empty() {
-                            Self::non_blocking_read(&mut self.comm, &mut self.read_queue, &mut thread_id_buf, &mut thread_id_buf_offset)?;
+                            Self::non_blocking_read(
+                                &mut self.comm,
+                                &mut self.read_queue,
+                                &mut thread_id_buf,
+                                &mut thread_id_buf_offset,
+                            )?;
                         }
                         if self.comm.stream.wants_write() {
                             Self::non_blocking_write_tls(&mut self.comm)?;
@@ -334,15 +384,25 @@ impl IoThreadContext {
 
     fn add_task(&mut self, task: Task) {
         match task {
-            Task::Read { thread_id, length, mailback } => {
-                self.read_queue.put(thread_id, ReadTask::new(length, mailback));
+            Task::Read {
+                thread_id,
+                length,
+                mailback,
+            } => {
+                self.read_queue
+                    .put(thread_id, ReadTask::new(length, mailback));
                 if !self.state.is_working() {
-                    self.state = State::Working { sync_requested: false,  close_requested: false, write_comm_stats_requested: false }
+                    self.state = State::Working {
+                        sync_requested: false,
+                        close_requested: false,
+                        write_comm_stats_requested: false,
+                    }
                 }
-            },
-                
+            }
+
             Task::Write { thread_id, data } => {
-                self.write_queue.put(thread_id, WriteTask::new(thread_id, data));
+                self.write_queue
+                    .put(thread_id, WriteTask::new(thread_id, data));
                 if !self.state.is_working() {
                     self.state = State::Working {
                         sync_requested: false,
@@ -403,7 +463,12 @@ impl IoThreadContext {
         }
     }
 
-    fn non_blocking_read(channel: &mut NonBlockingCommChannel, read_task_queue: &mut TaskQueue<ReadTask>, thread_id_buf: &mut [u8; U64_BYTE_SIZE], thread_id_buf_offset: &mut usize) -> io::Result<()> {
+    fn non_blocking_read(
+        channel: &mut NonBlockingCommChannel,
+        read_task_queue: &mut TaskQueue<ReadTask>,
+        thread_id_buf: &mut [u8; U64_BYTE_SIZE],
+        thread_id_buf_offset: &mut usize,
+    ) -> io::Result<()> {
         match read_task_queue.peek() {
             Some(read_task) => {
                 let buf = &mut read_task.buffer[read_task.offset..];
@@ -431,8 +496,8 @@ impl IoThreadContext {
                         }
                         Err(io_err)
                     }
-                }  
-            },
+                }
+            }
             None => {
                 // the current problem with the implementation for multi-threaded communication via one IoLayer is
                 // that reads with thread_id == Some(id) need to be declared BEFORE we read data from the network
@@ -442,11 +507,16 @@ impl IoThreadContext {
                 if !read_task_queue.is_empty() {
                     if *thread_id_buf_offset < thread_id_buf.len() {
                         // there are read tasks with thread_id but none are currently being read
-                        match channel.stream.read(&mut thread_id_buf[*thread_id_buf_offset..]) {
+                        match channel
+                            .stream
+                            .read(&mut thread_id_buf[*thread_id_buf_offset..])
+                        {
                             Ok(n) => *thread_id_buf_offset += n,
                             Err(io_err) => {
                                 // a few error types are expected, and are not an error
-                                if io_err.kind() == ErrorKind::WouldBlock || io_err.kind() == ErrorKind::Interrupted {
+                                if io_err.kind() == ErrorKind::WouldBlock
+                                    || io_err.kind() == ErrorKind::Interrupted
+                                {
                                     return Ok(()); // all is well, we try again later
                                 }
                                 return Err(io_err);
@@ -456,7 +526,8 @@ impl IoThreadContext {
                     if *thread_id_buf_offset >= thread_id_buf.len() {
                         // grab relevant read task
                         // check if the appropriate read task is present
-                        let t = read_task_queue.pop_with_thread_id(u64::from_le_bytes(thread_id_buf.clone()));
+                        let t = read_task_queue
+                            .pop_with_thread_id(u64::from_le_bytes(thread_id_buf.clone()));
                         if let Some(task) = t {
                             // completed reading the id
                             *thread_id_buf_offset = 0;
@@ -464,15 +535,18 @@ impl IoThreadContext {
                         }
                     }
                     Ok(())
-                }else{
+                } else {
                     // no read task, nothing to do
                     Ok(())
                 }
-            }, 
+            }
         }
     }
 
-    fn non_blocking_write(channel: &mut NonBlockingCommChannel, write_task_queue: &mut TaskQueue<WriteTask>) -> io::Result<()> {
+    fn non_blocking_write(
+        channel: &mut NonBlockingCommChannel,
+        write_task_queue: &mut TaskQueue<WriteTask>,
+    ) -> io::Result<()> {
         match write_task_queue.peek_or_peek_from_any_thread_id() {
             Some(write_task) => {
                 if write_task.offset == 0 {
@@ -482,16 +556,21 @@ impl IoThreadContext {
                                 Ok(n) => *offset += n,
                                 Err(io_err) => {
                                     // a few error types are expected, and are not an error
-                                    if io_err.kind() == ErrorKind::WouldBlock || io_err.kind() == ErrorKind::Interrupted {
+                                    if io_err.kind() == ErrorKind::WouldBlock
+                                        || io_err.kind() == ErrorKind::Interrupted
+                                    {
                                         return Ok(()); // all is well, we try again later
                                     }
-                                    return Err(io_err)
+                                    return Err(io_err);
                                 }
                             }
                         }
                     }
-                } 
-                match channel.stream.write(&write_task.buffer[write_task.offset..]) {
+                }
+                match channel
+                    .stream
+                    .write(&write_task.buffer[write_task.offset..])
+                {
                     Ok(n) => {
                         write_task.offset += n;
                         if write_task.offset >= write_task.buffer.len() {
@@ -547,7 +626,6 @@ pub struct IoLayer {
     task_next_channel: Sender<Task>,
 }
 
-
 #[cfg(feature = "verbose-timing")]
 lazy_static! {
     pub static ref IO_TIMER: Mutex<Timer> = Mutex::new(Timer::new());
@@ -581,7 +659,7 @@ impl IoLayerOwned {
             // when exit or error
             (ctx_next, Ok(()))
         });
-        
+
         let task_layer = OnceCell::new();
         task_layer.set(IoLayer::new(send_prev, send_next)).unwrap(); // OnceCell is empty
 
@@ -598,24 +676,50 @@ impl IoLayerOwned {
         self.task_layer.get().unwrap().send(direction, bytes)
     }
 
-    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize) {
-        self.task_layer.get().unwrap().send_field(direction, elements, len)
+    pub fn send_field<'a, F: Field + 'a>(
+        &self,
+        direction: Direction,
+        elements: impl IntoIterator<Item = impl Borrow<F>>,
+        len: usize,
+    ) {
+        self.task_layer
+            .get()
+            .unwrap()
+            .send_field(direction, elements, len)
     }
 
     pub fn receive(&self, direction: Direction, length: usize) -> receiver::VecReceiver {
         self.task_layer.get().unwrap().receive(direction, length)
     }
 
-    pub fn receive_slice<'a>(&self, direction: Direction, dst: &'a mut [u8]) -> receiver::SliceReceiver<'a> {
+    pub fn receive_slice<'a>(
+        &self,
+        direction: Direction,
+        dst: &'a mut [u8],
+    ) -> receiver::SliceReceiver<'a> {
         self.task_layer.get().unwrap().receive_slice(direction, dst)
     }
 
-    pub fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
-        self.task_layer.get().unwrap().receive_field(direction, num_elements)
+    pub fn receive_field<F: Field>(
+        &self,
+        direction: Direction,
+        num_elements: usize,
+    ) -> receiver::FieldVectorReceiver<F> {
+        self.task_layer
+            .get()
+            .unwrap()
+            .receive_field(direction, num_elements)
     }
 
-    pub fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
-        self.task_layer.get().unwrap().receive_field_slice(direction, dst)
+    pub fn receive_field_slice<'a, F: Field>(
+        &self,
+        direction: Direction,
+        dst: &'a mut [F],
+    ) -> receiver::FieldSliceReceiver<'a, F> {
+        self.task_layer
+            .get()
+            .unwrap()
+            .receive_field_slice(direction, dst)
     }
 
     pub fn wait_for_completion(&self) {
@@ -623,7 +727,14 @@ impl IoLayerOwned {
         let start = Instant::now();
         let task_layer = self.task_layer.get().unwrap();
         // first send a Sync task, then block and wait to the IO thread to sync
-        match (task_layer.task_prev_channel.send(Task::Sync {write_comm_stats: false}), task_layer.task_next_channel.send(Task::Sync {write_comm_stats: false})) {
+        match (
+            task_layer.task_prev_channel.send(Task::Sync {
+                write_comm_stats: false,
+            }),
+            task_layer.task_next_channel.send(Task::Sync {
+                write_comm_stats: false,
+            }),
+        ) {
             (Ok(()), Ok(())) => {
                 let sync_prev = self.sync_prev_channel.recv();
                 let sync_next = self.sync_next_channel.recv();
@@ -643,10 +754,12 @@ impl IoLayerOwned {
         }
     }
 
-    pub fn shutdown(mut self) -> io::Result<(NonBlockingCommChannel, NonBlockingCommChannel)>{
+    pub fn shutdown(mut self) -> io::Result<(NonBlockingCommChannel, NonBlockingCommChannel)> {
         let task_layer = self.task_layer.take().unwrap();
         // first send Sync task
-        match task_layer.task_prev_channel.send(Task::Sync{write_comm_stats: false}) {
+        match task_layer.task_prev_channel.send(Task::Sync {
+            write_comm_stats: false,
+        }) {
             Ok(()) => (),
             Err(_) => {
                 return Err(io::Error::new(
@@ -655,7 +768,9 @@ impl IoLayerOwned {
                 ))
             }
         }
-        match task_layer.task_next_channel.send(Task::Sync{write_comm_stats: false}) {
+        match task_layer.task_next_channel.send(Task::Sync {
+            write_comm_stats: false,
+        }) {
             Ok(()) => (),
             Err(_) => {
                 return Err(io::Error::new(
@@ -712,7 +827,14 @@ impl IoLayerOwned {
 
     pub fn reset_comm_stats(&self) -> CombinedCommStats {
         let task_layer = self.task_layer.get().unwrap();
-        match (task_layer.task_prev_channel.send(Task::Sync {write_comm_stats: true}), task_layer.task_next_channel.send(Task::Sync {write_comm_stats: true})) {
+        match (
+            task_layer.task_prev_channel.send(Task::Sync {
+                write_comm_stats: true,
+            }),
+            task_layer.task_next_channel.send(Task::Sync {
+                write_comm_stats: true,
+            }),
+        ) {
             (Ok(()), Ok(())) => {
                 let sync_prev = self.sync_prev_channel.recv();
                 let sync_next = self.sync_next_channel.recv();
@@ -739,7 +861,10 @@ impl IoLayerOwned {
 
 impl IoLayer {
     fn new(task_prev_channel: Sender<Task>, task_next_channel: Sender<Task>) -> Self {
-        Self { task_prev_channel, task_next_channel }
+        Self {
+            task_prev_channel,
+            task_next_channel,
+        }
     }
 
     fn send_helper(&self, direction: Direction, thread_id: Option<usize>, bytes: Vec<u8>) {
@@ -749,7 +874,10 @@ impl IoLayer {
                 Direction::Previous => &self.task_prev_channel,
                 Direction::Next => &self.task_next_channel,
             };
-            match channel.send(Task::Write { thread_id, data: bytes }) {
+            match channel.send(Task::Write {
+                thread_id,
+                data: bytes,
+            }) {
                 Ok(()) => (),
                 Err(_) => panic!("The IO is already closed"),
             }
@@ -768,11 +896,21 @@ impl IoLayer {
         receiver::VecReceiver::new(self.receive_raw(direction, None, length))
     }
 
-    pub fn receive_thread(&self, direction: Direction, thread_id: usize, length: usize) -> receiver::VecReceiver {
+    pub fn receive_thread(
+        &self,
+        direction: Direction,
+        thread_id: usize,
+        length: usize,
+    ) -> receiver::VecReceiver {
         receiver::VecReceiver::new(self.receive_raw(direction, Some(thread_id), length))
     }
 
-    fn receive_raw(&self, direction: Direction, thread_id: Option<usize>, length: usize) -> oneshot::Receiver<Vec<u8>> {
+    fn receive_raw(
+        &self,
+        direction: Direction,
+        thread_id: Option<usize>,
+        length: usize,
+    ) -> oneshot::Receiver<Vec<u8>> {
         let thread_id = thread_id.map(|t| u64::try_from(t).expect("ThreadId too large"));
         let (send, recv) = oneshot::channel();
         if length > 0 {
@@ -780,27 +918,44 @@ impl IoLayer {
                 Direction::Previous => &self.task_prev_channel,
                 Direction::Next => &self.task_next_channel,
             };
-            match channel.send(Task::Read { thread_id, length, mailback: send }) {
+            match channel.send(Task::Read {
+                thread_id,
+                length,
+                mailback: send,
+            }) {
                 Ok(()) => recv,
                 Err(_) => panic!("The IO is already closed"),
             }
-        }else{
+        } else {
             // immediately populate recv
             send.send(Vec::new()).unwrap(); // this is safe since `send` returns Err only if recv has been dropped
             recv
         }
     }
 
-    pub fn receive_slice<'a>(&self, direction: Direction, dst: &'a mut [u8]) -> receiver::SliceReceiver<'a> {
+    pub fn receive_slice<'a>(
+        &self,
+        direction: Direction,
+        dst: &'a mut [u8],
+    ) -> receiver::SliceReceiver<'a> {
         receiver::SliceReceiver::new(self.receive_raw(direction, None, dst.len()), dst)
     }
 
-    pub fn receive_slice_thread<'a>(&self, direction: Direction, thread_id: usize, dst: &'a mut [u8]) -> receiver::SliceReceiver<'a> {
+    pub fn receive_slice_thread<'a>(
+        &self,
+        direction: Direction,
+        thread_id: usize,
+        dst: &'a mut [u8],
+    ) -> receiver::SliceReceiver<'a> {
         receiver::SliceReceiver::new(self.receive_raw(direction, Some(thread_id), dst.len()), dst)
     }
 
-    pub fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize)
-    {
+    pub fn send_field<'a, F: Field + 'a>(
+        &self,
+        direction: Direction,
+        elements: impl IntoIterator<Item = impl Borrow<F>>,
+        len: usize,
+    ) {
         #[cfg(feature = "verbose-timing")]
         let start = Instant::now();
         let as_bytes = F::as_byte_vec(elements, len);
@@ -812,8 +967,13 @@ impl IoLayer {
         self.send(direction, as_bytes)
     }
 
-    pub fn send_field_thread<'a, F: Field + 'a>(&self, direction: Direction, thread_id: usize, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize)
-    {
+    pub fn send_field_thread<'a, F: Field + 'a>(
+        &self,
+        direction: Direction,
+        thread_id: usize,
+        elements: impl IntoIterator<Item = impl Borrow<F>>,
+        len: usize,
+    ) {
         #[cfg(feature = "verbose-timing")]
         let start = Instant::now();
         let as_bytes = F::as_byte_vec(elements, len);
@@ -825,20 +985,50 @@ impl IoLayer {
         self.send_helper(direction, Some(thread_id), as_bytes)
     }
 
-    pub fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(self.receive_raw(direction, None, F::serialized_size(num_elements)), num_elements)
+    pub fn receive_field<F: Field>(
+        &self,
+        direction: Direction,
+        num_elements: usize,
+    ) -> receiver::FieldVectorReceiver<F> {
+        receiver::FieldVectorReceiver::new(
+            self.receive_raw(direction, None, F::serialized_size(num_elements)),
+            num_elements,
+        )
     }
 
-    pub fn receive_field_thread<F: Field>(&self, direction: Direction, thread_id: usize, num_elements: usize) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(self.receive_raw(direction, Some(thread_id), F::serialized_size(num_elements)), num_elements)
+    pub fn receive_field_thread<F: Field>(
+        &self,
+        direction: Direction,
+        thread_id: usize,
+        num_elements: usize,
+    ) -> receiver::FieldVectorReceiver<F> {
+        receiver::FieldVectorReceiver::new(
+            self.receive_raw(direction, Some(thread_id), F::serialized_size(num_elements)),
+            num_elements,
+        )
     }
 
-    pub fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(self.receive_raw(direction, None, F::serialized_size(dst.len())), dst)
+    pub fn receive_field_slice<'a, F: Field>(
+        &self,
+        direction: Direction,
+        dst: &'a mut [F],
+    ) -> receiver::FieldSliceReceiver<'a, F> {
+        receiver::FieldSliceReceiver::new(
+            self.receive_raw(direction, None, F::serialized_size(dst.len())),
+            dst,
+        )
     }
 
-    pub fn receive_field_slice_thread<'a, F: Field>(&self, direction: Direction, thread_id: usize, dst: &'a mut [F]) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(self.receive_raw(direction, Some(thread_id), F::serialized_size(dst.len())), dst)
+    pub fn receive_field_slice_thread<'a, F: Field>(
+        &self,
+        direction: Direction,
+        thread_id: usize,
+        dst: &'a mut [F],
+    ) -> receiver::FieldSliceReceiver<'a, F> {
+        receiver::FieldSliceReceiver::new(
+            self.receive_raw(direction, Some(thread_id), F::serialized_size(dst.len())),
+            dst,
+        )
     }
 }
 
@@ -849,7 +1039,10 @@ mod test {
     use itertools::Itertools;
     use rand::{seq::SliceRandom, thread_rng, CryptoRng, Rng, RngCore};
 
-    use crate::{network::{receiver::VecReceiver, task::U64_BYTE_SIZE, CommChannel}, party::test::localhost_connect};
+    use crate::{
+        network::{receiver::VecReceiver, task::U64_BYTE_SIZE, CommChannel},
+        party::test::localhost_connect,
+    };
 
     use super::{Direction, IoLayerOwned, TaskQueue};
 
@@ -886,7 +1079,8 @@ mod test {
 
     #[test]
     fn proper_shutdown_when_empty() {
-        let ((comm_prev, mut comm_prev_receiver), (comm_next, mut comm_next_receiver)) = setup_comm_channels();
+        let ((comm_prev, mut comm_prev_receiver), (comm_next, mut comm_next_receiver)) =
+            setup_comm_channels();
         let io = IoLayerOwned::spawn_io(comm_prev, comm_next).unwrap();
         let (nb_prev, nb_next) = io.shutdown().unwrap();
         let mut comm_prev = nb_prev.into_channel().unwrap();
@@ -905,7 +1099,8 @@ mod test {
 
     #[test]
     fn can_read_write_one() {
-        let ((comm_prev, mut comm_prev_receiver), (comm_next, comm_next_receiver)) = setup_comm_channels();
+        let ((comm_prev, mut comm_prev_receiver), (comm_next, comm_next_receiver)) =
+            setup_comm_channels();
         let io = IoLayerOwned::spawn_io(comm_prev, comm_next).unwrap();
 
         let mut rng = thread_rng();
@@ -949,7 +1144,8 @@ mod test {
 
     #[test]
     fn can_read_write_multiple_blocks_prev() {
-        let ((comm_prev, mut comm_prev_receiver), (comm_next, _comm_next_receiver)) = setup_comm_channels();
+        let ((comm_prev, mut comm_prev_receiver), (comm_next, _comm_next_receiver)) =
+            setup_comm_channels();
         let io = IoLayerOwned::spawn_io(comm_prev, comm_next).unwrap();
 
         let mut rng = thread_rng();
@@ -1010,7 +1206,8 @@ mod test {
 
     #[test]
     fn can_read_write_multiple_blocks_both() {
-        let ((comm_prev, mut comm_prev_receiver), (comm_next, mut comm_next_receiver)) = setup_comm_channels();
+        let ((comm_prev, mut comm_prev_receiver), (comm_next, mut comm_next_receiver)) =
+            setup_comm_channels();
         let io = IoLayerOwned::spawn_io(comm_prev, comm_next).unwrap();
 
         let mut rng = thread_rng();
@@ -1120,7 +1317,11 @@ mod test {
         let io2 = IoLayerOwned::spawn_io(p2.comm_prev, p2.comm_next).unwrap();
         let io3 = IoLayerOwned::spawn_io(p3.comm_prev, p3.comm_next).unwrap();
 
-        fn send(io: &IoLayerOwned, msg_to_prev: String, msg_to_next: String) -> (VecReceiver, VecReceiver) {
+        fn send(
+            io: &IoLayerOwned,
+            msg_to_prev: String,
+            msg_to_next: String,
+        ) -> (VecReceiver, VecReceiver) {
             assert_eq!(msg_to_prev.len(), msg_to_next.len());
             let rcv_prev = io.receive(Direction::Previous, msg_to_prev.len());
             io.send(Direction::Next, msg_to_next.as_bytes().to_vec());
@@ -1153,7 +1354,8 @@ mod test {
 
     #[test]
     fn sending_receiving_empty() {
-        let ((comm_prev, comm_prev_receiver), (comm_next, comm_next_receiver)) = setup_comm_channels();
+        let ((comm_prev, comm_prev_receiver), (comm_next, comm_next_receiver)) =
+            setup_comm_channels();
         let io = IoLayerOwned::spawn_io(comm_prev, comm_next).unwrap();
         // send and receive empty messages
         let empty = Vec::new();
@@ -1233,7 +1435,8 @@ mod test {
 
     #[test]
     fn send_receive_threaded_one() {
-        let ((comm_prev, mut comm_prev_receiver), (comm_next, _comm_next_receiver)) = setup_comm_channels();
+        let ((comm_prev, mut comm_prev_receiver), (comm_next, _comm_next_receiver)) =
+            setup_comm_channels();
         let io_owned = IoLayerOwned::spawn_io(comm_prev, comm_next).unwrap();
         let io = io_owned.task_layer.get().unwrap();
 
@@ -1241,19 +1444,23 @@ mod test {
         const N: usize = 20_000; // a larger number of bytes, hoping that this will cause blocking read/write
         const N_THREADS: usize = 10;
 
-        let mut data_send = (0..N_THREADS).map(|id| {
-            let mut bytes = vec![0u8; N];
-            rng.fill_bytes(&mut bytes);
-            (id, bytes)
-        }).collect_vec();
+        let mut data_send = (0..N_THREADS)
+            .map(|id| {
+                let mut bytes = vec![0u8; N];
+                rng.fill_bytes(&mut bytes);
+                (id, bytes)
+            })
+            .collect_vec();
 
         data_send.shuffle(&mut rng);
 
-        let mut data_receive = (0..N_THREADS).map(|id| {
-            let mut bytes = vec![0u8; N];
-            rng.fill_bytes(&mut bytes);
-            (id*N, bytes)
-        }).collect_vec();
+        let mut data_receive = (0..N_THREADS)
+            .map(|id| {
+                let mut bytes = vec![0u8; N];
+                rng.fill_bytes(&mut bytes);
+                (id * N, bytes)
+            })
+            .collect_vec();
         let data_receive_clone = data_receive.clone();
 
         data_receive.shuffle(&mut rng);
@@ -1261,46 +1468,55 @@ mod test {
         // setup as many receivers
         let mut rcv_order = (0..N_THREADS).collect_vec();
         rcv_order.shuffle(&mut rng);
-        let recv = rcv_order.into_iter().map(|id| (id*N, io.receive_thread(Direction::Previous, id*N, N)))
-        .collect_vec();
+        let recv = rcv_order
+            .into_iter()
+            .map(|id| (id * N, io.receive_thread(Direction::Previous, id * N, N)))
+            .collect_vec();
 
         for (id, data) in &data_send {
-            io.send_thread(Direction::Previous, id*N, data.clone());
+            io.send_thread(Direction::Previous, id * N, data.clone());
         }
 
         let mut received = BTreeMap::new();
         // first receive a bit
-        for _ in 0..(N_THREADS/2) {
-            let mut buf = vec![0u8; N+U64_BYTE_SIZE];
+        for _ in 0..(N_THREADS / 2) {
+            let mut buf = vec![0u8; N + U64_BYTE_SIZE];
             comm_prev_receiver.read(&mut buf).unwrap();
             let mut id = [0u8; U64_BYTE_SIZE];
             id.copy_from_slice(&buf[..U64_BYTE_SIZE]);
             received.insert(u64::from_le_bytes(id), buf);
         }
         // then send a bit
-        for _ in 0..(N_THREADS/2) {
+        for _ in 0..(N_THREADS / 2) {
             let (id, data) = data_receive.pop().unwrap();
-            comm_prev_receiver.write(&(id as u64).to_le_bytes()).unwrap();
+            comm_prev_receiver
+                .write(&(id as u64).to_le_bytes())
+                .unwrap();
             comm_prev_receiver.write(&data).unwrap();
         }
         // receive the rest
-        for _ in (N_THREADS/2)..N_THREADS {
-            let mut buf = vec![0u8; N+U64_BYTE_SIZE];
+        for _ in (N_THREADS / 2)..N_THREADS {
+            let mut buf = vec![0u8; N + U64_BYTE_SIZE];
             comm_prev_receiver.read(&mut buf).unwrap();
             let mut id = [0u8; U64_BYTE_SIZE];
             id.copy_from_slice(&buf[..U64_BYTE_SIZE]);
             received.insert(u64::from_le_bytes(id), buf);
-        } 
+        }
         // send the rest
-        for _ in (N_THREADS/2)..N_THREADS {
+        for _ in (N_THREADS / 2)..N_THREADS {
             let (id, data) = data_receive.pop().unwrap();
-            comm_prev_receiver.write(&(id as u64).to_le_bytes()).unwrap();
+            comm_prev_receiver
+                .write(&(id as u64).to_le_bytes())
+                .unwrap();
             comm_prev_receiver.write(&data).unwrap();
         }
         assert!(data_receive.is_empty()); // should be all
 
         // wait on receivers
-        let recv = recv.into_iter().map(|(id,r)| (id, r.recv().unwrap())).collect_vec();
+        let recv = recv
+            .into_iter()
+            .map(|(id, r)| (id, r.recv().unwrap()))
+            .collect_vec();
         // sync
         io_owned.wait_for_completion();
 
@@ -1318,7 +1534,9 @@ mod test {
 
         // check that data was correctly sent
         for (id, expected) in data_send {
-            let actual = received.remove(&((N*id) as u64)).expect("id not received");
+            let actual = received
+                .remove(&((N * id) as u64))
+                .expect("id not received");
             assert_eq!(expected, actual[U64_BYTE_SIZE..]);
         }
         assert!(received.is_empty());

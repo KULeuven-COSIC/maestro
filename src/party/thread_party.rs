@@ -2,7 +2,13 @@ use std::{borrow::Borrow, cell::OnceCell};
 
 use rand_chacha::ChaCha20Rng;
 
-use crate::{network::{task::{Direction, IoLayer}, FieldSliceReceiver, FieldVectorReceiver}, share::{Field, FieldRngExt, RssShare}};
+use crate::{
+    network::{
+        task::{Direction, IoLayer},
+        FieldSliceReceiver, FieldVectorReceiver,
+    },
+    share::{Field, FieldRngExt, RssShare},
+};
 
 use super::{correlated_randomness::SharedRng, Party};
 
@@ -19,11 +25,27 @@ pub struct ThreadParty<T> {
     pub additional_data: T,
 }
 
-
-
 impl<T> ThreadParty<T> {
-    pub fn new(i: usize, range_start: usize, range_end: usize, random_next: SharedRng, random_prev: SharedRng, random_local: ChaCha20Rng, io_layer: OnceCell<IoLayer>, additional_data: T) -> Self {
-        Self { i, range_start, range_end, random_next, random_prev, random_local, io_layer, additional_data}
+    pub fn new(
+        i: usize,
+        range_start: usize,
+        range_end: usize,
+        random_next: SharedRng,
+        random_prev: SharedRng,
+        random_local: ChaCha20Rng,
+        io_layer: OnceCell<IoLayer>,
+        additional_data: T,
+    ) -> Self {
+        Self {
+            i,
+            range_start,
+            range_end,
+            random_next,
+            random_prev,
+            random_local,
+            io_layer,
+            additional_data,
+        }
     }
 
     pub fn task_size(&self) -> usize {
@@ -40,11 +62,17 @@ impl<T> ThreadParty<T> {
 }
 
 impl<T> Party for ThreadParty<T> {
-    fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F> where ChaCha20Rng: FieldRngExt<F> {
+    fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
+    where
+        ChaCha20Rng: FieldRngExt<F>,
+    {
         super::generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
-    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>> where ChaCha20Rng: FieldRngExt<F> {
+    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    where
+        ChaCha20Rng: FieldRngExt<F>,
+    {
         super::generate_random(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
@@ -53,16 +81,38 @@ impl<T> Party for ThreadParty<T> {
         super::constant(self.i, value)
     }
 
-    fn send_field<'a, F: Field + 'a>(&self, direction: Direction, elements: impl IntoIterator<Item=impl Borrow<F>>, len: usize) {
-        self.io_layer.get().unwrap().send_field_thread(direction, self.range_start, elements, len)
+    fn send_field<'a, F: Field + 'a>(
+        &self,
+        direction: Direction,
+        elements: impl IntoIterator<Item = impl Borrow<F>>,
+        len: usize,
+    ) {
+        self.io_layer
+            .get()
+            .unwrap()
+            .send_field_thread(direction, self.range_start, elements, len)
     }
 
-    fn receive_field<F: Field>(&self, direction: Direction, num_elements: usize) -> FieldVectorReceiver<F> {
-        self.io_layer.get().unwrap().receive_field_thread(direction, self.range_start, num_elements)
+    fn receive_field<F: Field>(
+        &self,
+        direction: Direction,
+        num_elements: usize,
+    ) -> FieldVectorReceiver<F> {
+        self.io_layer
+            .get()
+            .unwrap()
+            .receive_field_thread(direction, self.range_start, num_elements)
     }
 
-    fn receive_field_slice<'a, F: Field>(&self, direction: Direction, dst: &'a mut [F]) -> FieldSliceReceiver<'a, F> {
-        self.io_layer.get().unwrap().receive_field_slice_thread(direction, self.range_start, dst)
+    fn receive_field_slice<'a, F: Field>(
+        &self,
+        direction: Direction,
+        dst: &'a mut [F],
+    ) -> FieldSliceReceiver<'a, F> {
+        self.io_layer
+            .get()
+            .unwrap()
+            .receive_field_slice_thread(direction, self.range_start, dst)
     }
 }
 
@@ -73,34 +123,50 @@ mod test {
     use itertools::{izip, Itertools};
     use rand::RngCore;
 
-    use crate::{party::{test::{PartySetup, TestSetup}, MainParty, Party}, share::{gf8::GF8, test::consistent, Field, RssShare}};
+    use crate::{
+        party::{
+            test::{PartySetup, TestSetup},
+            MainParty, Party,
+        },
+        share::{gf8::GF8, test::consistent, Field, RssShare},
+    };
 
     #[test]
     fn thread_parties_correlated_randomness() {
         struct RngOutput {
             shared_prev: Vec<u8>,
             shared_next: Vec<u8>,
-            local: Vec<u8>
+            local: Vec<u8>,
         }
 
         const THREADS: usize = 3;
         const N_OUTPUT: usize = 1000;
         let program = |p: &mut MainParty| {
             let threads = p.create_thread_parties(p.split_range_equally(100));
-            threads.into_iter().map(|mut thread| {
-                let mut output = RngOutput {
-                    shared_next: vec![0u8; N_OUTPUT],
-                    shared_prev: vec![0u8; N_OUTPUT],
-                    local: vec![0u8; N_OUTPUT],
-                };
-                thread.random_prev.as_mut().fill_bytes(&mut output.shared_prev);
-                thread.random_next.as_mut().fill_bytes(&mut output.shared_next);
-                thread.random_local.fill_bytes(&mut output.local);
-                ((thread.range_start, thread.range_end), output)
-            }).collect_vec()
+            threads
+                .into_iter()
+                .map(|mut thread| {
+                    let mut output = RngOutput {
+                        shared_next: vec![0u8; N_OUTPUT],
+                        shared_prev: vec![0u8; N_OUTPUT],
+                        local: vec![0u8; N_OUTPUT],
+                    };
+                    thread
+                        .random_prev
+                        .as_mut()
+                        .fill_bytes(&mut output.shared_prev);
+                    thread
+                        .random_next
+                        .as_mut()
+                        .fill_bytes(&mut output.shared_next);
+                    thread.random_local.fill_bytes(&mut output.local);
+                    ((thread.range_start, thread.range_end), output)
+                })
+                .collect_vec()
         };
 
-        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(THREADS, program, program, program);
+        let (h1, h2, h3) =
+            PartySetup::localhost_setup_multithreads(THREADS, program, program, program);
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -109,7 +175,9 @@ mod test {
         assert_eq!(o3.len(), THREADS);
 
         // check that randomness is correlated for threads with the same range
-        for (((start1, end1), o1), ((start2, end2), o2), ((start3, end3), o3)) in izip!(o1.iter(), o2.iter(), o3.iter()) {
+        for (((start1, end1), o1), ((start2, end2), o2), ((start3, end3), o3)) in
+            izip!(o1.iter(), o2.iter(), o3.iter())
+        {
             // same range
             assert_eq!(start1, start2);
             assert_eq!(start1, start3);
@@ -128,7 +196,7 @@ mod test {
             set.insert(o.local);
             set.insert(o.shared_next);
         }
-        assert_eq!(set.len(), 3*THREADS*2);
+        assert_eq!(set.len(), 3 * THREADS * 2);
     }
 
     #[test]
@@ -142,16 +210,20 @@ mod test {
         const N_OUTPUT: usize = 1000;
         let program = |p: &mut MainParty| {
             let threads = p.create_thread_parties(p.split_range_equally(100));
-            threads.into_iter().map(|mut thread| {
-                let output = RngOutput {
-                    alpha: thread.generate_alpha(N_OUTPUT),
-                    random: thread.generate_random(N_OUTPUT),
-                };
-                ((thread.range_start, thread.range_end), output)
-            }).collect_vec()
+            threads
+                .into_iter()
+                .map(|mut thread| {
+                    let output = RngOutput {
+                        alpha: thread.generate_alpha(N_OUTPUT),
+                        random: thread.generate_random(N_OUTPUT),
+                    };
+                    ((thread.range_start, thread.range_end), output)
+                })
+                .collect_vec()
         };
 
-        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(THREADS, program, program, program);
+        let (h1, h2, h3) =
+            PartySetup::localhost_setup_multithreads(THREADS, program, program, program);
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -162,7 +234,8 @@ mod test {
         let mut random_elements = BTreeSet::new();
 
         // check that randomness is correct for threads with the same range
-        for (((start1, end1), o1), ((start2, end2), o2), ((start3, end3), o3)) in izip!(o1, o2, o3) {
+        for (((start1, end1), o1), ((start2, end2), o2), ((start3, end3), o3)) in izip!(o1, o2, o3)
+        {
             // same range
             assert_eq!(start1, start2);
             assert_eq!(start1, start3);

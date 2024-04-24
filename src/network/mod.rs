@@ -15,7 +15,7 @@ mod non_blocking;
 mod receiver;
 pub mod task;
 
-pub use receiver::{FieldVectorReceiver, FieldSliceReceiver};
+pub use receiver::{FieldSliceReceiver, FieldVectorReceiver};
 
 pub struct Config {
     player_addr: Vec<Ipv4Addr>,
