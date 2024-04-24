@@ -220,11 +220,9 @@ fn shuffle<R: RngCore + CryptoRng, F: Field>(
     debug_assert_eq!(a.len(), cii.len());
 
     fn shuffle_from_random_tape<T>(tape: &[usize], slice: &mut [T]) {
-        let mut tape_idx = 0;
-        for i in (1..slice.len()).rev() {
+        for (tape_idx, i) in (1..slice.len()).rev().enumerate() {
             // invariant: elements with index > i have been locked in place.
             slice.swap(i, tape[tape_idx]);
-            tape_idx += 1;
         }
     }
 

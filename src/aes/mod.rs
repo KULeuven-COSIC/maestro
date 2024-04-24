@@ -305,7 +305,7 @@ pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
 pub fn aes128_inv_no_keyschedule<Protocol: GF8InvBlackBox>(
     party: &mut Protocol,
     inputs: VectorAesState,
-    key_schedule: &Vec<AesKeyState>,
+    key_schedule: &[AesKeyState],
 ) -> MpcResult<VectorAesState> {
     debug_assert_eq!(key_schedule.len(), 11);
     let mut state = inputs;

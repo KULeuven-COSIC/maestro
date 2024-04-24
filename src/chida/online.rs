@@ -488,7 +488,7 @@ pub fn output_round<F: Field>(
     };
     debug_assert_eq!(my.len(), siii.len());
     let sum = my
-        .into_iter()
+        .iter()
         .zip(siii)
         .map(|(rss, siii)| rss.si + rss.sii + siii)
         .collect();

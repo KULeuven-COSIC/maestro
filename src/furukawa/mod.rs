@@ -370,7 +370,7 @@ where
             .open_rss_to(&mut self.context, &a, self.party.inner.i)?;
         let mut b = b.unwrap(); // this is safe since we open to party.i
         for i in 0..b.len() {
-            b[i] = b[i] + input[i];
+            b[i] += input[i];
         }
         self.party
             .inner

@@ -54,7 +54,7 @@ impl<'a, F: Field> FieldSliceReceiver<'a, F> {
         Self { inner, slice }
     }
 
-    pub fn rcv(mut self) -> Result<(), oneshot::RecvError> {
+    pub fn rcv(self) -> Result<(), oneshot::RecvError> {
         #[cfg(feature = "verbose-timing")]
         let start = Instant::now();
         match self.inner.recv() {

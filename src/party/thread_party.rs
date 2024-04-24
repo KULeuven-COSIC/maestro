@@ -26,6 +26,7 @@ pub struct ThreadParty<T> {
 }
 
 impl<T> ThreadParty<T> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         i: usize,
         range_start: usize,
