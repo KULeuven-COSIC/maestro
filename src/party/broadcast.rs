@@ -237,7 +237,7 @@ impl Broadcast for MainParty {
         rcv_view_next.rcv()?;
         for i in 0..(256 / 8) {
             if view_next[i] != check_next[i] {
-                return Err(MpcError::BroadcastError);
+                return Err(MpcError::Broadcast);
             }
         }
         return Ok(());
@@ -388,7 +388,7 @@ mod test {
                             .unwrap();
                         match p.compare_view(context) {
                             Ok(()) if (p.i + 1) % 3 != cheater => (), // ok! we only check the correctness of broadcast for the P+1
-                            Err(MpcError::BroadcastError) if (p.i + 1) % 3 == cheater => (), // ok!
+                            Err(MpcError::Broadcast) if (p.i + 1) % 3 == cheater => (), // ok!
                             _ => panic!("Expected broadcast error"),
                         }
                     }

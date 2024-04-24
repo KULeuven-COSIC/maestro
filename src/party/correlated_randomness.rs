@@ -58,7 +58,7 @@ impl SharedRng {
             let seeded_rng = ChaCha20Rng::from_seed(common_seed);
             Ok(Self(seeded_rng))
         } else {
-            Err(MpcError::CommitmentError)
+            Err(MpcError::Commitment)
         }
     }
 
@@ -131,10 +131,10 @@ impl GlobalRng {
                 }
                 return Ok(Self(ChaCha20Rng::from_seed(common_seed)));
             } else {
-                Err(MpcError::CommitmentError)
+                Err(MpcError::Commitment)
             }
         } else {
-            Err(MpcError::BroadcastError)
+            Err(MpcError::Broadcast)
         }
     }
 }

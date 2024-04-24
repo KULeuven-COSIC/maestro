@@ -85,7 +85,7 @@ where
     // let open_check_time = open_check_time.elapsed();
     if !ok {
         println!("First C triples don't check out");
-        return Err(MpcError::SacrificeError);
+        return Err(MpcError::Sacrifice);
     }
 
     // let sacrifice_time = Instant::now();
@@ -358,9 +358,9 @@ where
     party.io().wait_for_completion();
     party.compare_view(context).map_err(|mpc_err| {
         match mpc_err {
-            MpcError::BroadcastError => {
+            MpcError::Broadcast => {
                 println!("bucket triples failed");
-                MpcError::SacrificeError // turn broadcast error into sacrifice error
+                MpcError::Sacrifice // turn broadcast error into sacrifice error
             }
             _ => mpc_err,
         }
@@ -479,9 +479,9 @@ where
     party.io().wait_for_completion();
     party.compare_view(context).map_err(|mpc_err| {
         match mpc_err {
-            MpcError::BroadcastError => {
+            MpcError::Broadcast => {
                 println!("bucket triples failed");
-                MpcError::SacrificeError // turn broadcast error into sacrifice error
+                MpcError::Sacrifice // turn broadcast error into sacrifice error
             }
             _ => mpc_err,
         }

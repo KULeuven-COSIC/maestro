@@ -49,7 +49,7 @@ impl VectorAesState {
     }
 
     // outputs the AES states column-wise (as in FIPS 97)
-    pub fn to_bytes(self) -> Vec<RssShare<GF8>> {
+    pub fn to_bytes(&self) -> Vec<RssShare<GF8>> {
         let mut vec = Vec::with_capacity(self.n * 16);
         for k in 0..self.n {
             for i in 0..4 {
@@ -221,7 +221,7 @@ impl AesKeyState {
         return state;
     }
 
-    pub fn to_rss_vec(self) -> Vec<RssShare<GF8>> {
+    pub fn to_rss_vec(&self) -> Vec<RssShare<GF8>> {
         let mut out = Vec::with_capacity(16);
         for i in 0..16 {
             out.push(RssShare::from(self.si[i], self.sii[i]));
