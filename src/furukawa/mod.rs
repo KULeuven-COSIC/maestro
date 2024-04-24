@@ -31,7 +31,7 @@ use crate::{
         error::MpcResult,
         ArithmeticBlackBox, MainParty, Party, ThreadParty,
     },
-    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare},
+    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
 };
 
 mod offline;
@@ -362,7 +362,7 @@ where
         }
     }
 
-    pub fn my_input(&mut self, input: &[F]) -> MpcResult<Vec<RssShare<F>>> {
+    pub fn my_input(&mut self, input: &[F]) -> MpcResult<RssShareVec<F>> {
         let a = self.party.inner.generate_random(input.len());
         let b = self
             .party
@@ -385,7 +385,7 @@ where
         &mut self,
         input_party: usize,
         n_inputs: usize,
-    ) -> MpcResult<Vec<RssShare<F>>> {
+    ) -> MpcResult<RssShareVec<F>> {
         assert_ne!(self.party.inner.i, input_party);
         let a = self.party.inner.generate_random(n_inputs);
         let b = self
@@ -476,7 +476,7 @@ where
         self.inner.constant(value)
     }
 
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F> {
         self.inner.generate_random(n)
     }
 
@@ -487,7 +487,7 @@ where
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
         let party_index = self.inner.i;
         let mut input_phase = self.start_input_phase();
 

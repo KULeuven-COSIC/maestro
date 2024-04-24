@@ -7,7 +7,7 @@ use crate::{
     network::task::Direction,
     party::{broadcast::Broadcast, error::MpcResult, Party},
     share::{
-        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare
+        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare, RssShareVec
     },
 };
 
@@ -105,8 +105,8 @@ where
         return check_triple(party, &x_vec[0], &y_vec[0], z);
     }
     // Compute dot products
-    let f1: Vec<RssShare<F>> = x_vec.iter().skip(1).step_by(2).copied().collect();
-    let g1: Vec<RssShare<F>> = y_vec.iter().skip(1).step_by(2).copied().collect();
+    let f1: RssShareVec<F> = x_vec.iter().skip(1).step_by(2).copied().collect();
+    let g1: RssShareVec<F> = y_vec.iter().skip(1).step_by(2).copied().collect();
     let f2: Vec<_> = x_vec
         .chunks(2)
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)
@@ -222,7 +222,7 @@ where
 fn ss_to_rss_shares<F: Field + Copy + Sized>(
     party: &mut WL16ASParty,
     sum_shares: &[F],
-) -> MpcResult<Vec<RssShare<F>>>
+) -> MpcResult<RssShareVec<F>>
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
@@ -241,7 +241,7 @@ where
         .receive_field_slice(Direction::Next, &mut s_ii)
         .rcv()?;
     party.inner.io().wait_for_completion();
-    let res: Vec<RssShare<F>> = s_ii
+    let res: RssShareVec<F> = s_ii
         .iter()
         .zip(s_i)
         .map(|(sii, si)| RssShare::from(si, *sii))

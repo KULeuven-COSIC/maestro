@@ -7,7 +7,7 @@ use crate::{
         task::{Direction, IoLayer},
         FieldSliceReceiver, FieldVectorReceiver,
     },
-    share::{Field, FieldRngExt, RssShare},
+    share::{Field, FieldRngExt, RssShare, RssShareVec},
 };
 
 use super::{correlated_randomness::SharedRng, Party};
@@ -70,7 +70,7 @@ impl<T> Party for ThreadParty<T> {
         super::generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
-    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
     where
         ChaCha20Rng: FieldRngExt<F>,
     {

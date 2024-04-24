@@ -9,7 +9,7 @@ use crate::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-        Field, FieldDigestExt, FieldRngExt, RssShare,
+        Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec,
     },
 };
 use itertools::{izip, Itertools};
@@ -590,7 +590,7 @@ where
         self.inner.constant(value)
     }
 
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F> {
         self.inner.generate_random(n)
     }
 
@@ -602,7 +602,7 @@ where
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
         self.inner.input_round(my_input)
     }
 

@@ -9,7 +9,7 @@ use crate::network::task::{Direction, IoLayerOwned};
 use crate::party::error::MpcResult;
 use crate::party::{ArithmeticBlackBox, MainParty, Party};
 use crate::share::gf8::GF8;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
+use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec};
 
 use super::aes::VectorAesState;
 use super::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
@@ -34,7 +34,7 @@ where
         self.0.constant(value)
     }
 
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F> {
         self.0.generate_random(n)
     }
 
@@ -46,7 +46,7 @@ where
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
         input_round(&mut self.0, my_input)
     }
 
@@ -120,7 +120,7 @@ where
         self.inner.constant(value)
     }
 
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F> {
         self.inner.generate_random(n)
     }
 
@@ -132,7 +132,7 @@ where
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
         self.inner.input_round(my_input)
     }
 
@@ -302,7 +302,7 @@ fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
 pub fn input_round<F: Field>(
     party: &mut MainParty,
     input: &[F],
-) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>
+) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>
 where
     ChaCha20Rng: FieldRngExt<F>,
 {

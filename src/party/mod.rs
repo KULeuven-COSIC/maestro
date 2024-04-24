@@ -7,7 +7,7 @@ mod thread_party;
 use crate::network::task::{Direction, IoLayerOwned};
 use crate::network::{self, ConnectedParty};
 use crate::party::correlated_randomness::SharedRng;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
+use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec};
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -108,7 +108,7 @@ pub trait ArithmeticBlackBox<F: Field> {
     type Rng: FieldRngExt<F>;
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>>;
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F>;
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
     fn generate_alpha(&mut self, n: usize) -> Vec<F>;
     fn io(&self) -> &IoLayerOwned;
@@ -116,7 +116,7 @@ pub trait ArithmeticBlackBox<F: Field> {
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>;
     fn constant(&self, value: F) -> RssShare<F>;
     fn mul(
         &mut self,
@@ -132,7 +132,7 @@ pub trait ArithmeticBlackBox<F: Field> {
 }
 
 pub trait Party {
-    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
     where
         ChaCha20Rng: FieldRngExt<F>;
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
@@ -487,7 +487,7 @@ fn generate_random<F: Field, R: Rng + CryptoRng>(
     next: &mut R,
     prev: &mut R,
     n: usize,
-) -> Vec<RssShare<F>>
+) -> RssShareVec<F>
 where
     R: FieldRngExt<F>,
 {
@@ -519,7 +519,7 @@ impl Party for MainParty {
         generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
-    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
     where
         ChaCha20Rng: FieldRngExt<F>,
     {

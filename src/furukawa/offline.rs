@@ -8,7 +8,7 @@ use crate::{
         error::{MpcError, MpcResult},
         MainParty, Party,
     },
-    share::{Field, FieldDigestExt, FieldRngExt, RssShare},
+    share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
 };
 use itertools::izip;
 use rand::Rng;
@@ -152,7 +152,7 @@ where
     Ok(correct_triples)
 }
 
-type OptimisticMulResult<F> = (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<F>, Vec<F>);
+type OptimisticMulResult<F> = (RssShareVec<F>, RssShareVec<F>, Vec<F>, Vec<F>);
 
 #[allow(non_snake_case)]
 fn optimistic_mul_mt<F: Field + Send>(

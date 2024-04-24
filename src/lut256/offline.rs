@@ -237,7 +237,7 @@ mod test {
             bs_bool16::BsBool16,
             gf8::GF8,
             test::{assert_eq, consistent, secret_share_vector},
-            Field, FieldRngExt, RssShare,
+            Field, FieldRngExt, RssShare, RssShareVec,
         },
     };
 
@@ -247,9 +247,9 @@ mod test {
         rng: &mut R,
         v: &Vec<Vec<F>>,
     ) -> (
-        Vec<Vec<RssShare<F>>>,
-        Vec<Vec<RssShare<F>>>,
-        Vec<Vec<RssShare<F>>>,
+        Vec<RssShareVec<F>>,
+        Vec<RssShareVec<F>>,
+        Vec<RssShareVec<F>>,
     )
     where
         R: FieldRngExt<F>,
@@ -293,7 +293,7 @@ mod test {
         }
     }
 
-    fn transpose<F: Field>(v: Vec<Vec<RssShare<F>>>) -> Vec<Vec<RssShare<F>>> {
+    fn transpose<F: Field>(v: Vec<RssShareVec<F>>) -> Vec<RssShareVec<F>> {
         let simd = v[0].len();
         assert!(v.iter().all(|vx| vx.len() == simd));
         let mut outer = Vec::with_capacity(simd);

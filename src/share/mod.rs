@@ -78,6 +78,8 @@ pub struct RssShare<F: Field> {
     pub sii: F,
 }
 
+pub type RssShareVec<F> = Vec<RssShare<F>>;
+
 impl<F: Field> RssShare<F> {
     pub fn from(si: F, sii: F) -> Self {
         Self { si, sii }
@@ -151,6 +153,8 @@ pub mod test {
     use std::borrow::Borrow;
     use std::fmt::Debug;
 
+    use super::RssShareVec;
+
     pub fn consistent<F: Field + PartialEq + Debug>(
         share1: &RssShare<F>,
         share2: &RssShare<F>,
@@ -197,7 +201,7 @@ pub mod test {
     pub fn secret_share_vector<F: Field, R: Rng + CryptoRng>(
         rng: &mut R,
         elements: impl IntoIterator<Item = impl Borrow<F>>,
-    ) -> (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)
+    ) -> (RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)
     where
         R: FieldRngExt<F>,
     {
@@ -213,7 +217,7 @@ pub mod test {
 
     pub fn random_secret_shared_vector<F: Field>(
         n: usize,
-    ) -> (Vec<F>, Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)
+    ) -> (Vec<F>, RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)
     where
         ThreadRng: FieldRngExt<F>,
     {
