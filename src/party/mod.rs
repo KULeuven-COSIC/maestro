@@ -268,10 +268,7 @@ impl MainParty {
     }
 
     pub fn teardown(&mut self) -> MpcResult<()> {
-        self.thread_pool
-            .take()
-            .into_iter()
-            .for_each(drop);
+        self.thread_pool.take().into_iter().for_each(drop);
         let io = self.io.take();
         debug_assert!(io.is_some());
         if let Some(io) = io {

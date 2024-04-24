@@ -1,15 +1,16 @@
 //! This module implements the *semi-honest* oblivious AES protocol "WOL LUT 16".
 //!
-//! At its core is a protocol to compute multiplicative inverses in `GF(2^8)`.
-//! This is done using the WOL transform as proposed by Wolkerstorfer et al. 
-//! in "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, 
-//! <https://doi.org/10.1007/3-540-45760-7_6> to convert between `GF(2^8)` and `GF(2^4)^2`.
-//! 
-//! Then a pre-processed look-up table of 16-bits is used to compute multiplicative inverses in `GF(2^4)`. 
-//! 
+//! The core is a sub-protocol (`Protocol 2`) to compute multiplicative inverses in `GF(2^8)`.
+//! This works as follows:
+//! 1) Use the WOL[^note] transform to convert the element `GF(2^8)` to `GF(2^4)^2`.
+//! 2) Compute the inverse of the `GF(2^4)^2` element using a single inversion in `GF(2^4)`. To compute the `GF(2^4)` inversion a pre-processed lookup table of 16-bits is used.
+//! 3) Use the reverse WOL transform to convert the result to `GF(2^8)`.
+//!
 //! This module notably contains
 //!   - [wollut16_benchmark] that implements the AES benchmark
 //!   - [WL16Party] the party wrapper for the protocol. [WL16Party] also implements [ArithmeticBlackBox]
+//!
+//! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 
 use std::time::Instant;
 
@@ -25,7 +26,7 @@ use crate::{
 pub mod offline;
 pub mod online;
 
-/// The party wrapper for the protocol.
+/// The party wrapper for the WOLLUT16 protocol.
 pub struct WL16Party {
     inner: ChidaParty,
     prep_ohv: Vec<RndOhvOutput>,
@@ -37,7 +38,7 @@ pub struct WL16Party {
 pub struct RndOhv16(u16);
 
 /// Output of the random one-hot vector pre-processing.
-/// 
+///
 /// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (3,3)-sharing of the corresponding `GF4` element that indicates
 /// the position of 1 in the vector.
 pub struct RndOhvOutput {
@@ -81,7 +82,7 @@ impl WL16Party {
 }
 
 /// This function implements the AES benchmark.
-/// 
+///
 /// The arguments are
 /// - `connected` - the local party
 /// - `simd` - number of parallel AES calls

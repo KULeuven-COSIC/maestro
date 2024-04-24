@@ -126,16 +126,14 @@ impl<T> TaskQueue<T> {
     }
 
     pub fn pop_with_thread_id(&mut self, id: u64) -> Option<T> {
-        self.queue_thread_id
-            .get_mut(&id)
-            .and_then(|q| {
-                let popped = q.pop_front();
-                if popped.is_some() {
-                    // we actually removed an element
-                    self.el_count -= 1;
-                }
-                popped
-            })
+        self.queue_thread_id.get_mut(&id).and_then(|q| {
+            let popped = q.pop_front();
+            if popped.is_some() {
+                // we actually removed an element
+                self.el_count -= 1;
+            }
+            popped
+        })
     }
 
     pub fn peek(&mut self) -> Option<&mut T> {
@@ -225,7 +223,7 @@ enum State {
 
 impl State {
     pub fn is_working(&self) -> bool {
-        matches!(self,Self::Working { .. })
+        matches!(self, Self::Working { .. })
     }
 }
 
@@ -522,8 +520,8 @@ impl IoThreadContext {
                     if *thread_id_buf_offset >= thread_id_buf.len() {
                         // grab relevant read task
                         // check if the appropriate read task is present
-                        let t = read_task_queue
-                            .pop_with_thread_id(u64::from_le_bytes(*thread_id_buf));
+                        let t =
+                            read_task_queue.pop_with_thread_id(u64::from_le_bytes(*thread_id_buf));
                         if let Some(task) = t {
                             // completed reading the id
                             *thread_id_buf_offset = 0;

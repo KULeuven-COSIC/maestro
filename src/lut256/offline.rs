@@ -205,7 +205,7 @@ fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {
     debug_assert_eq!(bs.len(), 8);
     let mut res = vec![(0u8, 0u8); bs[0].len() * 16];
     for (i, bit) in bs.iter().enumerate().take(8) {
-        for (j,bit_j) in bit.iter().enumerate() {
+        for (j, bit_j) in bit.iter().enumerate() {
             for k in 0..16 {
                 let mut si = res[16 * j + k].0;
                 let mut sii = res[16 * j + k].1;

@@ -68,11 +68,11 @@ const GF4_BITSLICED_LUT: [[u16; 4]; 16] = [
 ];
 
 /// This function implements the LUT inversion protocol.
-/// 
+///
 /// The inputs are:
 /// - `party` - the local party `P_i` with a preprocessed lookup table
 /// - `v` - the sum share of the input value in `GF(2^4)`
-/// 
+///
 /// The function returns a replicated share of the multiplicative inverse of the input value.
 pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<GF4>)> {
     if party.prep_ohv.len() < v.len() {
@@ -167,7 +167,6 @@ fn ss_to_rss_layer(
     party.io().wait_for_completion();
     Ok(())
 }
-
 
 /// This function implements multiplicative inversion as in `Protocol 2`.
 ///
@@ -318,7 +317,6 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
     }
 }
 
-
 /// This function is an optimized version of the multiplicative inversion as in `Protocol 2`.
 ///
 /// Given a (2,3)-RSS shared vector `[[x]]`` of elements in `GF(2^8)`,
@@ -429,7 +427,11 @@ fn gf8_inv_layer_opt_party<P: Party>(
 /// - `sii` - the second component of `[[x]]_i`
 ///
 /// The output, the share `[[x^-1]]_i`, is written into `(s_i,s_ii)`.
-pub fn gf8_inv_layer_opt_mt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+pub fn gf8_inv_layer_opt_mt(
+    party: &mut WL16Party,
+    si: &mut [GF8],
+    sii: &mut [GF8],
+) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     if party.prep_ohv.len() < si.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
@@ -464,12 +466,12 @@ pub fn gf8_inv_layer_opt_mt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF
 }
 
 /// This function is an optimized implementation of the LUT inversion protocol.
-/// 
+///
 /// The inputs are:
 /// - `party` - the local party `P_i`
 /// - `v` - the sum share of the input value in `GF(2^4)`
-/// - `rnd_ohv` - the random one-hot vector used for the look-up table
-/// 
+/// - `rnd_ohv` - the random one-hot vector used for the lookup table
+///
 /// The function returns a replicated share of the multiplicative inverse of the input value.
 pub fn lut_layer_opt<P: Party>(
     party: &mut P,

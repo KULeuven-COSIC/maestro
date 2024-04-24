@@ -1,12 +1,9 @@
 //! This crate implements different oblivious AES protocols.
-//! 
-//! 
 
 #![allow(dead_code)]
 pub mod aes;
 pub mod benchmark;
 pub mod chida;
-pub mod dec;
 pub mod furukawa;
 pub mod gf4_circuit;
 pub mod lut256;

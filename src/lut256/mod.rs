@@ -1,3 +1,13 @@
+//! This module implements the *semi-honest* oblivious AES protocol "LUT 256".
+//!
+//! The core is a sub-protocol to compute the SBOX using a lookup table.
+//! This table lookup requires a pre-processed random one-hot vector of size `256`.
+//!
+//! This module notably contains
+//!   - [lut256_benchmark] that implements the AES benchmark
+//!   - [LUT256Party] the party wrapper for the protocol. [LUT256Party] also implements [ArithmeticBlackBox]
+//!
+
 use std::time::{Duration, Instant};
 
 use crate::{
@@ -12,11 +22,11 @@ mod lut256_tables;
 mod offline;
 mod online;
 
-/// a random one-hot vector of size 256
+/// A random one-hot vector of size `256`.
 #[derive(Clone, Copy)]
 pub struct RndOhv([u64; 4]);
 
-// Party for LUT-256
+/// The party wrapper for the LUT 256 protocol.
 pub struct LUT256Party {
     inner: ChidaParty,
     prep_ohv: Vec<RndOhv256Output>,
@@ -24,7 +34,8 @@ pub struct LUT256Party {
 }
 
 /// Output of the random one-hot vector pre-processing.
-/// Contains a (2,3)-sharing of a size 256 one-hot vector `RndOhv` and a (2,3)-sharing of the corresponding `GF8` element that indicates
+///
+/// Contains a (2,3)-sharing of a size `256` one-hot vector `RndOhv` and a (2,3)-sharing of the corresponding `GF8` element that indicates
 /// the position of 1 in the vector.
 pub struct RndOhv256Output {
     /// share i of one-hot vector
@@ -73,6 +84,12 @@ impl RndOhv {
     }
 }
 
+/// This function implements the AES benchmark.
+///
+/// The arguments are
+/// - `connected` - the local party
+/// - `simd` - number of parallel AES calls
+/// - `n_worker_threads` - number of worker threads
 pub fn lut256_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
     let mut party = LUT256Party::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();

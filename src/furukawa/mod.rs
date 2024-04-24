@@ -1,5 +1,5 @@
-//! This module implements the *maliciously-secure* oblivious AES protocol by Furukawa et al., 
-//! "High-Throughput Secure Three-Party Computation for Malicious Adversaries and an Honest Majority" 
+//! This module implements the *maliciously-secure* oblivious AES protocol by Furukawa et al.,
+//! "High-Throughput Secure Three-Party Computation for Malicious Adversaries and an Honest Majority"
 //! (<https://eprint.iacr.org/2016/944>).
 //!
 //! In the pre-processing phase, multiplication triples are generated and checked via bucket cut-and-choose.
@@ -39,7 +39,7 @@ use crate::{
 mod offline;
 
 /// This function implements the AES benchmark.
-/// 
+///
 /// The arguments are
 /// - `connected` - the local party
 /// - `simd` - number of parallel AES calls

@@ -63,13 +63,11 @@ impl Field for BsBool16 {
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
         debug_assert_eq!(v.len(), 2 * dest.len());
-        dest.iter_mut()
-            .zip(v.chunks(2))
-            .for_each(|(dst, chunk)| {
-                let low = chunk[0] as u16;
-                let high = chunk[1] as u16;
-                dst.0 = low | (high << 8);
-            });
+        dest.iter_mut().zip(v.chunks(2)).for_each(|(dst, chunk)| {
+            let low = chunk[0] as u16;
+            let high = chunk[1] as u16;
+            dst.0 = low | (high << 8);
+        });
     }
 }
 
@@ -149,9 +147,8 @@ impl<D: Digest> FieldDigestExt<BsBool16> for D {
 
 #[cfg(test)]
 mod test {
-    use rand::thread_rng;
     use crate::share::{bs_bool16::BsBool16, Field, FieldRngExt};
-
+    use rand::thread_rng;
 
     #[test]
     fn serialization() {
@@ -168,7 +165,10 @@ mod test {
         );
         assert_eq!(
             list_odd,
-            BsBool16::from_byte_vec(BsBool16::as_byte_vec(&list_odd, list_odd.len()), list_odd.len())
+            BsBool16::from_byte_vec(
+                BsBool16::as_byte_vec(&list_odd, list_odd.len()),
+                list_odd.len()
+            )
         );
 
         let mut slice_even = [BsBool16::ZERO; 500];
@@ -180,8 +180,10 @@ mod test {
         );
         assert_eq!(&list_even, &slice_even);
 
-        BsBool16::from_byte_slice(BsBool16::as_byte_vec(&list_odd, list_odd.len()), &mut slice_odd);
+        BsBool16::from_byte_slice(
+            BsBool16::as_byte_vec(&list_odd, list_odd.len()),
+            &mut slice_odd,
+        );
         assert_eq!(&list_odd, &slice_odd);
     }
-
 }

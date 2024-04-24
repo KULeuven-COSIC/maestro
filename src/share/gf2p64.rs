@@ -242,9 +242,7 @@ impl Field for GF2p64 {
         dest.iter_mut()
             .zip(v.chunks(Self::NBYTES))
             .for_each(|(dst, c)| {
-                dst.0 = u64::from_be_bytes(
-                    c.try_into().expect("chunk with incorrect length"),
-                );
+                dst.0 = u64::from_be_bytes(c.try_into().expect("chunk with incorrect length"));
             })
     }
 
@@ -730,8 +728,7 @@ mod test {
     use rand::thread_rng;
 
     use crate::share::{
-        gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field,
-        FieldRngExt, InnerProduct, Invertible,
+        gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, FieldRngExt, InnerProduct, Invertible,
     };
 
     #[cfg(any(
