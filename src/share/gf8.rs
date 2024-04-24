@@ -59,7 +59,7 @@ impl Field for GF8 {
     }
 
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
-        v.into_iter().map(|byte| GF8(byte)).collect()
+        v.into_iter().map(GF8).collect()
     }
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
@@ -72,12 +72,16 @@ impl Field for GF8 {
 impl Add for GF8 {
     type Output = GF8;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
 }
 
+
 impl AddAssign for GF8 {
+
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0;
     }
@@ -86,6 +90,7 @@ impl AddAssign for GF8 {
 impl Sub for GF8 {
     type Output = GF8;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
@@ -192,7 +197,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF8> for R {
         // r.fill(0);
         // debug_assert_eq!(r.len(), n);
         self.fill_bytes(&mut r);
-        r.into_iter().map(|x| GF8(x)).collect()
+        r.into_iter().map(GF8).collect()
     }
 
     fn fill(&mut self, buf: &mut [GF8]) {
@@ -205,7 +210,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF8> for R {
 impl<D: Digest> FieldDigestExt<GF8> for D {
     fn update(&mut self, message: &[GF8]) {
         for x in message {
-            self.update(&[x.0]);
+            self.update([x.0]);
         }
     }
 }

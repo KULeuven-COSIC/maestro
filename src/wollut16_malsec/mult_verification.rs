@@ -105,8 +105,8 @@ where
         return check_triple(party, &x_vec[0], &y_vec[0], z);
     }
     // Compute dot products
-    let f1: Vec<RssShare<F>> = x_vec.iter().skip(1).step_by(2).map(|x| *x).collect();
-    let g1: Vec<RssShare<F>> = y_vec.iter().skip(1).step_by(2).map(|y| *y).collect();
+    let f1: Vec<RssShare<F>> = x_vec.iter().skip(1).step_by(2).copied().collect();
+    let g1: Vec<RssShare<F>> = y_vec.iter().skip(1).step_by(2).copied().collect();
     let f2: Vec<_> = x_vec
         .chunks(2)
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)

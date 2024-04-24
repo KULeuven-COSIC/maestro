@@ -113,12 +113,12 @@ impl<F: Field> Sub<Self> for RssShare<F> {
     }
 }
 
-impl<F: Field> Mul<F> for RssShare<F> {
+impl<F: Field + Copy> Mul<F> for RssShare<F> {
     type Output = Self;
 
     fn mul(self, rhs: F) -> Self::Output {
         RssShare {
-            si: self.si * rhs.clone(),
+            si: self.si * rhs,
             sii: self.sii * rhs,
         }
     }

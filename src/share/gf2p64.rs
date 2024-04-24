@@ -280,12 +280,15 @@ impl HasTwo for GF2p64 {
 impl Add for GF2p64 {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
 }
 
 impl AddAssign for GF2p64 {
+
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0;
     }
@@ -294,6 +297,7 @@ impl AddAssign for GF2p64 {
 impl Sub for GF2p64 {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
@@ -402,6 +406,7 @@ impl InnerProduct for GF2p64 {
     fn weak_inner_product(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
         Self::clmul_weak_inner_product(a, b)
     }
+
 }
 
 impl Debug for GF2p64 {
@@ -427,7 +432,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF2p64> for R {
 impl<D: Digest> FieldDigestExt<GF2p64> for D {
     fn update(&mut self, message: &[GF2p64]) {
         for x in message {
-            self.update(&x.0.to_be_bytes());
+            self.update(x.0.to_be_bytes());
         }
     }
 }
