@@ -2,18 +2,18 @@ use criterion::*;
 use dist_dec::share::{gf2p64::GF2p64, FieldRngExt, RssShare};
 use rand::{rngs::ThreadRng, thread_rng};
 
-
-
-pub fn random_rss(
-    n: usize,
-) -> Vec<RssShare<GF2p64>>
+pub fn random_rss(n: usize) -> Vec<RssShare<GF2p64>>
 where
     ThreadRng: FieldRngExt<GF2p64>,
 {
     let mut rng = thread_rng();
     let x: Vec<GF2p64> = FieldRngExt::generate(&mut rng, n);
     let y: Vec<GF2p64> = FieldRngExt::generate(&mut rng, n);
-    let res = x.iter().zip(y.iter()).map(|(x,y)| RssShare::from(*x,*y)).collect();
+    let res = x
+        .iter()
+        .zip(y.iter())
+        .map(|(x, y)| RssShare::from(*x, *y))
+        .collect();
     res
 }
 
@@ -50,7 +50,6 @@ fn bench_inner_product(c: &mut Criterion) {
     }
 }
 
-
 fn bench_weak_inner_product(c: &mut Criterion) {
     let mut rng = thread_rng();
     let mut group = c.benchmark_group("Weak Inner Product Benchmark");
@@ -84,7 +83,7 @@ fn bench_weak_inner_product(c: &mut Criterion) {
     }
 }
 
-/* 
+/*
 
 A special case of the bench_weak_inner_product
 
@@ -106,5 +105,9 @@ fn bench_small_inner_product(c: &mut Criterion) {
 }
 */
 
-criterion_group!(gf2p64_ip_benchmark, bench_inner_product, bench_weak_inner_product);
+criterion_group!(
+    gf2p64_ip_benchmark,
+    bench_inner_product,
+    bench_weak_inner_product
+);
 criterion_main!(gf2p64_ip_benchmark);
