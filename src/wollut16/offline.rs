@@ -359,7 +359,7 @@ pub fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use itertools::izip;
     use rand::thread_rng;
 
@@ -456,7 +456,7 @@ mod test {
         }
     }
 
-    fn check_correct_rnd_ohv16(o1: Vec<RndOhvOutput>, o2: Vec<RndOhvOutput>, o3: Vec<RndOhvOutput>) {
+    pub fn check_correct_rnd_ohv16(o1: Vec<RndOhvOutput>, o2: Vec<RndOhvOutput>, o3: Vec<RndOhvOutput>) {
         for (o1,o2,o3) in izip!(o1,o2,o3) {
             let rand = o1.random + o2.random + o3.random;
             // check consistent

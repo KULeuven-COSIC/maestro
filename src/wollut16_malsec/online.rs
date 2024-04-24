@@ -1,11 +1,14 @@
 use itertools::{izip, Itertools};
+use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
+
+use super::WL16ASParty;
 
 #[cfg(feature = "verbose-timing")]
 use {std::time::Instant, crate::party::PARTY_TIMER};
 
 use crate::{
     network::task::Direction,
-    party::{error::MpcResult, MulTripleRecorder, Party},
+    party::{error::MpcResult, MainParty, MulTripleRecorder, Party},
     share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
@@ -14,8 +17,6 @@ use crate::{
     },
     wollut16::{RndOhv16, RndOhvOutput},
 };
-
-use super::WL16ASParty;
 
 /// This protocol implements multiplicative inversion as in `Protocol 3`.
 ///
@@ -28,7 +29,7 @@ use super::WL16ASParty;
 /// - `sii` - the second component of `[[x]]_i`
 ///
 /// The output, the share `[[x^-1]]_i`, is written into `(s_i,s_ii)`.
-pub fn gf8_inv_layer(party: &mut WL16ASParty, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+pub fn gf8_inv_layer<P: Party, Rec: MulTripleRecorder<BsGF4>>(party: &mut P, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     // Step 1 WOL conversion
     let (ah_i, al_i) = wol_bitslice_gf4(si);
@@ -48,7 +49,7 @@ pub fn gf8_inv_layer(party: &mut WL16ASParty, si: &mut [GF8], sii: &mut [GF8]) -
         })
         .collect();
     // Step 4 LUT Layer
-    let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v.clone())?;
+    let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v.clone(), rnd_ohv)?;
     // Step 5 local multiplication
     let mut ah_prime: Vec<_> = izip!(ah_i.iter(), ah_ii.iter(), v_inv_i.iter(), v_inv_ii.iter())
         .map(|(ahi, ahii, vinvi, vinvii)| (*ahi * *vinvi) + (*ahi + *ahii) * (*vinvi + *vinvii))
@@ -92,18 +93,39 @@ pub fn gf8_inv_layer(party: &mut WL16ASParty, si: &mut [GF8], sii: &mut [GF8]) -
 
     // Add triples to buffer
     // [a_h],[a_l],[a_h * a_l]
-    party.gf4_triples_to_check.record_mul_triple(&ah_i,&ah_ii, &al_i, &al_ii, &a_h_times_a_l_i, &a_h_times_a_l_ii);
+    triple_rec.record_mul_triple(&ah_i,&ah_ii, &al_i, &al_ii, &a_h_times_a_l_i, &a_h_times_a_l_ii);
     // [a_h], [v^-1], [a_h']
-    party.gf4_triples_to_check.record_mul_triple(&ah_i, &ah_ii, &v_inv_i, &v_inv_ii, &ah_prime, &ah_prime_ii);
+    triple_rec.record_mul_triple(&ah_i, &ah_ii, &v_inv_i, &v_inv_ii, &ah_prime, &ah_prime_ii);
 
     let a_h_plus_a_l_i = ah_i.into_iter().zip(al_i).map(|(ah,al)| ah + al).collect_vec();
     let a_h_plus_a_l_ii = ah_ii.into_iter().zip(al_ii).map(|(ah,al)| ah + al).collect_vec();
     // [a_h + a_l], [v^-1], [a_l']
-    party.gf4_triples_to_check.record_mul_triple(&a_h_plus_a_l_i, &a_h_plus_a_l_ii, &v_inv_i, &v_inv_ii, &al_prime, &al_prime_ii);
+    triple_rec.record_mul_triple(&a_h_plus_a_l_i, &a_h_plus_a_l_ii, &v_inv_i, &v_inv_ii, &al_prime, &al_prime_ii);
     
     // Step 8 WOL-inv conversion
     un_wol_bitslice_gf4(&ah_prime, &al_prime, si);
     un_wol_bitslice_gf4(&ah_prime_ii, &al_prime_ii, sii);
+    Ok(())
+}
+
+pub fn gf8_inv_layer_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+    debug_assert_eq!(si.len(), sii.len());
+    debug_assert_eq!(rnd_ohv.len(), si.len());
+    
+    let ranges = party.split_range_equally_even(si.len());
+    let chunk_size = ranges[0].1 - ranges[0].0;
+    let threads = party.create_thread_parties_with_additional_data(ranges, |start, end| Some(triple_rec.create_thread_mul_triple_recorder(start, end)));
+
+    
+    let observed_triples = party.run_in_threadpool(|| {
+        threads.into_par_iter().zip_eq(si.par_chunks_mut(chunk_size)).zip_eq(sii.par_chunks_mut(chunk_size)).zip_eq(rnd_ohv.par_chunks(chunk_size))
+            .map(|(((mut thread_party, si), sii), prep_ohv)| {
+                let mut triple_rec = thread_party.additional_data.take().unwrap();
+                gf8_inv_layer(&mut thread_party, &mut triple_rec, si, sii, prep_ohv).map(|()| triple_rec)
+        }).collect::<MpcResult<Vec<_>>>()
+    })?;
+    // add observed triples
+    triple_rec.join_thread_mul_triple_recorders(observed_triples);
     Ok(())
 }
 
@@ -152,38 +174,22 @@ fn square_and_e_layer(v: &[BsGF4]) -> Vec<BsGF4> {
 }
 
 /// This protocol implements the preprocessed table lookup to compute v^-1 from v
-fn lut_layer_opt(
-    party: &mut WL16ASParty,
+fn lut_layer_opt<P: Party>(
+    party: &mut P,
     mut v: Vec<BsGF4>,
+    rnd_ohv: &[RndOhvOutput],
 ) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
-    let n = 2 * v.len();
-    if party.prep_ohv.len() < n {
-        panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
-    }
     #[cfg(feature = "verbose-timing")]
     let lut_open_time = Instant::now();
 
-    let rnd_ohv = &party.prep_ohv[party.prep_ohv.len() - n..];
-    let rcv_cii = party
-        .inner
-        .io()
-        .receive_field::<BsGF4>(Direction::Next, v.len());
-    let rcv_ciii = party
-        .inner
-        .io()
-        .receive_field::<BsGF4>(Direction::Previous, v.len());
+    let rcv_cii = party.receive_field::<BsGF4>(Direction::Next, v.len());
+    let rcv_ciii = party.receive_field::<BsGF4>(Direction::Previous, v.len());
     v.iter_mut().enumerate().for_each(|(i, dst)| {
         *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
     });
     let ci = v;
-    party
-        .inner
-        .io()
-        .send_field::<BsGF4>(Direction::Next, &ci, ci.len());
-    party
-        .inner
-        .io()
-        .send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
+    party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
+    party.send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
 
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
@@ -196,8 +202,6 @@ fn lut_layer_opt(
     #[cfg(feature = "verbose-timing")]
     let lut_local_time = Instant::now();
     let res = lut_with_rnd_ohv_bitsliced_opt(rnd_ohv, ci, cii, ciii);
-    // remove used pre-processing material
-    party.prep_ohv.truncate(party.prep_ohv.len() - n);
 
     #[cfg(feature = "verbose-timing")]
     PARTY_TIMER
@@ -205,7 +209,7 @@ fn lut_layer_opt(
         .unwrap()
         .report_time("gf8_inv_layer_lut_local", lut_local_time.elapsed());
 
-    party.inner.io().wait_for_completion();
+    // party.inner.io().wait_for_completion();
     Ok(res)
 }
 
@@ -250,8 +254,8 @@ pub fn lut_with_rnd_ohv_bitsliced_opt(
 }
 
 /// This function implements the resharing protocol from sum shares to replicated shares.
-fn ss_to_rss_layer(
-    party: &mut WL16ASParty,
+fn ss_to_rss_layer<P: Party>(
+    party: &mut P,
     a_i: &mut [BsGF4],
     a_ii: &mut [BsGF4],
     b_i: &mut [BsGF4],
@@ -265,20 +269,17 @@ fn ss_to_rss_layer(
     debug_assert_eq!(b_i.len(), b_ii.len());
     debug_assert_eq!(c_i.len(), c_ii.len());
     let n = a_i.len();
-    let rcv_ii = party
-        .inner
-        .io()
-        .receive_field::<BsGF4>(Direction::Next, 3 * n);
-    izip!(a_i.iter_mut(), party.inner.generate_alpha(n)).for_each(|(si, alpha)| {
+    let rcv_ii = party.receive_field::<BsGF4>(Direction::Next, 3 * n);
+    izip!(a_i.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
-    izip!(b_i.iter_mut(), party.inner.generate_alpha(n)).for_each(|(si, alpha)| {
+    izip!(b_i.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
-    izip!(c_i.iter_mut(), party.inner.generate_alpha(n)).for_each(|(si, alpha)| {
+    izip!(c_i.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
-    party.inner.io().send_field::<BsGF4>(
+    party.send_field::<BsGF4>(
         Direction::Previous,
         a_i.iter().chain(b_i.iter()).chain(c_i.iter()),
         3 * n,
@@ -287,7 +288,7 @@ fn ss_to_rss_layer(
     a_ii.copy_from_slice(&res[..n]);
     b_ii.copy_from_slice(&res[n..2 * n]);
     c_ii.copy_from_slice(&res[2 * n..]);
-    party.inner.io().wait_for_completion();
+    // party.inner.io().wait_for_completion();
     Ok(())
 }
 
@@ -316,6 +317,12 @@ mod test {
     }
 
     #[test]
+    fn sub_bytes_mt() {
+        const N_THREADS: usize = 3;
+        test_sub_bytes::<WL16ASSetup,_>(Some(N_THREADS))
+    }
+
+    #[test]
     fn aes128_keyschedule() {
         test_aes128_keyschedule_gf8::<WL16ASSetup, _>(None)
     }
@@ -326,7 +333,19 @@ mod test {
     }
 
     #[test]
+    fn aes_128_no_keyschedule_mt() {
+        const N_THREADS: usize = 3;
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(100, Some(N_THREADS))
+    }
+
+    #[test]
     fn inv_aes128_no_keyschedule() {
         test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(1, None)
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_mt() {
+        const N_THREADS: usize = 3;
+        test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(100, Some(N_THREADS))
     }
 }

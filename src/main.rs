@@ -23,6 +23,7 @@ use chida::ChidaBenchmark;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use itertools::Itertools;
 use network::ConnectedParty;
+use wollut16_malsec::MalLUT16Benchmark;
 
 use crate::chida::ImplVariant;
 
@@ -43,6 +44,7 @@ pub enum ProtocolVariant {
     Lut16,
     GF4Circuit,
     Lut256,
+    MalLut16,
 }
 
 #[derive(Subcommand)]
@@ -188,6 +190,7 @@ impl ProtocolVariant {
             ProtocolVariant::GF4Circuit => &GF4CircuitBenchmark,
             ProtocolVariant::Lut16 => &LUT16Benchmark,
             ProtocolVariant::Lut256 => &LUT256Benchmark,
+            ProtocolVariant::MalLut16 => &MalLUT16Benchmark,
         }
     }
 }

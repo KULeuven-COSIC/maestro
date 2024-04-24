@@ -16,6 +16,7 @@ use super::WL16ASParty;
 /// Protocol `8` to verify the multiplication triples at the end of the protocol.
 pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool> {
     let r: GF2p64 = coin_flip(party)?;
+    println!("After coinflip");
     let k1 = party.gf4_triples_to_check.len() * 2; //each BsGF4 contains two values
     let k2 = party.gf2_triples_to_check.len() * 16; //each BsBool16 contains 16 values
     let n = (k1+k2).checked_next_power_of_two().expect("n too large");
@@ -60,7 +61,9 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
         }
     }
 
-    verify_dot_product(party, &x_vec, &y_vec, &z)
+    println!("Verify dot product");
+
+    verify_dot_product(party, x_vec, y_vec, z)
 }
 
 fn gf2_embed(s:BsBool16) -> [GF2p64;16] {
@@ -87,19 +90,20 @@ where
 /// This protocol assumes that the input vectors are of length 2^n for some n.
 fn verify_dot_product<F: Field + Copy + HasTwo + Invertible>(
     party: &mut WL16ASParty,
-    x_vec: &[RssShare<F>],
-    y_vec: &[RssShare<F>],
-    z: &RssShare<F>,
+    x_vec: Vec<RssShare<F>>,
+    y_vec: Vec<RssShare<F>>,
+    z: RssShare<F>,
 ) -> MpcResult<bool>
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
 {
     let n = x_vec.len();
+    println!("n = {}", n);
     debug_assert_eq!(n, y_vec.len());
     debug_assert!(n & (n - 1) == 0 && n != 0);
     if n == 1 {
-        return check_triple(party, &x_vec[0], &y_vec[0], z);
+        return check_triple(party, x_vec[0], y_vec[0], z);
     }
     // Compute dot products
     let f1: Vec<_> = x_vec.iter().skip(1).step_by(2).collect();
@@ -118,7 +122,7 @@ where
     let h = ss_to_rss_shares(party, &hs)?;
     let h1 = &h[0];
     let h2 = &h[1];
-    let h0 = *z - *h1;
+    let h0 = z - *h1;
     // Coin flip
     let r = coin_flip(party)?;
     // For large F this is very unlikely
@@ -127,15 +131,15 @@ where
     let fr: Vec<_> = x_vec.chunks(2).map(|c| c[0] + (c[0] + c[1]) * r).collect();
     let gr: Vec<_> = y_vec.chunks(2).map(|c| c[0] + (c[0] + c[1]) * r).collect();
     let hr = lagrange_deg2(&h0, h1, h2, r);
-    verify_dot_product(party, &fr, &gr, &hr)
+    verify_dot_product(party, fr, gr, hr)
 }
 
 /// Protocol [TODO Add Number at the end] CheckTriple
 fn check_triple<F: Field + Copy>(
     party: &mut WL16ASParty,
-    x: &RssShare<F>,
-    y: &RssShare<F>,
-    z: &RssShare<F>,
+    x: RssShare<F>,
+    y: RssShare<F>,
+    z: RssShare<F>,
 ) -> MpcResult<bool>
 where
     Sha256: FieldDigestExt<F>,
@@ -143,10 +147,10 @@ where
 {
     // Generate RSS sharing of random value
     let x_prime = party.inner.generate_random(1)[0];
-    let z_prime = weak_mult(party, &x_prime, y)?;
+    let z_prime = weak_mult(party, &x_prime, &y)?;
     let t = coin_flip(party)?;
-    let rho = reconstruct(party, *x + x_prime * t)?;
-    reconstruct(party, *z + z_prime * t - *y * rho).map(|x| x.is_zero())
+    let rho = reconstruct(party, x + x_prime * t)?;
+    reconstruct(party, z + z_prime * t - y * rho).map(|x| x.is_zero())
 }
 
 /// Shared lagrange evaluation of the polynomial h at position x for given (shared) points h(0), h(1), h(2)
@@ -405,7 +409,7 @@ mod test {
         let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
         let (c1, c2, c3) = secret_share(&mut rng, &c);
         let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>, c: RssShare<GF2p64>| {
-            move |p: &mut WL16ASParty| verify_dot_product(p, &a, &b, &c).unwrap()
+            move |p: &mut WL16ASParty| verify_dot_product(p, a, b, c).unwrap()
         };
         let (h1, h2, h3) = localhost_setup_wl16as(
             program(a1, b1, c1),
@@ -440,7 +444,7 @@ mod test {
         let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
         let (c1, c2, c3) = secret_share(&mut rng, &c);
         let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>, c: RssShare<GF2p64>| {
-            move |p: &mut WL16ASParty| verify_dot_product(p, &a, &b, &c).unwrap()
+            move |p: &mut WL16ASParty| verify_dot_product(p, a, b, c).unwrap()
         };
         let (h1, h2, h3) = localhost_setup_wl16as(
             program(a1, b1, c1),

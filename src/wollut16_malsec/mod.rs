@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::BroadcastContext, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
+    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
 };
 
 mod mult_verification;
@@ -35,7 +35,11 @@ impl WL16ASParty {
     }
 
     fn prepare_rand_ohv(&mut self, n: usize) -> MpcResult<()> {
-        let mut new = offline::generate_random_ohv16(self, n)?;
+        let mut new = if self.inner.has_multi_threading() && self.inner.num_worker_threads() <= n {
+            offline::generate_random_ohv16_mt(self, n)?
+        }else{
+            offline::generate_random_ohv16(self, n)?
+        };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;
         } else {
@@ -45,8 +49,12 @@ impl WL16ASParty {
     }
 
     fn verify_multiplications(&mut self) -> MpcResult<()> {
+        let t = Instant::now();
         match mult_verification::verify_multiplication_triples(self) {
-            Ok(true) => Ok(()),
+            Ok(true) => {
+                println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
+                Ok(())
+            },
             Ok(false) => Err(MpcError::MultCheckError),
             Err(err) => Err(err)
         }
@@ -75,6 +83,7 @@ impl BenchmarkProtocol for MalLUT16Benchmark {
 
         let start = Instant::now();
         let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+        println!("After AES: {}s", start.elapsed().as_secs_f64());
         // check all multipliction triples
         party.verify_multiplications().unwrap();
         let duration = start.elapsed();
@@ -129,58 +138,18 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
     }
 
     fn output_round(&mut self, si: &[GF8], sii: &[GF8]) -> MpcResult<Vec<GF8>> {
-        unimplemented!()
+        let output = self.inner.open_rss(&mut self.broadcast_context, si, sii)?;
+        let context = std::mem::replace(&mut self.broadcast_context, BroadcastContext::new());
+        self.inner.compare_view(context)?;
+        Ok(output)
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.verify_multiplications()
+        self.verify_multiplications()?;
+        let context = std::mem::replace(&mut self.broadcast_context, BroadcastContext::new());
+        self.inner.compare_view(context)
     }
 }
-
-// struct MulTripleVector<F: Field> {
-//     // s.t. a*b = c
-//     a_i: Vec<F>,
-//     a_ii: Vec<F>,
-//     b_i: Vec<F>,
-//     b_ii: Vec<F>,
-//     c_i: Vec<F>,
-//     c_ii: Vec<F>,
-// }
-
-// impl<F: Field> MulTripleVector<F> {
-//     pub fn new() -> Self {
-//         Self {
-//             a_i: Vec::new(),
-//             a_ii: Vec::new(),
-//             b_i: Vec::new(),
-//             b_ii: Vec::new(),
-//             c_i: Vec::new(),
-//             c_ii: Vec::new(),
-//         }
-//     }
-
-//     pub fn len(&self) -> usize {
-//         self.a_i.len()
-//     }
-
-//     pub fn shrink(&mut self, new_length: usize) {
-//         self.a_i.truncate(new_length);
-//         self.a_ii.truncate(new_length);
-//         self.b_i.truncate(new_length);
-//         self.b_ii.truncate(new_length);
-//         self.c_i.truncate(new_length);
-//         self.c_ii.truncate(new_length);
-//     }
-
-//     pub fn push(&mut self, ai: F, aii: F, bi: F, bii: F, ci: F, cii: F) {
-//         self.a_i.push(ai);
-//         self.a_ii.push(aii);
-//         self.b_i.push(bi);
-//         self.b_ii.push(bii);
-//         self.c_i.push(ci);
-//         self.c_ii.push(cii);
-//     }
-// }
 
 impl GF8InvBlackBox for WL16ASParty {
     #[inline]
@@ -195,7 +164,20 @@ impl GF8InvBlackBox for WL16ASParty {
     }
 
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-        online::gf8_inv_layer(self, si, sii)
+        debug_assert_eq!(si.len(), sii.len());
+        if self.prep_ohv.len() < si.len() {
+            panic!("Not enough pre-processed random one-hot vectors available. Use WL16ASParty::prepare_rand_ohv to generate them.");
+        }
+        let remainning = self.prep_ohv.len() - si.len();
+        if self.inner.has_multi_threading() && self.inner.num_worker_threads() <= si.len() {
+            online::gf8_inv_layer_mt(&mut self.inner, &mut self.gf4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?
+        }else{
+            online::gf8_inv_layer(&mut self.inner, &mut self.gf4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?
+        }
+        // remove used pre-processing material
+        self.prep_ohv.truncate(remainning);
+        self.inner.io().wait_for_completion();
+        Ok(())
     }
 }
 
