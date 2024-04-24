@@ -42,3 +42,8 @@ required-features = ["verbose-timing"]
 name = "gf2p64_mult_benchmark"
 harness = false
 required-features = ["clmul"]
+
+[[bench]]
+name = "gf2p64_ip_benchmark"
+harness = false
+required-features = ["clmul"]
