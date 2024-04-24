@@ -31,7 +31,11 @@ use crate::chida::ImplVariant;
 struct Cli {
     #[arg(long, value_name = "FILE")]
     config: PathBuf,
-    #[arg(long, value_name = "N_THREADS", help="The number of worker threads. Set to 0 to indicate the number of cores on the machine. Optional, default single-threaded")]
+    #[arg(
+        long,
+        value_name = "N_THREADS",
+        help = "The number of worker threads. Set to 0 to indicate the number of cores on the machine. Optional, default single-threaded"
+    )]
     threads: Option<usize>,
     #[command(subcommand)]
     command: Commands,
@@ -115,7 +119,7 @@ fn main() {
             .unwrap();
             println!("Connected!");
             chida::chida_benchmark(connected, simd, variant, cli.threads);
-        },
+        }
         Commands::MalChidaBenchmark { simd } => {
             let connected = ConnectedParty::bind_and_connect(
                 party_index,
@@ -125,7 +129,7 @@ fn main() {
             .unwrap();
             println!("Connected!");
             furukawa::furukawa_benchmark(connected, simd, cli.threads);
-        },
+        }
         Commands::LUT16Benchmark { simd } => {
             let connected = ConnectedParty::bind_and_connect(
                 party_index,
@@ -135,7 +139,7 @@ fn main() {
             .unwrap();
             println!("Connected!");
             wollut16::wollut16_benchmark(connected, simd, cli.threads);
-        },
+        }
         Commands::GF4CircuitBenchmark { simd } => {
             let connected = ConnectedParty::bind_and_connect(
                 party_index,
@@ -145,7 +149,7 @@ fn main() {
             .unwrap();
             println!("Connected!");
             gf4_circuit::gf4_circuit_benchmark(connected, simd, cli.threads);
-        },
+        }
         Commands::LUT256Benchmark { simd } => {
             let connected = ConnectedParty::bind_and_connect(
                 party_index,
@@ -155,8 +159,13 @@ fn main() {
             .unwrap();
             println!("Connected!");
             lut256::lut256_benchmark(connected, simd, cli.threads);
-        },
-        Commands::Benchmark { simd, rep, csv, target } => {
+        }
+        Commands::Benchmark {
+            simd,
+            rep,
+            csv,
+            target,
+        } => {
             // check non-empty and distinct targets
             if target.is_empty() {
                 let all_targets: Vec<_> = ProtocolVariant::value_variants()
@@ -177,7 +186,16 @@ fn main() {
             for v in target {
                 boxed.push(Box::new(v));
             }
-            benchmark::benchmark_protocols(party_index, &config, rep, simd, cli.threads, boxed, csv).unwrap();
+            benchmark::benchmark_protocols(
+                party_index,
+                &config,
+                rep,
+                simd,
+                cli.threads,
+                boxed,
+                csv,
+            )
+            .unwrap();
         }
     }
 }
@@ -199,7 +217,12 @@ impl BenchmarkProtocol for ProtocolVariant {
     fn protocol_name(&self) -> String {
         self.get_protocol().protocol_name()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> benchmark::BenchmarkResult {
+    fn run(
+        &self,
+        conn: ConnectedParty,
+        simd: usize,
+        n_worker_threads: Option<usize>,
+    ) -> benchmark::BenchmarkResult {
         self.get_protocol().run(conn, simd, n_worker_threads)
     }
 }

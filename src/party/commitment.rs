@@ -27,7 +27,7 @@ pub fn open(commitment: &[u8], msg: &[u8]) -> MpcResult<()> {
 
     for i in 0..SHA256_OUTPUT_SIZE {
         if commitment[COMMITMENT_SEC_PARAM + i] != hash[i] {
-            return Err(MpcError::CommitmentError);
+            return Err(MpcError::Commitment);
         }
     }
     Ok(())
@@ -58,7 +58,7 @@ mod test {
 
         // try open different message
         message[5] ^= 0x4;
-        if let Err(MpcError::CommitmentError) = open(&commitment, &message) {
+        if let Err(MpcError::Commitment) = open(&commitment, &message) {
             // ok
         } else {
             panic!()
@@ -67,7 +67,7 @@ mod test {
         message[5] ^= 0x4;
         // try different commitment
         commitment[3] ^= 0x80;
-        if let Err(MpcError::CommitmentError) = open(&commitment, &message) {
+        if let Err(MpcError::Commitment) = open(&commitment, &message) {
             // ok
         } else {
             panic!()

@@ -14,7 +14,10 @@ use crate::{
 };
 use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
-use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
+use rayon::{
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    slice::{ParallelSlice, ParallelSliceMut},
+};
 use sha2::Sha256;
 
 #[cfg(feature = "verbose-timing")]
@@ -66,7 +69,7 @@ const GF4_BITSLICED_LUT: [[u16; 4]; 16] = [
 ];
 
 /// Placeholder for the LUT protocol
-pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>,Vec<GF4>)> {
+pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<GF4>)> {
     if party.prep_ohv.len() < v.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
     }
@@ -135,7 +138,12 @@ fn append(a: &[GF4], b: &[GF4]) -> Vec<GF4> {
 }
 
 /// Share conversion protocol <<x>> to [[x]]
-fn ss_to_rss_layer(party: &mut WL16Party, xss_i: &[GF4], x_i: &mut [GF4], x_ii: &mut [GF4]) -> MpcResult<()> {
+fn ss_to_rss_layer(
+    party: &mut WL16Party,
+    xss_i: &[GF4],
+    x_i: &mut [GF4],
+    x_ii: &mut [GF4],
+) -> MpcResult<()> {
     debug_assert_eq!(xss_i.len(), x_i.len());
     debug_assert_eq!(xss_i.len(), x_ii.len());
     // Shares of zero
@@ -225,9 +233,14 @@ fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     let ss_rss_timer = Instant::now();
 
     // Step 7: Generate replicated sharing of a_h' and a_l'
-    let mut a_h_a_l_i = vec![GF4::ZERO; 2*n];
-    let mut a_h_a_l_ii = vec![GF4::ZERO; 2*n];
-    ss_to_rss_layer(party, &append(&a_h_prime_ss, &a_l_prime_ss), &mut a_h_a_l_i, &mut a_h_a_l_ii)?;
+    let mut a_h_a_l_i = vec![GF4::ZERO; 2 * n];
+    let mut a_h_a_l_ii = vec![GF4::ZERO; 2 * n];
+    ss_to_rss_layer(
+        party,
+        &append(&a_h_prime_ss, &a_l_prime_ss),
+        &mut a_h_a_l_i,
+        &mut a_h_a_l_ii,
+    )?;
 
     #[cfg(feature = "verbose-timing")]
     PARTY_TIMER
@@ -304,24 +317,36 @@ fn gf8_inv_layer_opt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
     if party.prep_ohv.len() < si.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
     }
-    gf8_inv_layer_opt_party(party.inner.as_party_mut(), si, sii, &party.prep_ohv[party.prep_ohv.len()-si.len()..])?;
+    gf8_inv_layer_opt_party(
+        party.inner.as_party_mut(),
+        si,
+        sii,
+        &party.prep_ohv[party.prep_ohv.len() - si.len()..],
+    )?;
     // remove used pre-processing material
-    party.prep_ohv.truncate(party.prep_ohv.len()-si.len());
+    party.prep_ohv.truncate(party.prep_ohv.len() - si.len());
     party.io().wait_for_completion();
     Ok(())
 }
 
-fn gf8_inv_layer_opt_party<P: Party>(party: &mut P, si: &mut [GF8], sii: &mut [GF8], prep_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+fn gf8_inv_layer_opt_party<P: Party>(
+    party: &mut P,
+    si: &mut [GF8],
+    sii: &mut [GF8],
+    prep_ohv: &[RndOhvOutput],
+) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     debug_assert_eq!(si.len(), prep_ohv.len());
     let (mut ah_i, mut al_i) = wol_bitslice_gf4(si);
     let (ah_ii, mut al_ii) = wol_bitslice_gf4(sii);
-    let v = izip!(ah_i.iter(), ah_ii.iter(), al_i.iter(), al_ii.iter()).map(|(ahi, ahii, ali, alii)| {
-        let e_mul_ah2 = ahi.square_mul_e();
-        let al2 = ali.square();
-        let ah_mul_al = (*ahi * *ali) + (*ahi + *ahii) * (*ali + *alii);
-        e_mul_ah2 + al2 + ah_mul_al
-    }).collect();
+    let v = izip!(ah_i.iter(), ah_ii.iter(), al_i.iter(), al_ii.iter())
+        .map(|(ahi, ahii, ali, alii)| {
+            let e_mul_ah2 = ahi.square_mul_e();
+            let al2 = ali.square();
+            let ah_mul_al = (*ahi * *ali) + (*ahi + *ahii) * (*ali + *alii);
+            e_mul_ah2 + al2 + ah_mul_al
+        })
+        .collect();
     let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v, prep_ohv)?;
 
     // local mult
@@ -381,50 +406,65 @@ fn gf8_inv_layer_opt_mt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) 
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
     }
 
-    let ranges = party.inner.as_party_mut().split_range_equally_even(si.len());
+    let ranges = party
+        .inner
+        .as_party_mut()
+        .split_range_equally_even(si.len());
     let chunk_size = ranges[0].1 - ranges[0].0;
     let threads = party.inner.as_party_mut().create_thread_parties(ranges);
 
-    let prep_ohv_slice = &party.prep_ohv[party.prep_ohv.len()-si.len()..];
+    let prep_ohv_slice = &party.prep_ohv[party.prep_ohv.len() - si.len()..];
     debug_assert_eq!(prep_ohv_slice.len(), si.len());
     let success = party.inner.as_party_mut().run_in_threadpool(|| {
-        threads.into_par_iter().zip_eq(si.par_chunks_mut(chunk_size)).zip_eq(sii.par_chunks_mut(chunk_size)).zip_eq(prep_ohv_slice.par_chunks(chunk_size))
+        threads
+            .into_par_iter()
+            .zip_eq(si.par_chunks_mut(chunk_size))
+            .zip_eq(sii.par_chunks_mut(chunk_size))
+            .zip_eq(prep_ohv_slice.par_chunks(chunk_size))
             .map(|(((mut thread_party, si), sii), prep_ohv)| {
                 gf8_inv_layer_opt_party(&mut thread_party, si, sii, prep_ohv)
-        }).collect::<MpcResult<Vec<()>>>()
+            })
+            .collect::<MpcResult<Vec<()>>>()
     });
     // remove pre-processing data before evaluation the error
-    party.prep_ohv.truncate(party.prep_ohv.len()-si.len());
+    party.prep_ohv.truncate(party.prep_ohv.len() - si.len());
     // check computation
     success?;
     party.io().wait_for_completion();
     Ok(())
 }
 
-fn lut_layer_opt<P: Party>(party: &mut P, mut v: Vec<BsGF4>, rnd_ohv: &[RndOhvOutput]) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
-    debug_assert_eq!(rnd_ohv.len(), 2*v.len());
+fn lut_layer_opt<P: Party>(
+    party: &mut P,
+    mut v: Vec<BsGF4>,
+    rnd_ohv: &[RndOhvOutput],
+) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
+    debug_assert_eq!(rnd_ohv.len(), 2 * v.len());
     #[cfg(feature = "verbose-timing")]
     let lut_open_time = Instant::now();
 
     let rcv_cii = party.receive_field::<BsGF4>(Direction::Next, v.len());
     let rcv_ciii = party.receive_field::<BsGF4>(Direction::Previous, v.len());
-    if rnd_ohv.len() < 2*v.len() {
-        let vlen = v.len()-1;
-        v.iter_mut().take(2*rnd_ohv.len()).enumerate().for_each(|(i, dst)| {
-            *dst += BsGF4::new(rnd_ohv[2*i].random, rnd_ohv[2*i+1].random);
-        });
+    if rnd_ohv.len() < 2 * v.len() {
+        let vlen = v.len() - 1;
+        v.iter_mut()
+            .take(2 * rnd_ohv.len())
+            .enumerate()
+            .for_each(|(i, dst)| {
+                *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
+            });
         let empty_v = v[vlen].unpack().1;
-        v[vlen] += BsGF4::new(rnd_ohv[rnd_ohv.len()-1].random, empty_v);
-    }else{
+        v[vlen] += BsGF4::new(rnd_ohv[rnd_ohv.len() - 1].random, empty_v);
+    } else {
         v.iter_mut().enumerate().for_each(|(i, dst)| {
-            *dst += BsGF4::new(rnd_ohv[2*i].random, rnd_ohv[2*i+1].random);
+            *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
         });
     }
-    
+
     let ci = v;
     party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
     party.send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
-    
+
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
     #[cfg(feature = "verbose-timing")]
@@ -446,19 +486,25 @@ fn lut_layer_opt<P: Party>(party: &mut P, mut v: Vec<BsGF4>, rnd_ohv: &[RndOhvOu
     Ok(res)
 }
 
-fn ss_to_rss_layer_opt<P: Party>(party: &mut P, ss1: &mut [BsGF4], ss2: &mut [BsGF4], ss1_ii: &mut [BsGF4], ss2_ii: &mut [BsGF4]) -> MpcResult<()> {
+fn ss_to_rss_layer_opt<P: Party>(
+    party: &mut P,
+    ss1: &mut [BsGF4],
+    ss2: &mut [BsGF4],
+    ss1_ii: &mut [BsGF4],
+    ss2_ii: &mut [BsGF4],
+) -> MpcResult<()> {
     debug_assert_eq!(ss1.len(), ss2.len());
     debug_assert_eq!(ss1.len(), ss1_ii.len());
     debug_assert_eq!(ss1.len(), ss2_ii.len());
     let n = ss1.len();
-    let rcv_ii = party.receive_field::<BsGF4>(Direction::Next, 2*n);
+    let rcv_ii = party.receive_field::<BsGF4>(Direction::Next, 2 * n);
     izip!(ss1.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
     izip!(ss2.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
-    party.send_field::<BsGF4>(Direction::Previous, ss1.iter().chain(ss2.iter()), 2*n);
+    party.send_field::<BsGF4>(Direction::Previous, ss1.iter().chain(ss2.iter()), 2 * n);
     let res = rcv_ii.rcv()?;
     ss1_ii.copy_from_slice(&res[..n]);
     ss2_ii.copy_from_slice(&res[n..]);
@@ -466,27 +512,39 @@ fn ss_to_rss_layer_opt<P: Party>(party: &mut P, ss1: &mut [BsGF4], ss2: &mut [Bs
 }
 
 #[inline]
-pub fn lut_with_rnd_ohv_bitsliced_opt(rnd_ohv: &[RndOhvOutput], ci: Vec<BsGF4>, mut cii: Vec<BsGF4>, mut ciii: Vec<BsGF4>) -> (Vec<BsGF4>, Vec<BsGF4>) {
-    let loop_len = if rnd_ohv.len() < 2*ci.len() { ci.len()-1 } else { ci.len() };
+pub fn lut_with_rnd_ohv_bitsliced_opt(
+    rnd_ohv: &[RndOhvOutput],
+    ci: Vec<BsGF4>,
+    mut cii: Vec<BsGF4>,
+    mut ciii: Vec<BsGF4>,
+) -> (Vec<BsGF4>, Vec<BsGF4>) {
+    let loop_len = if rnd_ohv.len() < 2 * ci.len() {
+        ci.len() - 1
+    } else {
+        ci.len()
+    };
 
     for i in 0..loop_len {
-        let (c1, c2) = (ci[i]+cii[i]+ciii[i]).unpack();
-        let ohv1 = &rnd_ohv[2*i];
-        let (lut1_i, lut1_ii) = RndOhv16::lut_rss(c1.as_u8() as usize, &ohv1.si, &ohv1.sii, &GF4_BITSLICED_LUT);
-        let ohv2 = &rnd_ohv[2*i+1];
-        let (lut2_i, lut2_ii) = RndOhv16::lut_rss(c2.as_u8() as usize, &ohv2.si, &ohv2.sii, &GF4_BITSLICED_LUT);
+        let (c1, c2) = (ci[i] + cii[i] + ciii[i]).unpack();
+        let ohv1 = &rnd_ohv[2 * i];
+        let (lut1_i, lut1_ii) =
+            RndOhv16::lut_rss(c1.as_u8() as usize, &ohv1.si, &ohv1.sii, &GF4_BITSLICED_LUT);
+        let ohv2 = &rnd_ohv[2 * i + 1];
+        let (lut2_i, lut2_ii) =
+            RndOhv16::lut_rss(c2.as_u8() as usize, &ohv2.si, &ohv2.sii, &GF4_BITSLICED_LUT);
         cii[i] = BsGF4::new(lut1_i, lut2_i);
         ciii[i] = BsGF4::new(lut1_ii, lut2_ii);
     }
-    if rnd_ohv.len() < 2*ci.len() {
-        let last_ci = ci.len()-1;
-        let (c1, _) = (ci[last_ci]+cii[last_ci]+ciii[last_ci]).unpack();
-        let ohv1 = &rnd_ohv[rnd_ohv.len()-1];
-        let (lut1_i, lut1_ii) = RndOhv16::lut_rss(c1.as_u8() as usize, &ohv1.si, &ohv1.sii, &GF4_BITSLICED_LUT);
+    if rnd_ohv.len() < 2 * ci.len() {
+        let last_ci = ci.len() - 1;
+        let (c1, _) = (ci[last_ci] + cii[last_ci] + ciii[last_ci]).unpack();
+        let ohv1 = &rnd_ohv[rnd_ohv.len() - 1];
+        let (lut1_i, lut1_ii) =
+            RndOhv16::lut_rss(c1.as_u8() as usize, &ohv1.si, &ohv1.sii, &GF4_BITSLICED_LUT);
         cii[last_ci] = BsGF4::new(lut1_i, GF4::ZERO);
         ciii[last_ci] = BsGF4::new(lut1_ii, GF4::ZERO);
     }
-    
+
     (cii, ciii)
 }
 
@@ -501,12 +559,12 @@ impl GF8InvBlackBox for WL16Party {
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
         if self.opt {
-            if self.inner.has_multi_threading() && si.len() >= 2*self.inner.num_worker_threads() {
+            if self.inner.has_multi_threading() && si.len() >= 2 * self.inner.num_worker_threads() {
                 gf8_inv_layer_opt_mt(self, si, sii)
-            }else{
+            } else {
                 gf8_inv_layer_opt(self, si, sii)
             }
-        }else{
+        } else {
             gf8_inv_layer(self, si, sii)
         }
     }
@@ -574,7 +632,24 @@ mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
 
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, party::test::TestSetup, share::{gf4::GF4, gf8::GF8, test::{assert_eq, consistent, secret_share_vector}, Field, FieldRngExt, RssShare}, wollut16::{online::{gf8_inv_layer_opt, gf8_inv_layer_opt_mt, GF4_INV}, test::WL16Setup, WL16Party}};
+    use crate::{
+        aes::test::{
+            test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
+            test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
+        },
+        party::test::TestSetup,
+        share::{
+            gf4::GF4,
+            gf8::GF8,
+            test::{assert_eq, consistent, secret_share_vector},
+            Field, FieldRngExt, RssShare,
+        },
+        wollut16::{
+            online::{gf8_inv_layer_opt, gf8_inv_layer_opt_mt, GF4_INV},
+            test::WL16Setup,
+            WL16Party,
+        },
+    };
 
     use super::{gf8_inv_layer, lut_layer};
 
@@ -601,12 +676,15 @@ mod test {
         let program = |v: Vec<GF4>| {
             move |p: &mut WL16Party| {
                 p.prepare_rand_ohv(v.len()).unwrap();
-                let (si,sii) = lut_layer(p, &v).unwrap();
+                let (si, sii) = lut_layer(p, &v).unwrap();
                 p.io().wait_for_completion();
-                si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si, sii)).collect_vec()
+                si.into_iter()
+                    .zip(sii)
+                    .map(|(si, sii)| RssShare::from(si, sii))
+                    .collect_vec()
             }
         };
-        let (h1,h2,h3) = WL16Setup::localhost_setup(program(in1), program(in2), program(in3));
+        let (h1, h2, h3) = WL16Setup::localhost_setup(program(in1), program(in2), program(in3));
         let (s1, p1) = h1.join().unwrap();
         let (s2, p2) = h2.join().unwrap();
         let (s3, p3) = h3.join().unwrap();
@@ -665,7 +743,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
+        let (h1, h2, h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
@@ -696,7 +774,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
+        let (h1, h2, h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
@@ -718,13 +796,22 @@ mod test {
         let program = |v: Vec<RssShare<GF8>>| {
             move |p: &mut WL16Party| {
                 p.prepare_rand_ohv(v.len()).unwrap();
-                let (mut si, mut sii): (Vec<_>, Vec<_>) = v.into_iter().map(|rss| (rss.si,rss.sii)).unzip();
+                let (mut si, mut sii): (Vec<_>, Vec<_>) =
+                    v.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
                 gf8_inv_layer_opt_mt(p, &mut si, &mut sii).unwrap();
-                si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si, sii)).collect_vec()
+                si.into_iter()
+                    .zip(sii)
+                    .map(|(si, sii)| RssShare::from(si, sii))
+                    .collect_vec()
             }
         };
 
-        let (h1,h2,h3) = WL16Setup::localhost_setup_multithreads(N_THREADS, program(s1), program(s2), program(s3));
+        let (h1, h2, h3) = WL16Setup::localhost_setup_multithreads(
+            N_THREADS,
+            program(s1),
+            program(s2),
+            program(s3),
+        );
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
@@ -748,13 +835,22 @@ mod test {
         let program = |v: Vec<RssShare<GF8>>| {
             move |p: &mut WL16Party| {
                 p.prepare_rand_ohv(v.len()).unwrap();
-                let (mut si, mut sii): (Vec<_>, Vec<_>) = v.into_iter().map(|rss| (rss.si,rss.sii)).unzip();
+                let (mut si, mut sii): (Vec<_>, Vec<_>) =
+                    v.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
                 gf8_inv_layer_opt_mt(p, &mut si, &mut sii).unwrap();
-                si.into_iter().zip(sii).map(|(si,sii)| RssShare::from(si, sii)).collect_vec()
+                si.into_iter()
+                    .zip(sii)
+                    .map(|(si, sii)| RssShare::from(si, sii))
+                    .collect_vec()
             }
         };
 
-        let (h1,h2,h3) = WL16Setup::localhost_setup_multithreads(N_THREADS, program(s1), program(s2), program(s3));
+        let (h1, h2, h3) = WL16Setup::localhost_setup_multithreads(
+            N_THREADS,
+            program(s1),
+            program(s2),
+            program(s3),
+        );
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();
@@ -769,13 +865,13 @@ mod test {
 
     #[test]
     fn sub_bytes() {
-        test_sub_bytes::<WL16Setup,_>(None)
+        test_sub_bytes::<WL16Setup, _>(None)
     }
 
     #[test]
     fn sub_bytes_mt() {
         const N_THREADS: usize = 3;
-        test_sub_bytes::<WL16Setup,_>(Some(N_THREADS))
+        test_sub_bytes::<WL16Setup, _>(Some(N_THREADS))
     }
 
     #[test]

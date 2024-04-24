@@ -1,12 +1,12 @@
-use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
-use std::slice;
-use sha2::{Sha256, Digest};
-use sha2::digest::FixedOutput;
 use crate::network::task::Direction;
 use crate::party::error::{MpcError, MpcResult};
 use crate::party::MainParty;
 use crate::share::{Field, FieldDigestExt, RssShare};
+use sha2::digest::FixedOutput;
+use sha2::{Digest, Sha256};
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
+use std::slice;
 
 pub struct BroadcastContext {
     view_next: Sha256,
@@ -88,7 +88,13 @@ impl BroadcastContext {
 }
 
 impl Broadcast for MainParty {
-    fn broadcast_round_bytes(&mut self, context: &mut BroadcastContext, buffer_next: &mut [u8], buffer_prev: &mut[u8], message: &[u8]) -> MpcResult<()> {
+    fn broadcast_round_bytes(
+        &mut self,
+        context: &mut BroadcastContext,
+        buffer_next: &mut [u8],
+        buffer_prev: &mut [u8],
+        message: &[u8],
+    ) -> MpcResult<()> {
         // first send to P+1
         self.io().send(Direction::Next, message.to_vec());
         // then send to P-1
@@ -231,7 +237,7 @@ impl Broadcast for MainParty {
         rcv_view_next.rcv()?;
         for i in 0..(256 / 8) {
             if view_next[i] != check_next[i] {
-                return Err(MpcError::BroadcastError);
+                return Err(MpcError::Broadcast);
             }
         }
         return Ok(());
@@ -254,11 +260,11 @@ mod test {
     use crate::network::task::Direction;
     use crate::party::broadcast::{Broadcast, BroadcastContext};
     use crate::party::error::MpcError;
-    use crate::party::MainParty;
     use crate::party::test::{PartySetup, TestSetup};
-    use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
+    use crate::party::MainParty;
     use crate::share::gf8::GF8;
     use crate::share::test::secret_share;
+    use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
     use rand::thread_rng;
     use sha2::digest::FixedOutput;
     use sha2::{Digest, Sha256};
@@ -282,7 +288,11 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
+        let (h1, h2, h3) = PartySetup::localhost_setup(
+            program(x1.clone()),
+            program(x2.clone()),
+            program(x3.clone()),
+        );
         let ((c1, x13, x12), _) = h1.join().unwrap();
         let ((c2, x21, x23), _) = h2.join().unwrap();
         let ((c3, x32, x31), _) = h3.join().unwrap();
@@ -329,7 +339,11 @@ mod test {
                 p.compare_view(context).unwrap();
             }
         };
-        let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
+        let (h1, h2, h3) = PartySetup::localhost_setup(
+            program(x1.clone()),
+            program(x2.clone()),
+            program(x3.clone()),
+        );
         h1.join().unwrap();
         h2.join().unwrap();
         h3.join().unwrap();
@@ -374,13 +388,17 @@ mod test {
                             .unwrap();
                         match p.compare_view(context) {
                             Ok(()) if (p.i + 1) % 3 != cheater => (), // ok! we only check the correctness of broadcast for the P+1
-                            Err(MpcError::BroadcastError) if (p.i + 1) % 3 == cheater => (), // ok!
+                            Err(MpcError::Broadcast) if (p.i + 1) % 3 == cheater => (), // ok!
                             _ => panic!("Expected broadcast error"),
                         }
                     }
                 }
             };
-            let (h1,h2,h3) = PartySetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
+            let (h1, h2, h3) = PartySetup::localhost_setup(
+                program(x1.clone()),
+                program(x2.clone()),
+                program(x3.clone()),
+            );
             h1.join().unwrap();
             h2.join().unwrap();
             h3.join().unwrap();

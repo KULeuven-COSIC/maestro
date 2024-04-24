@@ -1,7 +1,12 @@
 use itertools::izip;
 use rayon::prelude::*;
 
-use crate::{chida, party::{error::MpcResult, MainParty, MulTripleRecorder, Party}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}, wollut16::{RndOhv16, RndOhvOutput}};
+use crate::{
+    chida,
+    party::{error::MpcResult, MainParty, MulTripleRecorder, Party},
+    share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare},
+    wollut16::{RndOhv16, RndOhvOutput},
+};
 #[cfg(feature = "verbose-timing")]
 use {crate::party::PARTY_TIMER, std::time::Instant};
 
@@ -25,10 +30,10 @@ fn inner_product(
 ) -> Vec<RssShare<BsBool16>> {
     debug_assert_eq!(elements.len(), selector.len());
     let mut res = vec![start; n];
-    for i in 0..elements.len() {
+    for (i, elem_i) in elements.iter().enumerate() {
         if selector[i] {
-            for j in 0..res.len() {
-                res[j] += elements[i][j];
+            for (j,res_j) in res.iter_mut().enumerate() {
+                *res_j += elem_i[j];
             }
         }
     }
@@ -97,7 +102,7 @@ const SELECTOR_IDX_15: [bool; 15] = [
 
 // implements Protocol 7
 pub fn generate_random_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
-    let n16 = if n % 16 == 0 { n/16 } else { n/16 + 1};
+    let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1};
     // generate 4 random bits
     let r0 = party.generate_random(n16);
     let r1 = party.generate_random(n16);
@@ -112,7 +117,7 @@ pub fn generate_random_ohv16_mt<'a, Rec: MulTripleRecorder<BsBool16>>(party: &'a
     let threads = party.create_thread_parties_with_additional_data(ranges, |start, end| Some(triple_rec.create_thread_mul_triple_recorder(start, end)));
 
     let mut rnd_ohv = Vec::with_capacity(threads.len());
-    
+
     party.run_in_threadpool(|| {
         threads.into_par_iter().map(|mut thread_party| {
             // generate 4 random bits
@@ -137,7 +142,6 @@ pub fn generate_random_ohv16_mt<'a, Rec: MulTripleRecorder<BsBool16>>(party: &'a
     let rnd_ohv = rnd_ohv.into_iter().flatten().take(n).collect();
     party.wait_for_completion();
     Ok(rnd_ohv)
-    
 }
 
 // implements Protocol 7 with fixed inputs
@@ -188,8 +192,8 @@ fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, tri
     bii.copy_within(2 * n16..3 * n16, 4 * n16);
     bii.copy_within(2 * n16..3 * n16, 5 * n16);
 
-    let mut ci = vec![BsBool16::default(); 6*n16];
-    let mut cii = vec![BsBool16::default(); 6*n16];
+    let mut ci = vec![BsBool16::default(); 6 * n16];
+    let mut cii = vec![BsBool16::default(); 6 * n16];
     chida::online::mul_no_sync(party, &mut ci, &mut cii, &ai, &aii, &bi, &bii)?;
     triple_rec.record_mul_triple(&ai, &aii, &bi, &bii, &ci, &cii);
 
@@ -225,12 +229,15 @@ fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, tri
     b2ii.copy_within(n16..2 * n16, 3 * n16);
     b2ii[4 * n16..].copy_from_slice(&cii[5 * n16..]);
 
-    let mut c2i = vec![BsBool16::default(); 5*n16];
-    let mut c2ii = vec![BsBool16::default(); 5*n16];
+    let mut c2i = vec![BsBool16::default(); 5 * n16];
+    let mut c2ii = vec![BsBool16::default(); 5 * n16];
     chida::online::mul_no_sync(party, &mut c2i, &mut c2ii, &a2i, &a2ii, &b2i, &b2ii)?;
-    triple_rec.record_mul_triple(&a2i, &a2ii, &b2i, &b2ii, &c2i, &c2ii);
-    
-    let pairs: Vec<_> = ci.into_iter().zip(cii).map(|(si,sii)| RssShare::from(si, sii)).collect();
+
+    let pairs: Vec<_> = ci
+        .into_iter()
+        .zip(cii)
+        .map(|(si, sii)| RssShare::from(si, sii))
+        .collect();
     let r01 = &pairs[..n16];
     let r02 = &pairs[n16..2 * n16];
     let r03 = &pairs[2 * n16..3 * n16];
@@ -325,11 +332,10 @@ fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, tri
 
 fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
     let mut res = vec![(RndOhv16::new(0u16), RndOhv16::new(0u16)); 16 * bs[0].len()];
-    for i in 0..16 {
-        let bit = &bs[i];
-        for j in 0..bit.len() {
-            let si = bit[j].si.as_u16();
-            let sii = bit[j].sii.as_u16();
+    for (i,bit) in bs.iter().enumerate() {
+        for (j,bit_j) in bit.iter().enumerate() {
+            let si = bit_j.si.as_u16();
+            let sii = bit_j.sii.as_u16();
             for k in 0..16 {
                 res[16 * j + k].0 .0 |= ((si >> k) & 0x1) << i;
                 res[16 * j + k].1 .0 |= ((sii >> k) & 0x1) << i;
@@ -341,8 +347,7 @@ fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
 
 pub fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
     let mut res = vec![0u8; bs[0].len() * 16];
-    for i in 0..4 {
-        let bit = &bs[i];
+    for (i,bit) in bs.iter().enumerate() {
         for j in 0..bit.len() {
             for k in 0..16 {
                 let mut si = res[16 * j + k] & 0x0f;
@@ -363,7 +368,20 @@ pub mod test {
     use itertools::izip;
     use rand::thread_rng;
 
-    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::{test::TestSetup, NoMulTripleRecording}, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::{offline::{generate_random_ohv16, generate_random_ohv16_mt}, RndOhvOutput}};
+    use crate::{
+        chida::{online::test::ChidaSetup, ChidaParty},
+        party::{test::TestSetup, NoMulTripleRecording},
+        share::{
+            bs_bool16::BsBool16,
+            gf4::GF4,
+            test::{assert_eq, consistent, secret_share_vector},
+            RssShare,
+        },
+        wollut16::{
+            offline::{generate_random_ohv16, generate_random_ohv16_mt},
+            RndOhvOutput,
+        },
+    };
 
     use super::{generate_ohv16, un_bitslice4};
 
@@ -422,10 +440,11 @@ pub mod test {
         let bit2 = secret_share_vector::<BsBool16, _>(&mut rng, &inputs[2]);
         let bit3 = secret_share_vector::<BsBool16, _>(&mut rng, &inputs[3]);
 
-        let program = |b0: Vec<RssShare<BsBool16>>, b1: Vec<RssShare<BsBool16>>, b2: Vec<RssShare<BsBool16>>, b3: Vec<RssShare<BsBool16>>| {
-            move |p: &mut ChidaParty| {
-                generate_ohv16(p.as_party_mut(), &mut NoMulTripleRecording, 16, b0, b1, b2, b3).unwrap()
-            }
+        let program = |b0: Vec<RssShare<BsBool16>>,
+                       b1: Vec<RssShare<BsBool16>>,
+                       b2: Vec<RssShare<BsBool16>>,
+                       b3: Vec<RssShare<BsBool16>>| {
+            move |p: &mut ChidaParty| generate_ohv16(p.as_party_mut(), &mut NoMulTripleRecording, 16, b0, b1, b2, b3).unwrap()
         };
         let (h1, h2, h3) = ChidaSetup::localhost_setup(
             program(bit0.0, bit1.0, bit2.0, bit3.0),
@@ -456,8 +475,12 @@ pub mod test {
         }
     }
 
-    pub fn check_correct_rnd_ohv16(o1: Vec<RndOhvOutput>, o2: Vec<RndOhvOutput>, o3: Vec<RndOhvOutput>) {
-        for (o1,o2,o3) in izip!(o1,o2,o3) {
+    pub fn check_correct_rnd_ohv16(
+        o1: Vec<RndOhvOutput>,
+        o2: Vec<RndOhvOutput>,
+        o3: Vec<RndOhvOutput>,
+    ) {
+        for (o1, o2, o3) in izip!(o1, o2, o3) {
             let rand = o1.random + o2.random + o3.random;
             // check consistent
             assert_eq!(o1.sii, o2.si);
@@ -480,7 +503,7 @@ pub mod test {
             }
         };
 
-        let (h1,h2,h3) = ChidaSetup::localhost_setup(program(), program(), program());
+        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(), program(), program());
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -500,7 +523,8 @@ pub mod test {
             }
         };
 
-        let (h1,h2,h3) = ChidaSetup::localhost_setup_multithreads(THREADS, program(), program(), program());
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup_multithreads(THREADS, program(), program(), program());
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();

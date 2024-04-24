@@ -47,14 +47,29 @@ pub trait Field:
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
 }
 
+/// Trait for fields that exposes a function for computing multiplicative inversion
 pub trait Invertible: Field {
     /// Multiplicative Inverse (zero may map to zero)
     fn inverse(self) -> Self;
 }
 
+/// Trait exposes 2 as a field element. This only works for field with order > 2.
 pub trait HasTwo: Field {
     /// Multiplicative Inverse (zero may map to zero)
     const TWO: Self;
+}
+
+pub trait InnerProduct: Field {
+    /// Computes the dot product of vectors x and y.
+    ///
+    /// This function assumes that both vectors are of equal length.
+    fn inner_product(a: &[Self], b: &[Self]) -> Self;
+
+    /// Computes the dot product of vectors x and y given as replicated shares.
+    /// The result is a sum sharing.
+    ///
+    /// This function assumes that both vectors are of equal length.    
+    fn weak_inner_product(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
 }
 
 #[derive(Clone, Debug)]
@@ -98,12 +113,12 @@ impl<F: Field> Sub<Self> for RssShare<F> {
     }
 }
 
-impl<F: Field> Mul<F> for RssShare<F> {
+impl<F: Field + Copy> Mul<F> for RssShare<F> {
     type Output = Self;
 
     fn mul(self, rhs: F) -> Self::Output {
         RssShare {
-            si: self.si * rhs.clone(),
+            si: self.si * rhs,
             sii: self.sii * rhs,
         }
     }

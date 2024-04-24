@@ -12,10 +12,25 @@ use std::{ops::AddAssign, time::Instant};
 
 use itertools::izip;
 use rand_chacha::ChaCha20Rng;
-use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
+use rayon::{
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{
+    aes::{self, aes128_no_keyschedule, GF8InvBlackBox},
+    benchmark::{BenchmarkProtocol, BenchmarkResult},
+    chida,
+    network::{
+        task::{Direction, IoLayerOwned},
+        ConnectedParty,
+    },
+    party::{
+        broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty
+    },
+    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare},
+};
 
 mod offline;
 
@@ -59,7 +74,12 @@ impl BenchmarkProtocol for MalChidaBenchmark {
     fn protocol_name(&self) -> String {
         "mal-chida".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+    fn run(
+        &self,
+        conn: ConnectedParty,
+        simd: usize,
+        n_worker_threads: Option<usize>,
+    ) -> BenchmarkResult {
         let mut party = FurukawaParty::setup(conn, n_worker_threads).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
         let inputs = aes::random_state(&mut party, simd);
@@ -104,9 +124,10 @@ pub struct FurukawaParty<F: Field + Sync + Send> {
 }
 
 impl<F: Field + Sync + Send> FurukawaParty<F>
-where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+where
+    Sha256: FieldDigestExt<F>,
+    ChaCha20Rng: FieldRngExt<F>,
 {
-
     pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
@@ -115,7 +136,10 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
         })
     }
 
-    pub fn prepare_multiplications(&mut self, n_mults: usize) -> MpcResult<()> where F: Send + Sync {
+    pub fn prepare_multiplications(&mut self, n_mults: usize) -> MpcResult<()>
+    where
+        F: Send + Sync,
+    {
         // run the bucket cut-and-choose
         if let Some(ref pre_processing) = self.pre_processing {
             println!("Discarding {} left-over triples", pre_processing.len());
@@ -181,10 +205,44 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
 
             let leftover = prep.len() - self.triples_to_check.len();
             let (prep_ai, prep_aii, prep_bi, prep_bii, prep_ci, prep_cii) = prep.as_mut_slices();
-            let err = if self.inner.has_multi_threading() && self.triples_to_check.len() > self.inner.num_worker_threads() {
-                offline::sacrifice_mt(&mut self.inner, self.triples_to_check.len(), 1, self.triples_to_check.ai(), self.triples_to_check.aii(), self.triples_to_check.bi(), self.triples_to_check.bii(), self.triples_to_check.ci(), self.triples_to_check.cii(), &mut prep_ai[leftover..], &mut prep_aii[leftover..], &mut prep_bi[leftover..], &mut prep_bii[leftover..], &mut prep_ci[leftover..], &mut prep_cii[leftover..])
-            }else{
-                offline::sacrifice(&mut self.inner, self.triples_to_check.len(), 1, self.triples_to_check.ai(), self.triples_to_check.aii(), self.triples_to_check.bi(), self.triples_to_check.bii(), self.triples_to_check.ci(), self.triples_to_check.cii(), &mut prep_ai[leftover..], &mut prep_aii[leftover..], &mut prep_bi[leftover..], &mut prep_bii[leftover..], &mut prep_ci[leftover..], &mut prep_cii[leftover..])
+            let err = if self.inner.has_multi_threading()
+                && self.triples_to_check.len() > self.inner.num_worker_threads()
+            {
+                offline::sacrifice_mt(
+                    &mut self.inner,
+                    self.triples_to_check.len(),
+                    1,
+                    self.triples_to_check.ai(),
+                    self.triples_to_check.aii(),
+                    self.triples_to_check.bi(),
+                    self.triples_to_check.bii(),
+                    self.triples_to_check.ci(),
+                    self.triples_to_check.cii(),
+                    &mut prep_ai[leftover..],
+                    &mut prep_aii[leftover..],
+                    &mut prep_bi[leftover..],
+                    &mut prep_bii[leftover..],
+                    &mut prep_ci[leftover..],
+                    &mut prep_cii[leftover..],
+                )
+            } else {
+                offline::sacrifice(
+                    &mut self.inner,
+                    self.triples_to_check.len(),
+                    1,
+                    self.triples_to_check.ai(),
+                    self.triples_to_check.aii(),
+                    self.triples_to_check.bi(),
+                    self.triples_to_check.bii(),
+                    self.triples_to_check.ci(),
+                    self.triples_to_check.cii(),
+                    &mut prep_ai[leftover..],
+                    &mut prep_aii[leftover..],
+                    &mut prep_bi[leftover..],
+                    &mut prep_bii[leftover..],
+                    &mut prep_ci[leftover..],
+                    &mut prep_cii[leftover..],
+                )
             };
             // purge the sacrificed triples
             if leftover > 0 {
@@ -222,7 +280,9 @@ pub struct InputPhase<'a, F: Field + Sync + Send> {
 }
 
 impl<'a, F: Field + Sync + Send> InputPhase<'a, F>
-where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+where
+    Sha256: FieldDigestExt<F>,
+    ChaCha20Rng: FieldRngExt<F>,
 {
     fn new(party: &'a mut FurukawaParty<F>) -> Self {
         Self {
@@ -293,8 +353,10 @@ pub struct OutputPhase<'a, F: Field + Sync + Send> {
 }
 
 impl<'a, F: Field + Sync + Send> OutputPhase<'a, F>
-where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F> {
-
+where
+    Sha256: FieldDigestExt<F>,
+    ChaCha20Rng: FieldRngExt<F>,
+{
     fn new(party: &'a mut FurukawaParty<F>) -> Self {
         Self {
             party,
@@ -324,7 +386,9 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F> {
 }
 
 impl<F: Field + Send + Sync> ArithmeticBlackBox<F> for FurukawaParty<F>
-where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>,
+where
+    ChaCha20Rng: FieldRngExt<F>,
+    Sha256: FieldDigestExt<F>,
 {
     type Rng = ChaCha20Rng;
     type Digest = Sha256;
@@ -410,21 +474,26 @@ impl GF8InvBlackBox for FurukawaParty<GF8> {
             debug_assert_eq!(si.len(), sii.len());
             let ranges = self.inner.split_range_equally(si.len());
             let chunk_size = ranges[0].1 - ranges[0].0;
-            let thread_parties = self.inner.create_thread_parties_with_additional_data(ranges, |_,_| MulTripleVector::new());
+            let thread_parties = self
+                .inner
+                .create_thread_parties_with_additional_data(ranges, |_, _| MulTripleVector::new());
             let observed_triples = self.inner.run_in_threadpool(|| {
-                Ok(
-                    thread_parties.into_par_iter().zip_eq(si.par_chunks_mut(chunk_size)).zip_eq(sii.par_chunks_mut(chunk_size))
+                Ok(thread_parties
+                    .into_par_iter()
+                    .zip_eq(si.par_chunks_mut(chunk_size))
+                    .zip_eq(sii.par_chunks_mut(chunk_size))
                     .map(|((mut thread_party, si), sii)| {
-                        gf8_inv_layer_threadparty(&mut thread_party, si, sii).map(|()| thread_party.additional_data)
-                    }).collect_vec_list()
-                )
+                        gf8_inv_layer_threadparty(&mut thread_party, si, sii)
+                            .map(|()| thread_party.additional_data)
+                    })
+                    .collect_vec_list())
             })?;
             // append triples
 
             let observed_triples = observed_triples.into_iter().flatten().collect::<MpcResult<Vec<_>>>()?;
             self.triples_to_check.join_thread_mul_triple_recorders(observed_triples);
             Ok(())
-        }else{
+        } else {
             chida::online::gf8_inv_layer(self, si, sii)
         }
     }
@@ -449,7 +518,11 @@ fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
 }
 
 // the straight-forward gf8 inversion using 4 multiplication and only squaring (see Chida et al. "High-Throughput Secure AES Computation" in WAHC'18 [Figure 6])
-fn gf8_inv_layer_threadparty(party: &mut ThreadParty<MulTripleVector<GF8>>, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+fn gf8_inv_layer_threadparty(
+    party: &mut ThreadParty<MulTripleVector<GF8>>,
+    si: &mut [GF8],
+    sii: &mut [GF8],
+) -> MpcResult<()> {
     let n = si.len();
     // this is not yet the multiplication that chida et al use
     let x2 = (square_layer(si), square_layer(sii));
@@ -504,11 +577,36 @@ pub mod test {
 
     use super::FurukawaParty;
 
-    pub fn localhost_setup_furukawa<F: Field + Send + 'static + Sync, T1: Send + 'static, F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,FurukawaParty<F>)>, JoinHandle<(T2,FurukawaParty<F>)>, JoinHandle<(T3,FurukawaParty<F>)>)
-    where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+    pub fn localhost_setup_furukawa<
+        F: Field + Send + 'static + Sync,
+        T1: Send + 'static,
+        F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
+        T2: Send + 'static,
+        F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
+        T3: Send + 'static,
+        F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+    >(
+        f1: F1,
+        f2: F2,
+        f3: F3,
+        n_worker_threads: Option<usize>,
+    ) -> (
+        JoinHandle<(T1, FurukawaParty<F>)>,
+        JoinHandle<(T2, FurukawaParty<F>)>,
+        JoinHandle<(T3, FurukawaParty<F>)>,
+    )
+    where
+        Sha256: FieldDigestExt<F>,
+        ChaCha20Rng: FieldRngExt<F>,
     {
-        fn adapter<F: Field + Send + Sync, T, Fx: FnOnce(&mut FurukawaParty<F>)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,FurukawaParty<F>)
-        where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+        fn adapter<F: Field + Send + Sync, T, Fx: FnOnce(&mut FurukawaParty<F>) -> T>(
+            conn: ConnectedParty,
+            f: Fx,
+            n_worker_threads: Option<usize>,
+        ) -> (T, FurukawaParty<F>)
+        where
+            Sha256: FieldDigestExt<F>,
+            ChaCha20Rng: FieldRngExt<F>,
         {
             let mut party = FurukawaParty::setup(conn, n_worker_threads).unwrap();
             let t = f(&mut party);
@@ -516,17 +614,54 @@ pub mod test {
             party.inner.teardown().unwrap();
             (t, party)
         }
-        localhost_connect(move |conn_party| adapter(conn_party, f1, n_worker_threads), move |conn_party| adapter(conn_party, f2, n_worker_threads), move |conn_party| adapter(conn_party, f3, n_worker_threads))
+        localhost_connect(
+            move |conn_party| adapter(conn_party, f1, n_worker_threads),
+            move |conn_party| adapter(conn_party, f2, n_worker_threads),
+            move |conn_party| adapter(conn_party, f3, n_worker_threads),
+        )
     }
 
     pub struct FurukawaSetup;
     impl<F: Field + Send + Sync + 'static> TestSetup<FurukawaParty<F>> for FurukawaSetup
-    where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
+    where
+        Sha256: FieldDigestExt<F>,
+        ChaCha20Rng: FieldRngExt<F>,
     {
-        fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,FurukawaParty<F>)>, JoinHandle<(T2,FurukawaParty<F>)>, JoinHandle<(T3,FurukawaParty<F>)>) {
+        fn localhost_setup<
+            T1: Send + 'static,
+            F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
+            T2: Send + 'static,
+            F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
+            T3: Send + 'static,
+            F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+        >(
+            f1: F1,
+            f2: F2,
+            f3: F3,
+        ) -> (
+            JoinHandle<(T1, FurukawaParty<F>)>,
+            JoinHandle<(T2, FurukawaParty<F>)>,
+            JoinHandle<(T3, FurukawaParty<F>)>,
+        ) {
             localhost_setup_furukawa(f1, f2, f3, None)
         }
-        fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,FurukawaParty<F>)>, JoinHandle<(T2,FurukawaParty<F>)>, JoinHandle<(T3,FurukawaParty<F>)>) {
+        fn localhost_setup_multithreads<
+            T1: Send + 'static,
+            F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
+            T2: Send + 'static,
+            F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
+            T3: Send + 'static,
+            F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+        >(
+            n_threads: usize,
+            f1: F1,
+            f2: F2,
+            f3: F3,
+        ) -> (
+            JoinHandle<(T1, FurukawaParty<F>)>,
+            JoinHandle<(T2, FurukawaParty<F>)>,
+            JoinHandle<(T3, FurukawaParty<F>)>,
+        ) {
             localhost_setup_furukawa(f1, f2, f3, Some(n_threads))
         }
     }
@@ -539,13 +674,13 @@ pub mod test {
         let x2 = rng.generate(N);
         let x3 = rng.generate(N);
 
-        let program = |x: Vec<GF8>| {
-            move |p: &mut FurukawaParty<GF8>| {
-                p.input_round(&x).unwrap()
-            }
-        };
+        let program = |x: Vec<GF8>| move |p: &mut FurukawaParty<GF8>| p.input_round(&x).unwrap();
 
-        let (h1, h2, h3) = FurukawaSetup::localhost_setup(program(x1.clone()), program(x2.clone()), program(x3.clone()));
+        let (h1, h2, h3) = FurukawaSetup::localhost_setup(
+            program(x1.clone()),
+            program(x2.clone()),
+            program(x3.clone()),
+        );
         let ((x11, x21, x31), _) = h1.join().unwrap();
         let ((x12, x22, x32), _) = h2.join().unwrap();
         let ((x13, x23, x33), _) = h3.join().unwrap();
@@ -575,28 +710,28 @@ pub mod test {
 
     #[test]
     fn aes128_no_keyschedule_gf8() {
-        test_aes128_no_keyschedule_gf8::<FurukawaSetup,_>(1, None);
+        test_aes128_no_keyschedule_gf8::<FurukawaSetup, _>(1, None);
     }
 
     #[test]
     fn aes128_no_keyschedule_gf8_mt() {
         const N_THREADS: usize = 3;
-        test_aes128_no_keyschedule_gf8::<FurukawaSetup,_>(100, Some(N_THREADS));
+        test_aes128_no_keyschedule_gf8::<FurukawaSetup, _>(100, Some(N_THREADS));
     }
 
     #[test]
     fn aes128_keyschedule_gf8() {
-        test_aes128_keyschedule_gf8::<FurukawaSetup,_>(None);
+        test_aes128_keyschedule_gf8::<FurukawaSetup, _>(None);
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_gf8() {
-        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup,_>(1, None);
+        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup, _>(1, None);
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_gf8_mt() {
         const N_THREADS: usize = 3;
-        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup,_>(100, Some(N_THREADS));
+        test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup, _>(100, Some(N_THREADS));
     }
 }

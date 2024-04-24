@@ -1,10 +1,10 @@
-use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use crate::network::task::{Direction, IoLayerOwned};
 use crate::network::CommChannel;
-use crate::party::{commitment, MainParty};
-use rand_chacha::ChaCha20Rng;
 use crate::party::broadcast::{Broadcast, BroadcastContext};
 use crate::party::error::{MpcError, MpcResult};
+use crate::party::{commitment, MainParty};
+use rand::{CryptoRng, Rng, RngCore, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
 const CR_SEC_PARAM: usize = 128 / 8;
 
@@ -58,11 +58,14 @@ impl SharedRng {
             let seeded_rng = ChaCha20Rng::from_seed(common_seed);
             Ok(Self(seeded_rng))
         } else {
-            Err(MpcError::CommitmentError)
+            Err(MpcError::Commitment)
         }
     }
 
-    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(rng: &mut LocalRng, io: &IoLayerOwned) -> MpcResult<(Self, Self)> {
+    pub fn setup_all_pairwise_semi_honest<LocalRng: Rng + CryptoRng>(
+        rng: &mut LocalRng,
+        io: &IoLayerOwned,
+    ) -> MpcResult<(Self, Self)> {
         // receive seed from P+1
         let mut seed_next = [0u8; 32];
         let rcv_seed_next = io.receive_slice(Direction::Next, &mut seed_next[0..CR_SEC_PARAM]);
@@ -75,7 +78,10 @@ impl SharedRng {
         rcv_seed_next.rcv()?;
         io.wait_for_completion();
 
-        Ok((Self(ChaCha20Rng::from_seed(seed)), Self(ChaCha20Rng::from_seed(seed_next))))
+        Ok((
+            Self(ChaCha20Rng::from_seed(seed)),
+            Self(ChaCha20Rng::from_seed(seed_next)),
+        ))
     }
 
     pub fn seeded_from(other: &mut Self) -> Self {
@@ -125,10 +131,10 @@ impl GlobalRng {
                 }
                 return Ok(Self(ChaCha20Rng::from_seed(common_seed)));
             } else {
-                Err(MpcError::CommitmentError)
+                Err(MpcError::Commitment)
             }
         } else {
-            Err(MpcError::BroadcastError)
+            Err(MpcError::Broadcast)
         }
     }
 }

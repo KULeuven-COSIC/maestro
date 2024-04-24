@@ -29,7 +29,6 @@ fn bench_multiplication(c: &mut Criterion) {
     c.bench_function("CLMUL Multiplication", move |b| {
         b.iter(|| x.mul_clmul_u64(&y))
     });
-
 }
 
 criterion_group!(gf2p64_mult_benchmark, bench_multiplication);

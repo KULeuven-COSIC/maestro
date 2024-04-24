@@ -70,8 +70,12 @@ pub struct ChidaBenchmarkParty {
 }
 
 impl ChidaBenchmarkParty {
-    pub fn setup(connected: ConnectedParty, variant: ImplVariant, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|party| Self{
+    pub fn setup(
+        connected: ConnectedParty,
+        variant: ImplVariant,
+        n_worker_threads: Option<usize>,
+    ) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             variant,
         })
@@ -79,7 +83,12 @@ impl ChidaBenchmarkParty {
 }
 
 // simd: how many parallel AES calls
-pub fn chida_benchmark(connected: ConnectedParty, simd: usize, variant: ImplVariant, n_worker_threads: Option<usize>) {
+pub fn chida_benchmark(
+    connected: ConnectedParty,
+    simd: usize,
+    variant: ImplVariant,
+    n_worker_threads: Option<usize>,
+) {
     let mut party = ChidaBenchmarkParty::setup(connected, variant, n_worker_threads).unwrap();
     let setup_comm_stats = party.inner.0.io().reset_comm_stats();
     let input = aes::random_state(&mut party.inner, simd);
@@ -117,8 +126,14 @@ impl BenchmarkProtocol for ChidaBenchmark {
     fn protocol_name(&self) -> String {
         "chida".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-        let mut party = ChidaBenchmarkParty::setup(conn, ImplVariant::Optimized, n_worker_threads).unwrap();
+    fn run(
+        &self,
+        conn: ConnectedParty,
+        simd: usize,
+        n_worker_threads: Option<usize>,
+    ) -> BenchmarkResult {
+        let mut party =
+            ChidaBenchmarkParty::setup(conn, ImplVariant::Optimized, n_worker_threads).unwrap();
         let _setup_comm_stats = party.inner.0.io().reset_comm_stats();
         let input = aes::random_state(&mut party.inner, simd);
         // create random key states for benchmarking purposes

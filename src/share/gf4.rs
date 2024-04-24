@@ -206,12 +206,14 @@ impl Field for GF4 {
 impl Add for GF4 {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
 }
 
 impl AddAssign for GF4 {
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0;
     }
@@ -220,6 +222,7 @@ impl AddAssign for GF4 {
 impl Sub for GF4 {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
@@ -252,7 +255,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF4> for R {
     fn generate(&mut self, n: usize) -> Vec<GF4> {
         let mut r = vec![0; n];
         self.fill_bytes(&mut r);
-        r.into_iter().map(|x| GF4::new(x)).collect()
+        r.into_iter().map(GF4::new).collect()
     }
 
     fn fill(&mut self, buf: &mut [GF4]) {
@@ -265,7 +268,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<GF4> for R {
 impl<D: Digest> FieldDigestExt<GF4> for D {
     fn update(&mut self, message: &[GF4]) {
         for x in message {
-            self.update(&[x.0]);
+            self.update([x.0]);
         }
     }
 }
@@ -311,7 +314,7 @@ impl Field for BsGF4 {
         it.into_iter().map(|el| el.borrow().0).collect()
     }
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
-        v.into_iter().map(|b| Self(b)).collect()
+        v.into_iter().map(Self).collect()
     }
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
         dest.iter_mut().zip(v).for_each(|(dst, b)| *dst = Self(b));
@@ -319,6 +322,7 @@ impl Field for BsGF4 {
 }
 
 impl AddAssign for BsGF4 {
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0
     }
@@ -340,6 +344,7 @@ impl Mul for BsGF4 {
 
 impl Sub for BsGF4 {
     type Output = Self;
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
@@ -347,6 +352,7 @@ impl Sub for BsGF4 {
 
 impl Add for BsGF4 {
     type Output = Self;
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
@@ -361,14 +367,14 @@ impl<R: Rng + CryptoRng> FieldRngExt<BsGF4> for R {
     fn generate(&mut self, n: usize) -> Vec<BsGF4> {
         let mut r = vec![0; n];
         self.fill_bytes(&mut r);
-        r.into_iter().map(|x| BsGF4(x)).collect()
+        r.into_iter().map(BsGF4).collect()
     }
 }
 
 impl<D: Digest> FieldDigestExt<BsGF4> for D {
     fn update(&mut self, message: &[BsGF4]) {
         for x in message {
-            self.update(&[x.0]);
+            self.update([x.0]);
         }
     }
 }

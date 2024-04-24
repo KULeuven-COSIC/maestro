@@ -55,7 +55,7 @@ impl WL16ASParty {
                 println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
                 Ok(())
             },
-            Ok(false) => Err(MpcError::MultCheckError),
+            Ok(false) => Err(MpcError::MultCheck),
             Err(err) => Err(err)
         }
     }
