@@ -53,6 +53,12 @@ pub trait Broadcast {
         Sha256: FieldDigestExt<F>;
 }
 
+impl Default for BroadcastContext {
+    fn default() -> Self {
+        BroadcastContext::new()
+    }
+}
+
 impl BroadcastContext {
     pub fn new() -> Self {
         Self {
@@ -80,8 +86,8 @@ impl BroadcastContext {
         contexts.into_iter().for_each(|context| {
             let final_next = context.view_next.finalize();
             let final_prev = context.view_prev.finalize();
-            Digest::update(&mut res.view_next, &final_next);
-            Digest::update(&mut res.view_prev, &final_prev);
+            Digest::update(&mut res.view_next, final_next);
+            Digest::update(&mut res.view_prev, final_prev);
         });
         res
     }
@@ -162,7 +168,7 @@ impl Broadcast for MainParty {
         let rcv_share_iii = self.io().receive_field(Direction::Previous, share_i.len());
 
         // also update view_next as we would have received share_ii from P+1 (but due to RSS we know it already)
-        FieldDigestExt::update(&mut context.view_next, &share_ii);
+        FieldDigestExt::update(&mut context.view_next, share_ii);
 
         let share_iii = rcv_share_iii.rcv()?;
         FieldDigestExt::update(&mut context.view_prev, &share_iii);
@@ -170,7 +176,7 @@ impl Broadcast for MainParty {
         // reconstruct
         let mut value = Vec::with_capacity(share_i.len());
         for (i, siii) in share_iii.into_iter().enumerate() {
-            value.push(share_i[i].clone() + share_ii[i].clone() + siii);
+            value.push(share_i[i] + share_ii[i] + siii);
         }
         self.io().wait_for_completion();
         Ok(value)
@@ -199,7 +205,7 @@ impl Broadcast for MainParty {
                     shares
                         .iter()
                         .zip(siii)
-                        .map(|(s, siii)| s.si.clone() + s.sii.clone() + siii)
+                        .map(|(s, siii)| s.si + s.sii + siii)
                         .collect(),
                 ))
             }
@@ -217,7 +223,7 @@ impl Broadcast for MainParty {
                 // update my view of P+1 (who virtually sent sii)
                 FieldDigestExt::update(
                     &mut context.view_next,
-                    &shares.iter().map(|s| s.sii.clone()).collect::<Vec<_>>(),
+                    &shares.iter().map(|s| s.sii).collect::<Vec<_>>(),
                 );
                 Ok(None)
             }
@@ -240,7 +246,7 @@ impl Broadcast for MainParty {
                 return Err(MpcError::Broadcast);
             }
         }
-        return Ok(());
+        Ok(())
     }
 }
 

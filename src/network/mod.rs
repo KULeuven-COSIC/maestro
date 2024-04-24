@@ -61,7 +61,7 @@ impl Config {
                 ),
             ));
         }
-        return Ok(cert[0].clone());
+        Ok(cert[0].clone())
     }
 
     fn load_private_key_from_file(
@@ -72,10 +72,10 @@ impl Config {
         path.push(key_path);
         let mut reader = BufReader::new(File::open(&path)?);
         let key = rustls_pemfile::private_key(&mut reader)?;
-        return key.ok_or(io::Error::new(
+        key.ok_or(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Invalid private key in {}", path.display()),
-        ));
+        ))
     }
 
     // returns party index and config
@@ -368,7 +368,6 @@ impl CommChannel {
             .with_root_certificates(root_store)
             .with_client_auth_cert(vec![my_cert.clone()], my_key)
             .unwrap()
-            .into()
     }
 
     fn new(to: usize, stream: Stream) -> Self {
@@ -468,15 +467,15 @@ impl CommChannel {
     }
 
     pub fn get_bytes_sent(&self) -> u64 {
-        return self.bytes_sent;
+        self.bytes_sent
     }
 
     pub fn get_bytes_received(&self) -> u64 {
-        return self.bytes_received;
+        self.bytes_received
     }
 
     pub fn get_rounds(&self) -> usize {
-        return self.rounds;
+        self.rounds
     }
 
     /// closes the connection properly. This may block if data needs to be written

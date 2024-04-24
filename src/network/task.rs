@@ -226,10 +226,7 @@ enum State {
 
 impl State {
     pub fn is_working(&self) -> bool {
-        match self {
-            Self::Working { .. } => true,
-            _ => false,
-        }
+        matches!(self,Self::Working { .. })
     }
 }
 
@@ -527,7 +524,7 @@ impl IoThreadContext {
                         // grab relevant read task
                         // check if the appropriate read task is present
                         let t = read_task_queue
-                            .pop_with_thread_id(u64::from_le_bytes(thread_id_buf.clone()));
+                            .pop_with_thread_id(u64::from_le_bytes(*thread_id_buf));
                         if let Some(task) = t {
                             // completed reading the id
                             *thread_id_buf_offset = 0;
@@ -842,7 +839,7 @@ impl IoLayerOwned {
                     (Ok(()), Ok(())) => {
                         // sync is completed, return the function to caller
                         let mut guard = IO_COMM_STATS.lock().unwrap();
-                        let comm_stats = guard.clone();
+                        let comm_stats = *guard;
                         guard.prev.reset();
                         guard.next.reset();
                         comm_stats

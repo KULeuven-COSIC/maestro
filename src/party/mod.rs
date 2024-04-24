@@ -210,7 +210,7 @@ impl MainParty {
             random_prev: rand_prev,
             random_local: rng,
             stats: CombinedCommStats::empty(),
-            thread_pool: n_worker_threads.map(|n_workers| Self::build_thread_pool(n_workers)),
+            thread_pool: n_worker_threads.map(Self::build_thread_pool),
         })
     }
 
@@ -244,7 +244,7 @@ impl MainParty {
             random_prev: rand_prev,
             random_local: rng,
             stats: CombinedCommStats::empty(),
-            thread_pool: n_worker_threads.map(|n_workers| Self::build_thread_pool(n_workers)),
+            thread_pool: n_worker_threads.map(Self::build_thread_pool),
         })
     }
 
@@ -271,7 +271,7 @@ impl MainParty {
         self.thread_pool
             .take()
             .into_iter()
-            .for_each(|thread_pool| drop(thread_pool));
+            .for_each(drop);
         let io = self.io.take();
         debug_assert!(io.is_some());
         if let Some(io) = io {
@@ -477,7 +477,7 @@ where
 {
     next.generate(n)
         .into_iter()
-        .zip(prev.generate(n).into_iter())
+        .zip(prev.generate(n))
         .map(|(next, prev)| next - prev)
         .collect()
 }
