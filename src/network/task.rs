@@ -37,7 +37,7 @@ pub enum Task {
         mailback: oneshot::Sender<Vec<u8>>,
     },
     Sync {
-        /// if true, write comm stats to [IO_COMM_STATS] and reset the stats
+        /// if true, write comm stats to IO_COMM_STATS and reset the stats
         write_comm_stats: bool,
     },
 }

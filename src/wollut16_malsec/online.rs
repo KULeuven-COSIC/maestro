@@ -19,7 +19,7 @@ use super::WL16ASParty;
 
 /// This protocol implements multiplicative inversion as in `Protocol 3`.
 ///
-/// Given a (2,3)-RSS shared vector [[x]] of elements in GF(2^8),
+/// Given a (2,3)-RSS shared vector `[[x]]`` of elements in `GF(2^8)`,
 /// the protocol computes the component-wise multiplicative inverse.
 ///
 /// The function inputs are:
