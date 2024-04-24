@@ -11,7 +11,7 @@ use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
 
-use super::{gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, Invertible};
+use super::{gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible};
 
 /// An element of `GF(2^64) := GF(2)[X] / X^64+X^4+X^3+X+1`
 ///
@@ -73,6 +73,7 @@ impl GF2p64 {
             target_feature = "aes"
         )
     ))]
+
     fn propagate_carries(mut word: u64, carry: u64) -> Self {
         let mut c = carry;
         while c != 0 {
@@ -82,14 +83,13 @@ impl GF2p64 {
         Self(word)
     }
 
-    /// Multiply using CLMUL (cf. https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs)
     #[cfg(all(
         feature = "clmul",
         target_arch = "x86_64",
         target_feature = "sse2",
         target_feature = "pclmulqdq"
     ))]
-    pub fn mul_clmul_u64(&self, other: &Self) -> Self {
+    fn clmul_u64(&self, other: &Self) -> (u64,u64) {
         use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
 
         let mut word = 0u64;
@@ -103,24 +103,71 @@ impl GF2p64 {
 
         let word = cc[0];
         let carry = cc[1];
+        (word, carry)        
+    }   
 
-        Self::propagate_carries(word, carry)
-    }
-
-    /// Multiply using CLMUL (cf. https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs)
     #[cfg(all(
         feature = "clmul",
         target_arch = "aarch64",
         target_feature = "neon",
         target_feature = "aes"
-    ))]
-    pub fn mul_clmul_u64(&self, other: &Self) -> Self {
+    ))] 
+    fn clmul_u64(&self, other: &Self) -> (u64,u64) {
         use std::arch::aarch64::vmull_p64;
         let clmul: u128 = unsafe { vmull_p64(self.0, other.0) };
         let word = clmul as u64;
         let carry = (clmul >> 64) as u64;
+        (word, carry)
+    }
+
+    /// Multiply using CLMUL (cf. https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs)
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    pub fn mul_clmul_u64(&self, other: &Self) -> Self {
+        let (word,carry) = Self::clmul_u64(&self, other);
         Self::propagate_carries(word, carry)
     }
+
+    /// Inner product using basic multiplication
+    pub fn fall_back_inner_product(a: &[Self], b: &[Self]) -> Self {
+        a.iter().zip(b).fold(Self::ZERO, |s, (a,b)| s + *a * *b)
+    }
+
+    /// Inner product for CLMUL with delayed carry propagation
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    pub fn clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
+        let (word,carry) = a.iter().zip(b).fold((0u64,0u64), |(wrd,car), (a,b)| {
+            let (w,c) = Self::clmul_u64(a, b);
+            (wrd ^ w, car ^c)
+        });
+        Self::propagate_carries(word, carry)
+    }
+
 }
 
 impl Field for GF2p64 {
@@ -271,6 +318,45 @@ impl Mul for GF2p64 {
 impl MulAssign for GF2p64 {
     fn mul_assign(&mut self, rhs: Self) {
         *self = *self * rhs
+    }
+}
+
+impl InnerProduct for GF2p64 {
+
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    fn inner_product(a: &[Self], b: &[Self]) -> Self {
+        Self::clmul_inner_product(a,b)
+    }
+    
+    #[cfg(not(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    )))]
+    fn inner_product(a: &[Self], b: &[Self]) -> Self {
+        Self::fall_back_inner_product(a,b)
     }
 }
 
@@ -598,7 +684,9 @@ impl GF2p64Subfield for GF4 {
 
 #[cfg(test)]
 mod test {
-    use crate::share::{gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, Invertible};
+    use rand::thread_rng;
+
+    use crate::share::{gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, FieldRngExt, InnerProduct, Invertible};
 
     use super::GF2p64;
 
@@ -682,5 +770,30 @@ mod test {
                 assert_eq!((x * y).embed(), x.embed() * y.embed())
             }
         }
+    }
+
+    #[test]
+    fn test_fall_back_inner_product() {
+        let a = vec![
+            GF2p64(0x1),
+            GF2p64(0x1),
+            GF2p64(0x4),
+            GF2p64(0x8),
+        ];
+        let b = vec![
+            GF2p64(0x1),
+            GF2p64(0x2),
+            GF2p64(0x1),
+            GF2p64(0x1),
+        ];
+        assert_eq!(GF2p64::fall_back_inner_product(&a, &b),GF2p64(0xf))
+    }
+
+    #[test]
+    fn test_inner_product() {
+        let mut rng = thread_rng();
+        let a: Vec<GF2p64> = rng.generate(29);
+        let b: Vec<GF2p64> = rng.generate(29);
+        assert_eq!(GF2p64::fall_back_inner_product(&a, &b),GF2p64::inner_product(&a, &b))
     }
 }

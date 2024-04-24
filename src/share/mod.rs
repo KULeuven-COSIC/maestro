@@ -47,14 +47,20 @@ pub trait Field:
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
 }
 
+/// Trait for fields that exposes a function for computing multiplicative inversion
 pub trait Invertible: Field {
     /// Multiplicative Inverse (zero may map to zero)
     fn inverse(self) -> Self;
 }
 
+/// Trait exposes 2 as a field element. This only works for field with order > 2.
 pub trait HasTwo: Field {
     /// Multiplicative Inverse (zero may map to zero)
     const TWO: Self;
+}
+
+pub trait InnerProduct: Field {
+    fn inner_product(a: &[Self], b: &[Self]) -> Self;
 }
 
 #[derive(Clone, Debug)]
