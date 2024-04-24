@@ -1,10 +1,12 @@
 //! This module implements the maliciously-secure oblivious AES protocol "WOL LUT 16".
 
+use std::time::Instant;
+
+use rand_chacha::ChaCha20Rng;
+use sha2::Sha256;
+
 use crate::{
-    network::ConnectedParty,
-    party::{broadcast::BroadcastContext, error::MpcResult, MainParty},
-    share::{gf4::BsGF4, Field},
-    wollut16::RndOhvOutput,
+    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::BroadcastContext, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, Party}, share::{gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
 };
 
 mod mult_verification;
@@ -28,6 +30,108 @@ impl WL16ASParty {
             gf4_triples_to_check: MulTripleVector::new(),
             broadcast_context: BroadcastContext::new(),
         })
+    }
+
+    fn prepare_rand_ohv(&mut self, n: usize) -> MpcResult<()> {
+        let mut new = offline::generate_random_ohv16(self, n)?;
+        if self.prep_ohv.is_empty() {
+            self.prep_ohv = new;
+        } else {
+            self.prep_ohv.append(&mut new);
+        }
+        Ok(())
+    }
+
+    fn verify_multiplications(&mut self) -> MpcResult<()> {
+        match mult_verification::verify_multiplication_triples(self) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(MpcError::MultCheckError),
+            Err(err) => Err(err)
+        }
+    }
+}
+
+pub struct MalLUT16Benchmark;
+
+impl BenchmarkProtocol for MalLUT16Benchmark {
+    fn protocol_name(&self) -> String {
+        "mal-lut16".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        let mut party = WL16ASParty::setup(conn, n_worker_threads).unwrap();
+        let _setup_comm_stats = party.io().reset_comm_stats();
+        println!("After setup");
+        let start_prep = Instant::now();
+        party.do_preprocessing(0, simd).unwrap();
+        let prep_duration = start_prep.elapsed();
+        let prep_comm_stats = party.io().reset_comm_stats();
+        println!("After pre-processing");
+
+        let input = aes::random_state(&mut party, simd);
+        // create random key states for benchmarking purposes
+        let ks = aes::random_keyschedule(&mut party);
+
+        let start = Instant::now();
+        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+        // check all multipliction triples
+        party.verify_multiplications().unwrap();
+        let duration = start.elapsed();
+        let online_comm_stats = party.io().reset_comm_stats();
+        println!("After online");
+        let _ = aes::output(&mut party, output).unwrap();
+        println!("After outout");
+        party.inner.teardown().unwrap();
+        println!("After teardown");
+
+        BenchmarkResult::new(
+            prep_duration,
+            duration,
+            prep_comm_stats,
+            online_comm_stats,
+            party.inner.get_additional_timers(),
+        )
+    }
+}
+
+impl ArithmeticBlackBox<GF8> for WL16ASParty {
+    type Digest = Sha256;
+    type Rng = ChaCha20Rng;
+
+    #[inline]
+    fn constant(&self, value: GF8) -> RssShare<GF8> {
+        self.inner.constant(value)
+    }
+
+    fn io(&self) -> &IoLayerOwned {
+        self.inner.io()
+    }
+
+    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
+        unimplemented!()
+    }
+
+    fn generate_alpha(&mut self, n: usize) -> Vec<GF8> {
+        self.inner.generate_alpha(n)
+    }
+
+    fn generate_random(&mut self, n: usize) -> Vec<RssShare<GF8>> {
+        self.inner.generate_random(n)
+    }
+
+    fn input_round(&mut self, my_input: &[GF8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+        unimplemented!()
+    }
+
+    fn mul(&mut self, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF8], bi: &[GF8], bii: &[GF8]) -> MpcResult<()> {
+        unimplemented!()
+    }
+
+    fn output_round(&mut self, si: &[GF8], sii: &[GF8]) -> MpcResult<Vec<GF8>> {
+        unimplemented!()
+    }
+
+    fn finalize(&mut self) -> MpcResult<()> {
+        self.verify_multiplications()
     }
 }
 
@@ -73,6 +177,23 @@ impl<F: Field> MulTripleVector<F> {
         self.b_ii.push(bii);
         self.c_i.push(ci);
         self.c_ii.push(cii);
+    }
+}
+
+impl GF8InvBlackBox for WL16ASParty {
+    #[inline]
+    fn constant(&self, value: GF8) -> RssShare<GF8> {
+        self.inner.constant(value)
+    }
+
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
+        let n_rnd_ohv_ks = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
+        let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
+        self.prepare_rand_ohv(n_rnd_ohv + n_rnd_ohv_ks)
+    }
+
+    fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+        online::gf8_inv_layer(self, si, sii)
     }
 }
 

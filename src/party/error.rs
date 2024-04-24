@@ -11,6 +11,7 @@ pub enum MpcError {
     SacrificeError,
     IoError(io::Error),
     RecvError,
+    MultCheckError,
 }
 
 impl Display for MpcError {
@@ -21,6 +22,7 @@ impl Display for MpcError {
             MpcError::SacrificeError => f.write_str("SacrificeError"),
             MpcError::IoError(io_err) => write!(f, "IoError({})", io_err),
             MpcError::RecvError => f.write_str("RecvError"),
+            MpcError::MultCheckError => f.write_str("MultCheckError"),
         }
     }
 }
