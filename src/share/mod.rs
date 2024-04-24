@@ -61,6 +61,8 @@ pub trait HasTwo: Field {
 
 pub trait InnerProduct: Field {
     fn inner_product(a: &[Self], b: &[Self]) -> Self;
+
+    fn weak_inner_product(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
 }
 
 #[derive(Clone, Debug)]
