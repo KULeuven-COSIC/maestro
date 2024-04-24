@@ -7,8 +7,8 @@ edition = "2021"
 
 [features]
 benchmark-helper = ["criterion"]
-verbose-timing = []
 default = ["clmul"]
+verbose-timing = []
 clmul = []
 
 [dependencies]
@@ -28,6 +28,7 @@ rayon = "1.10.0"
 
 [dev-dependencies]
 # serial_test = "*"
+criterion = "0.5.1"
 
 [[bin]]
 name = "lut_benchmark"
@@ -36,3 +37,8 @@ required-features = ["benchmark-helper"]
 
 [lib]
 required-features = ["verbose-timing"]
+
+[[bench]]
+name = "gf2p64_mult_benchmark"
+harness = false
+required-features = ["clmul"]

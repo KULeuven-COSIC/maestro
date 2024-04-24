@@ -46,7 +46,7 @@ impl GF2p64 {
     }
 
     /// Multiply using addition
-    fn mul_using_add(mut self, other: &Self) -> Self {
+    pub fn mul_using_add(mut self, other: &Self) -> Self {
         let mut result = Self::ZERO;
         for i in 0..Self::NBITS {
             if other.0 & (1 << i) != 0 {
@@ -89,7 +89,7 @@ impl GF2p64 {
         target_feature = "sse2",
         target_feature = "pclmulqdq"
     ))]
-    fn mul_clmul_u64(&self, other: &Self) -> Self {
+    pub fn mul_clmul_u64(&self, other: &Self) -> Self {
         use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
 
         let mut word = 0u64;
@@ -114,7 +114,7 @@ impl GF2p64 {
         target_feature = "neon",
         target_feature = "aes"
     ))]
-    fn mul_clmul_u64(&self, other: &Self) -> Self {
+    pub fn mul_clmul_u64(&self, other: &Self) -> Self {
         use std::arch::aarch64::vmull_p64;
         let clmul: u128 = unsafe { vmull_p64(self.0, other.0) };
         let word = clmul as u64;
