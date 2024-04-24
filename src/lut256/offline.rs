@@ -181,17 +181,17 @@ fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv, RndOhv)> {
             .zip(res.into_iter())
             .for_each(|(dst, (ohv_i, ohv_ii))| {
                 if k < 4 {
-                    dst.0[0] |= (ohv_i as u64) << 16 * k;
-                    dst.1[0] |= (ohv_ii as u64) << 16 * k;
+                    dst.0[0] |= (ohv_i as u64) << (16 * k);
+                    dst.1[0] |= (ohv_ii as u64) << (16 * k);
                 } else if k < 8 {
-                    dst.0[1] |= (ohv_i as u64) << 16 * (k - 4);
-                    dst.1[1] |= (ohv_ii as u64) << 16 * (k - 4);
+                    dst.0[1] |= (ohv_i as u64) << (16 * (k - 4));
+                    dst.1[1] |= (ohv_ii as u64) << (16 * (k - 4));
                 } else if k < 12 {
-                    dst.0[2] |= (ohv_i as u64) << 16 * (k - 8);
-                    dst.1[2] |= (ohv_ii as u64) << 16 * (k - 8);
+                    dst.0[2] |= (ohv_i as u64) << (16 * (k - 8));
+                    dst.1[2] |= (ohv_ii as u64) << (16 * (k - 8));
                 } else {
-                    dst.0[3] |= (ohv_i as u64) << 16 * (k - 12);
-                    dst.1[3] |= (ohv_ii as u64) << 16 * (k - 12);
+                    dst.0[3] |= (ohv_i as u64) << (16 * (k - 12));
+                    dst.1[3] |= (ohv_ii as u64) << (16 * (k - 12));
                 }
             });
     }

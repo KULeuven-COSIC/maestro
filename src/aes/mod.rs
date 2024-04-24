@@ -188,6 +188,12 @@ pub struct AesKeyState {
     sii: [GF8; 16],
 }
 
+impl Default for AesKeyState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AesKeyState {
     /// Returns a all zero state
     pub fn new() -> Self {
@@ -207,7 +213,7 @@ impl AesKeyState {
                 state.sii[4 * i + j] = vec[4 * j + i].sii;
             }
         }
-        return state;
+        state
     }
 
     // vec must be in row-wise representation
@@ -218,7 +224,7 @@ impl AesKeyState {
             state.si[i] = x.si;
             state.sii[i] = x.sii;
         }
-        return state;
+        state
     }
 
     pub fn to_rss_vec(&self) -> Vec<RssShare<GF8>> {
@@ -226,7 +232,7 @@ impl AesKeyState {
         for i in 0..16 {
             out.push(RssShare::from(self.si[i], self.sii[i]));
         }
-        return out;
+        out
     }
 }
 
@@ -265,7 +271,7 @@ macro_rules! timer {
 pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
     party: &mut Protocol,
     inputs: VectorAesState,
-    round_key: &Vec<AesKeyState>,
+    round_key: &[AesKeyState],
 ) -> MpcResult<VectorAesState> {
     debug_assert_eq!(round_key.len(), 11);
     let mut state = inputs;
@@ -274,6 +280,7 @@ pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
         add_round_key(&mut state, &round_key[0]);
     });
 
+    #[allow(clippy::needless_range_loop)]
     for r in 1..=9 {
         timer!("aes_sbox", {
             sbox_layer(party, &mut state.si, &mut state.sii)?;
