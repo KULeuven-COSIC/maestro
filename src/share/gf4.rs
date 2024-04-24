@@ -1,9 +1,11 @@
 //! This module implements the 4-bit finite field `GF(2^4)`.
 //!
-//! It provides two data types:
-//! - [GF4] contains a single field element
-//! - [BsGF4] contains two field elements packed for efficiency
-//! 
+//! The field modulus is `X^4+X+1`.
+//!
+//! There are two data types:
+//! - [GF4] contains a single field element.
+//! - [BsGF4] contains two field elements packed for efficiency.
+//!
 //! Multiplication is implemented using lookup tables.
 
 use std::{
@@ -18,7 +20,7 @@ use sha2::Digest;
 
 use super::{gf4_bs_table, Field, FieldDigestExt, FieldRngExt};
 
-/// An element of `GF(2^4) := GF(2)[X] / X^4+X+1`
+/// An element of `GF(2^4) := GF(2)[X] / X^4+X+1`.
 ///
 /// An element is represented as a byte where the top 4 bits are always 0.
 #[derive(Copy, Clone, Default, PartialEq)]
@@ -55,35 +57,42 @@ const MUL_TABLE: [[u8; 16]; 16] = [
 ];
 
 impl GF4 {
-    // Generates a new element of `GF(2^4)` from a u8. The top 4 bits are ignored.
+    /// Generates a new element of `GF(2^4)` from a byte.
+    ///
+    /// The top 4 bits are ignored.
     pub fn new(x: u8) -> Self {
         GF4(x & 0x0F)
     }
 
-    // Generates a new element of `GF(2^4)` from a u8 may have undefined behavior if the top 4-bits are set.
+    /// Generates a new element of `GF(2^4)` from a byte without any checks.
+    ///  
+    /// May have undefined behavior if the top 4-bits are set.
     pub fn new_unchecked(x: u8) -> Self {
         GF4(x)
     }
 
+    /// Returns a binary representation of the field element.
     pub fn as_u8(self) -> u8 {
         self.0
     }
 
+    /// Squares the field element.
     pub fn square(&self) -> Self {
         Self(SQ_TABLE[self.0 as usize])
     }
 
-    // Returns the produce 0xE * self
+    // Multiplies the field element by `0xE`.
     pub fn mul_e(&self) -> Self {
         Self(MUL_E_TABLE[self.0 as usize])
     }
 
-    /// Pack to elements of GF4 into a single byte
+    /// Packs two field elements of GF4 into a single byte.
     #[inline]
     pub fn pack(ah: GF4, al: GF4) -> u8 {
         (ah.0 << 4) + al.0
     }
 
+    /// Unpacks a byte into two field elements.
     #[inline]
     pub fn unpack(b: u8) -> (GF4, GF4) {
         //here we abuse the fact that new ignores the high bits.
@@ -94,6 +103,10 @@ impl GF4 {
 impl Field for GF4 {
     const NBYTES: usize = 1;
 
+    const ZERO: GF4 = Self(0);
+
+    const ONE: GF4 = Self(1);
+
     fn serialized_size(n_elements: usize) -> usize {
         if n_elements % 2 == 0 {
             n_elements / 2
@@ -101,10 +114,6 @@ impl Field for GF4 {
             n_elements / 2 + 1
         }
     }
-
-    const ZERO: GF4 = Self(0);
-
-    const ONE: GF4 = Self(1);
 
     fn is_zero(&self) -> bool {
         self.0 == 0
@@ -232,25 +241,29 @@ impl<D: Digest> FieldDigestExt<GF4> for D {
     }
 }
 
-/// Two elements of `GF(2^4) := GF(2)[X] / X^4+X+1`
+/// Two elements of `GF(2^4) := GF(2)[X] / X^4+X+1` packed into a single byte.
 ///
-/// The two elements are represented as a byte where the top bits are the first element.
+/// The top 4 bits are the first element.
 #[derive(Clone, Copy, PartialEq, Default)]
 pub struct BsGF4(u8);
 
 impl BsGF4 {
+    /// Generates a new packed element from two [GF4].
     pub fn new(el1: GF4, el2: GF4) -> Self {
         Self(el1.as_u8() << 4 | el2.as_u8())
     }
 
+    /// Unpacks an element into two [GF4].
     pub fn unpack(self) -> (GF4, GF4) {
         (GF4::new_unchecked(self.0 >> 4), GF4::new(self.0))
     }
 
+    /// Squares both elements.
     pub fn square(self) -> Self {
         Self(gf4_bs_table::SQUARE_TABLE[self.0 as usize])
     }
 
+    // Squares both elements and multiplies both with `0xE`.
     pub fn square_mul_e(self) -> Self {
         Self(gf4_bs_table::SQUARE_MUL_E_TABLE[self.0 as usize])
     }

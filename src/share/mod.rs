@@ -1,5 +1,6 @@
 //! This module provides implementations of various finite [Field]s and replicated secret sharing.
 //!
+//! The provided field operations are **not constant-time**.
 pub mod bs_bool16;
 pub mod gf2p64;
 pub mod gf4;

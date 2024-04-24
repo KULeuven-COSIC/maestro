@@ -1,5 +1,4 @@
 //! This crate implements different oblivious AES protocols.
-
 #![allow(dead_code)]
 pub mod aes;
 pub mod benchmark;
