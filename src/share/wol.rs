@@ -2,7 +2,7 @@
 //!
 //! The WOL transformations are efficient isomorphisms between GF(2^8) and GF(2^4^2)
 //! proposed by Wolkerstorfer et al. in "An ASIC Implementation of the AES S-Boxes"
-//! in CT-RSA 2002, <https://doi.org/10.1007/3- 540- 45760- 7_6>.
+//! in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 //!
 
 use super::{gf4::GF4, gf8::GF8};

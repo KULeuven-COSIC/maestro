@@ -60,7 +60,7 @@ impl GF2p64 {
         result
     }
 
-    /// Carry propagation for CLMUL (cf. https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs)
+    /// Carry propagation for CLMUL (cf. <https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs>)
     #[cfg(any(
         test,
         all(
@@ -123,7 +123,7 @@ impl GF2p64 {
         (word, carry)
     }
 
-    /// Multiply using CLMUL (cf. https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs)
+    /// Multiply using CLMUL (cf. <https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs>)
     #[cfg(any(
         all(
             feature = "clmul",

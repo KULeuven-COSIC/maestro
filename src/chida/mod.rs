@@ -1,4 +1,4 @@
-//! This module implements the semi-honest oblivious AES protocol by Chida et al., "High-Throughput Secure AES Computation" in WAHC'18 (https://doi.org/10.1145/3267973.3267977).
+//! This module implements the semi-honest oblivious AES protocol by Chida et al., "High-Throughput Secure AES Computation" in WAHC'18 (<https://doi.org/10.1145/3267973.3267977>).
 //!
 //! The implementation has two variants, [ImplVariant::Simple] and [ImplVariant::Optimized].
 //! These variants differ in the implementation of the `sub_bytes` step of the AES round function. Both variants send the same number of bytes to each party and require the same number of communication rounds.
@@ -8,7 +8,7 @@
 //! The [ImplVariant::Optimized] implements the proposed multiplication protocol from Chida et al. including the optimized field operations via local table lookups.
 //! Thus, the [ImplVariant::Optimized] should improve local computation but does not improve communication complexity.
 //!
-//! [^note]: Araki et al. "High-Throughput Semi-Honest Secure Three-Party Computation with an Honest Majority" in CCS'16 (https://eprint.iacr.org/2016/768)
+//! [^note]: Araki et al. "High-Throughput Semi-Honest Secure Three-Party Computation with an Honest Majority" in CCS'16 (<https://eprint.iacr.org/2016/768>)
 
 use std::time::{Duration, Instant};
 
