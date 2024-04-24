@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::BroadcastContext, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
+    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::BroadcastContext, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
 };
 
 mod mult_verification;
@@ -137,50 +137,50 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
     }
 }
 
-struct MulTripleVector<F: Field> {
-    // s.t. a*b = c
-    a_i: Vec<F>,
-    a_ii: Vec<F>,
-    b_i: Vec<F>,
-    b_ii: Vec<F>,
-    c_i: Vec<F>,
-    c_ii: Vec<F>,
-}
+// struct MulTripleVector<F: Field> {
+//     // s.t. a*b = c
+//     a_i: Vec<F>,
+//     a_ii: Vec<F>,
+//     b_i: Vec<F>,
+//     b_ii: Vec<F>,
+//     c_i: Vec<F>,
+//     c_ii: Vec<F>,
+// }
 
-impl<F: Field> MulTripleVector<F> {
-    pub fn new() -> Self {
-        Self {
-            a_i: Vec::new(),
-            a_ii: Vec::new(),
-            b_i: Vec::new(),
-            b_ii: Vec::new(),
-            c_i: Vec::new(),
-            c_ii: Vec::new(),
-        }
-    }
+// impl<F: Field> MulTripleVector<F> {
+//     pub fn new() -> Self {
+//         Self {
+//             a_i: Vec::new(),
+//             a_ii: Vec::new(),
+//             b_i: Vec::new(),
+//             b_ii: Vec::new(),
+//             c_i: Vec::new(),
+//             c_ii: Vec::new(),
+//         }
+//     }
 
-    pub fn len(&self) -> usize {
-        self.a_i.len()
-    }
+//     pub fn len(&self) -> usize {
+//         self.a_i.len()
+//     }
 
-    pub fn shrink(&mut self, new_length: usize) {
-        self.a_i.truncate(new_length);
-        self.a_ii.truncate(new_length);
-        self.b_i.truncate(new_length);
-        self.b_ii.truncate(new_length);
-        self.c_i.truncate(new_length);
-        self.c_ii.truncate(new_length);
-    }
+//     pub fn shrink(&mut self, new_length: usize) {
+//         self.a_i.truncate(new_length);
+//         self.a_ii.truncate(new_length);
+//         self.b_i.truncate(new_length);
+//         self.b_ii.truncate(new_length);
+//         self.c_i.truncate(new_length);
+//         self.c_ii.truncate(new_length);
+//     }
 
-    pub fn push(&mut self, ai: F, aii: F, bi: F, bii: F, ci: F, cii: F) {
-        self.a_i.push(ai);
-        self.a_ii.push(aii);
-        self.b_i.push(bi);
-        self.b_ii.push(bii);
-        self.c_i.push(ci);
-        self.c_ii.push(cii);
-    }
-}
+//     pub fn push(&mut self, ai: F, aii: F, bi: F, bii: F, ci: F, cii: F) {
+//         self.a_i.push(ai);
+//         self.a_ii.push(aii);
+//         self.b_i.push(bi);
+//         self.b_ii.push(bii);
+//         self.c_i.push(ci);
+//         self.c_ii.push(cii);
+//     }
+// }
 
 impl GF8InvBlackBox for WL16ASParty {
     #[inline]

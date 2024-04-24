@@ -6,9 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 use sha2::Sha256;
 use rand::Rng;
-use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, MainParty, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
-
-use super::MulTripleVector;
+use crate::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, MainParty, MulTripleVector, Party}, share::{Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 // required bucket size B for B=C for 2^10, 2^11, ..., 2^19; all batches > 2^19 use B=3; all batches < 2^10 use B=5
 const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];
@@ -88,14 +86,14 @@ where ChaCha20Rng: FieldRngExt<F>, Sha256: FieldDigestExt<F>
         sacrifice(party, N, B-1, ai_check, aii_check, bi_check, bii_check, ci_check, cii_check, ai_sac, aii_sac, bi_sac, bii_sac, ci_sac, cii_sac)?;
     }
     
-    let correct_triples = MulTripleVector {
-        ai: ai.into_iter().take(n).collect(),
-        aii: aii.into_iter().take(n).collect(),
-        bi: bi.into_iter().take(n).collect(),
-        bii: bii.into_iter().take(n).collect(),
-        ci: ci.into_iter().skip(C).take(n).collect(),
-        cii: cii.into_iter().skip(C).take(n).collect(),
-    };
+    let correct_triples = MulTripleVector::from_vecs(
+        ai.into_iter().take(n).collect(),
+        aii.into_iter().take(n).collect(),
+        bi.into_iter().take(n).collect(),
+        bii.into_iter().take(n).collect(),
+        ci.into_iter().skip(C).take(n).collect(),
+        cii.into_iter().skip(C).take(n).collect(),
+    );
     // let sacrifice_time = sacrifice_time.elapsed();
     // println!("Bucket cut-and-choose: optimistic multiplication: {}s, shuffle: {}s, open: {}s, sacrifice: {}s", mul_triples_time.as_secs_f64(), shuffle_time.as_secs_f64(), open_check_time.as_secs_f64(), sacrifice_time.as_secs_f64());
     Ok(correct_triples)
@@ -426,16 +424,7 @@ where Sha256: FieldDigestExt<F>
 pub mod test {
     use itertools::{izip, Itertools};
 
-    use crate::{furukawa::{offline::bucket_cut_and_choose, MulTripleVector}, party::{test::{simple_localhost_setup, PartySetup, TestSetup}, MainParty}, share::{gf8::GF8, test::consistent, Field, RssShare}};
-
-    fn check_len<F>(triples: &MulTripleVector<F>, len: usize) {
-        assert_eq!(triples.ai.len(), len);
-        assert_eq!(triples.aii.len(), len);
-        assert_eq!(triples.bi.len(), len);
-        assert_eq!(triples.bii.len(), len);
-        assert_eq!(triples.ci.len(), len);
-        assert_eq!(triples.cii.len(), len);
-    }
+    use crate::{furukawa::offline::bucket_cut_and_choose, party::{test::{simple_localhost_setup, PartySetup, TestSetup}, MainParty, MulTripleVector}, share::{gf8::GF8, test::consistent, Field, RssShare}};
 
     fn into_rss<'a: 'b, 'b: 'a, F: Field>(
         si: &'a [F],
@@ -453,35 +442,20 @@ pub mod test {
         let ((triples1, triples2, triples3), _) =
             simple_localhost_setup(|p| bucket_cut_and_choose::<GF8>(p, N).unwrap());
 
-        check_len(&triples1, N);
-        check_len(&triples2, N);
-        check_len(&triples3, N);
-        // check consistent
-        izip!(
-            into_rss(&triples1.ai, &triples1.aii),
-            into_rss(&triples2.ai, &triples2.aii),
-            into_rss(&triples3.ai, &triples3.aii)
-        )
-        .for_each(|(a1, a2, a3)| consistent(&a1, &a2, &a3));
-        izip!(
-            into_rss(&triples1.bi, &triples1.bii),
-            into_rss(&triples2.bi, &triples2.bii),
-            into_rss(&triples3.bi, &triples3.bii)
-        )
-        .for_each(|(b1, b2, b3)| consistent(&b1, &b2, &b3));
-        izip!(
-            into_rss(&triples1.ci, &triples1.cii),
-            into_rss(&triples2.ci, &triples2.cii),
-            into_rss(&triples3.ci, &triples3.cii)
-        )
-        .for_each(|(c1, c2, c3)| consistent(&c1, &c2, &c3));
+        assert_eq!(triples1.len(), N);
+        assert_eq!(triples2.len(), N);
+        assert_eq!(triples3.len(), N);
 
+        for ((a1, b1, c1), (a2, b2, c2), (a3, b3, c3)) in izip!(triples1.into_rss_iter(), triples2.into_rss_iter(), triples3.into_rss_iter()) {
+            // check consistent
+            consistent(&a1, &a2, &a3);
+            consistent(&b1, &b2, &b3);
+            consistent(&c1, &c2, &c3);
 
-        // check correct
-        for i in 0..N {
-            let a = triples1.ai[i] + triples2.ai[i] + triples3.ai[i];
-            let b = triples1.bi[i] + triples2.bi[i] + triples3.bi[i];
-            let c = triples1.ci[i] + triples2.ci[i] + triples3.ci[i];
+            // check correct
+            let a = a1.si + a2.si + a3.si;
+            let b = b1.si + b2.si + b3.si;
+            let c = c1.si + c2.si + c3.si;
 
             assert_eq!(a * b, c);
         }
@@ -502,23 +476,20 @@ pub mod test {
         let (triples2, _) = h2.join().unwrap();
         let (triples3, _) = h3.join().unwrap();
 
-        check_len(&triples1, N);
-        check_len(&triples2, N);
-        check_len(&triples3, N);
-        // check consistent
-        izip!(into_rss(&triples1.ai, &triples1.aii), into_rss(&triples2.ai, &triples2.aii), into_rss(&triples3.ai, &triples3.aii))
-            .for_each(|(a1, a2, a3)| consistent(&a1, &a2, &a3));
-        izip!(into_rss(&triples1.bi, &triples1.bii), into_rss(&triples2.bi, &triples2.bii), into_rss(&triples3.bi, &triples3.bii))
-            .for_each(|(b1, b2, b3)| consistent(&b1, &b2, &b3));
-        izip!(into_rss(&triples1.ci, &triples1.cii), into_rss(&triples2.ci, &triples2.cii), into_rss(&triples3.ci, &triples3.cii))
-            .for_each(|(c1, c2, c3)| consistent(&c1, &c2, &c3));
+        assert_eq!(triples1.len(), N);
+        assert_eq!(triples2.len(), N);
+        assert_eq!(triples3.len(), N);
+        
+        for ((a1, b1, c1), (a2, b2, c2), (a3, b3, c3)) in izip!(triples1.into_rss_iter(), triples2.into_rss_iter(), triples3.into_rss_iter()) {
+            // check consistent
+            consistent(&a1, &a2, &a3);
+            consistent(&b1, &b2, &b3);
+            consistent(&c1, &c2, &c3);
 
-
-        // check correct
-        for i in 0..N {
-            let a = triples1.ai[i] + triples2.ai[i] + triples3.ai[i];
-            let b = triples1.bi[i] + triples2.bi[i] + triples3.bi[i];
-            let c = triples1.ci[i] + triples2.ci[i] + triples3.ci[i];
+            // check correct
+            let a = a1.si + a2.si + a3.si;
+            let b = b1.si + b2.si + b3.si;
+            let c = c1.si + c2.si + c3.si;
 
             assert_eq!(a * b, c);
         }

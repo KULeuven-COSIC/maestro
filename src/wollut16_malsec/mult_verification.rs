@@ -26,13 +26,13 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
     let mut weight = GF2p64::ONE;
 
     // Add GF4 triples
-    for i in 0..party.gf4_triples_to_check.len() {
-        let (ai1, ai2) = party.gf4_triples_to_check.a_i[i].unpack();
-        let (aii1, aii2) = party.gf4_triples_to_check.a_ii[i].unpack();
-        let (bi1, bi2) = party.gf4_triples_to_check.b_i[i].unpack();
-        let (bii1, bii2) = party.gf4_triples_to_check.b_ii[i].unpack();
-        let (ci1, ci2) = party.gf4_triples_to_check.c_i[i].unpack();
-        let (cii1, cii2) = party.gf4_triples_to_check.c_ii[i].unpack();
+    for (i, (a, b, c)) in party.gf4_triples_to_check.drain_into_rss_iter().enumerate() {
+        let (ai1, ai2) = a.si.unpack();
+        let (aii1, aii2) = a.sii.unpack();
+        let (bi1, bi2) = b.si.unpack();
+        let (bii1, bii2) = b.sii.unpack();
+        let (ci1, ci2) = c.si.unpack();
+        let (cii1, cii2) = c.sii.unpack();
         x_vec[2 * i] = embed_sharing(ai1, aii1).mul_by_sc(weight);
         y_vec[2 * i] = embed_sharing(bi1, bii1);
         z += embed_sharing(ci1, cii1).mul_by_sc(weight);
@@ -42,17 +42,16 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
         z += embed_sharing(ci2, cii2).mul_by_sc(weight);
         weight *= r;
     }
-    party.gf4_triples_to_check.shrink(0);
 
     // Add GF2 triples 
     // The embedding of GF2 is trivial, i.e. 0 -> 0 and 1 -> 1.
-    for i in 0..party.gf2_triples_to_check.len() {
-        let ai = gf2_embed(party.gf2_triples_to_check.a_i[i]);
-        let aii = gf2_embed(party.gf2_triples_to_check.a_ii[i]);
-        let bi = gf2_embed(party.gf2_triples_to_check.b_i[i]);
-        let bii = gf2_embed(party.gf2_triples_to_check.b_ii[i]);
-        let ci = gf2_embed(party.gf2_triples_to_check.c_i[i]);
-        let cii = gf2_embed(party.gf2_triples_to_check.c_ii[i]);
+    for (i, (a,b,c)) in party.gf2_triples_to_check.drain_into_rss_iter().enumerate() {
+        let ai = gf2_embed(a.si);
+        let aii = gf2_embed(a.sii);
+        let bi = gf2_embed(b.si);
+        let bii = gf2_embed(b.sii);
+        let ci = gf2_embed(c.si);
+        let cii = gf2_embed(c.sii);
         for j in 0..16 {
             x_vec[k1 + 16 * i + j] = RssShare::from(ai[j],aii[j]).mul_by_sc(weight);
             y_vec[k1 + 16 * i + j] = RssShare::from(bi[j],bii[j]);
@@ -60,7 +59,6 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
             weight *= r;
         }
     }
-    party.gf2_triples_to_check.shrink(0);
 
     verify_dot_product(party, &x_vec, &y_vec, &z)
 }
@@ -297,13 +295,12 @@ mod test {
     use rand::{thread_rng, CryptoRng, Rng};
 
     use crate::{
-        share::{
+        party::MulTripleRecorder, share::{
             bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, RssShare
-        },
-        wollut16_malsec::{
+        }, wollut16_malsec::{
             mult_verification::verify_multiplication_triples, test::localhost_setup_wl16as,
             WL16ASParty,
-        },
+        }
     };
 
     use super::{lagrange_deg2, ss_to_rss_shares, verify_dot_product, weak_dot_prod, weak_mult};
@@ -474,7 +471,7 @@ mod test {
                 move |p: &mut WL16ASParty| {
                     izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
                         p.gf4_triples_to_check
-                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
                     verify_multiplication_triples(p).unwrap()
                 }
@@ -508,7 +505,7 @@ mod test {
                 move |p: &mut WL16ASParty| {
                     izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
                         p.gf2_triples_to_check
-                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
                     verify_multiplication_triples(p).unwrap()
                 }
@@ -547,7 +544,7 @@ mod test {
                 move |p: &mut WL16ASParty| {
                     izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
                         p.gf4_triples_to_check
-                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
                     verify_multiplication_triples(p).unwrap()
                 }
@@ -586,7 +583,7 @@ mod test {
                 move |p: &mut WL16ASParty| {
                     izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
                         p.gf2_triples_to_check
-                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
                     verify_multiplication_triples(p).unwrap()
                 }

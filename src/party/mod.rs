@@ -3,6 +3,7 @@ mod commitment;
 pub mod correlated_randomness;
 pub mod error;
 mod thread_party;
+mod mul_triple_vec;
 
 use std::borrow::Borrow;
 use std::io::{self, Write};
@@ -20,6 +21,7 @@ use std::time::Duration;
 #[cfg(feature = "verbose-timing")]
 use {std::{collections::HashMap, sync::Mutex}, lazy_static::lazy_static, crate::network::task::IO_TIMER};
 pub use self::thread_party::ThreadParty;
+pub use self::mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording, MulTripleVector};
 
 #[derive(Clone, Copy)]
 pub struct CommStats {

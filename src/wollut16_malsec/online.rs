@@ -5,7 +5,7 @@ use {std::time::Instant, crate::party::PARTY_TIMER};
 
 use crate::{
     network::task::Direction,
-    party::{error::MpcResult, Party},
+    party::{error::MpcResult, MulTripleRecorder, Party},
     share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
@@ -89,57 +89,61 @@ pub fn gf8_inv_layer(party: &mut WL16ASParty, si: &mut [GF8], sii: &mut [GF8]) -
     let a_h_plus_a_l_i = v;
     let a_h_plus_a_l_ii = v_ii;
     // Add triples to buffer
-    izip!(
-        ah_i,
-        ah_ii,
-        al_i,
-        al_ii,
-        a_h_plus_a_l_i,
-        a_h_plus_a_l_ii,
-        v_inv_i,
-        v_inv_ii,
-        ah_prime.clone(),
-        ah_prime_ii.clone(),
-        al_prime.clone(),
-        al_prime_ii.clone()
-    )
-    .for_each(
-        |(
-            ah_i,
-            ah_ii,
-            al_i,
-            al_ii,
-            a_h_plus_a_l_i,
-            a_h_plus_a_l_ii,
-            v_inv_i,
-            v_inv_ii,
-            ah_prime,
-            ah_prime_ii,
-            al_prime,
-            al_prime_ii,
-        )| {
-            // [a_h],[a_l],[a_h + a_l]
-            party.gf4_triples_to_check.push(
-                ah_i,
-                ah_ii,
-                al_i,
-                al_ii,
-                a_h_plus_a_l_i,
-                a_h_plus_a_l_ii,
-            );
-            party
-                .gf4_triples_to_check
-                .push(ah_i, ah_ii, v_inv_i, v_inv_ii, ah_prime, ah_prime_ii);
-            party.gf4_triples_to_check.push(
-                a_h_plus_a_l_i,
-                a_h_plus_a_l_ii,
-                v_inv_i,
-                v_inv_ii,
-                al_prime,
-                al_prime_ii,
-            );
-        },
-    );
+    // [a_h],[a_l],[a_h + a_l]
+    party.gf4_triples_to_check.record_mul_triple(&ah_i,&ah_ii, &al_i, &al_ii, &a_h_plus_a_l_i, &a_h_plus_a_l_ii);
+    party.gf4_triples_to_check.record_mul_triple(&ah_i, &ah_ii, &v_inv_i, &v_inv_ii, &ah_prime, &ah_prime_ii);
+    party.gf4_triples_to_check.record_mul_triple(&a_h_plus_a_l_i, &a_h_plus_a_l_ii, &v_inv_i, &v_inv_ii, &al_prime, &al_prime_ii);
+    // izip!(
+    //     ah_i,
+    //     ah_ii,
+    //     al_i,
+    //     al_ii,
+    //     a_h_plus_a_l_i,
+    //     a_h_plus_a_l_ii,
+    //     v_inv_i,
+    //     v_inv_ii,
+    //     ah_prime.clone(),
+    //     ah_prime_ii.clone(),
+    //     al_prime.clone(),
+    //     al_prime_ii.clone()
+    // )
+    // .for_each(
+    //     |(
+    //         ah_i,
+    //         ah_ii,
+    //         al_i,
+    //         al_ii,
+    //         a_h_plus_a_l_i,
+    //         a_h_plus_a_l_ii,
+    //         v_inv_i,
+    //         v_inv_ii,
+    //         ah_prime,
+    //         ah_prime_ii,
+    //         al_prime,
+    //         al_prime_ii,
+    //     )| {
+    //         // [a_h],[a_l],[a_h + a_l]
+    //         party.gf4_triples_to_check.push(
+    //             ah_i,
+    //             ah_ii,
+    //             al_i,
+    //             al_ii,
+    //             a_h_plus_a_l_i,
+    //             a_h_plus_a_l_ii,
+    //         );
+    //         party
+    //             .gf4_triples_to_check
+    //             .push(ah_i, ah_ii, v_inv_i, v_inv_ii, ah_prime, ah_prime_ii);
+    //         party.gf4_triples_to_check.push(
+    //             a_h_plus_a_l_i,
+    //             a_h_plus_a_l_ii,
+    //             v_inv_i,
+    //             v_inv_ii,
+    //             al_prime,
+    //             al_prime_ii,
+    //         );
+    //     },
+    // );
     // Step 8 WOL-inv conversion
     un_wol_bitslice_gf4(&ah_prime, &al_prime, si);
     un_wol_bitslice_gf4(&ah_prime_ii, &al_prime_ii, sii);
@@ -341,5 +345,21 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
         let (xh1, _) = xh[xh.len() - 1].unpack();
         let (xl1, _) = xl[xh.len() - 1].unpack();
         x[x.len() - 1] = wol_inv_map(&xh1, &xl1);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{aes::test::{test_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::WL16ASSetup};
+
+
+    #[test]
+    fn sub_bytes() {
+        test_sub_bytes::<WL16ASSetup,_>(None)
+    }
+
+    #[test]
+    fn aes_128_no_keyschedule() {
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(1, None)
     }
 }

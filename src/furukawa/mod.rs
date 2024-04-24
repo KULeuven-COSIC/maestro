@@ -15,7 +15,7 @@ use rand_chacha::ChaCha20Rng;
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
 use sha2::Sha256;
 
-use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, Party, ThreadParty}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{aes::{self, aes128_no_keyschedule, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida, network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 mod offline;
 
@@ -97,69 +97,6 @@ impl BenchmarkProtocol for MalChidaBenchmark {
     }
 }
 
-struct MulTripleVector<F> {
-    // s.t. a*b = c
-    ai: Vec<F>,
-    aii: Vec<F>,
-    bi: Vec<F>,
-    bii: Vec<F>,
-    ci: Vec<F>,
-    cii: Vec<F>,
-}
-
-impl<F: Clone> MulTripleVector<F> {
-    pub fn new() -> Self {
-        Self {
-            ai: Vec::new(),
-            aii: Vec::new(),
-            bi: Vec::new(),
-            bii: Vec::new(),
-            ci: Vec::new(),
-            cii: Vec::new(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.ai.len()
-    }
-
-    pub fn shrink(&mut self, new_length: usize) {
-        self.ai.truncate(new_length);
-        self.aii.truncate(new_length);
-        self.bi.truncate(new_length);
-        self.bii.truncate(new_length);
-        self.ci.truncate(new_length);
-        self.cii.truncate(new_length);
-    }
-
-    pub fn clear(&mut self) {
-        self.ai.clear();
-        self.aii.clear();
-        self.bi.clear();
-        self.bii.clear();
-        self.ci.clear();
-        self.cii.clear();
-    }
-
-    fn record(&mut self, ai: &[F], aii: &[F], bi: &[F], bii: &[F], ci: &[F], cii: &[F]) {
-        self.ai.extend_from_slice(ai);
-        self.aii.extend_from_slice(aii);
-        self.bi.extend_from_slice(bi);
-        self.bii.extend_from_slice(bii);
-        self.ci.extend_from_slice(ci);
-        self.cii.extend_from_slice(cii);
-    }
-
-    fn append(&mut self, mut other: Self) {
-        self.ai.append(&mut other.ai);
-        self.aii.append(&mut other.aii);
-        self.bi.append(&mut other.bi);
-        self.bii.append(&mut other.bii);
-        self.ci.append(&mut other.ci);
-        self.cii.append(&mut other.cii);
-    }
-}
-
 pub struct FurukawaParty<F: Field + Sync + Send> {
     inner: MainParty,
     triples_to_check: MulTripleVector<F>,
@@ -223,16 +160,9 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
             .io()
             .send_field::<F>(Direction::Previous, ci.iter(), ci.len());
         let rcv_cii = self.inner.io().receive_field(Direction::Next, ci.len());
-        // note down the observed multiplication triple
-        // first the ones we already have
-        self.triples_to_check.ai.extend_from_slice(ai);
-        self.triples_to_check.aii.extend_from_slice(aii);
-        self.triples_to_check.bi.extend_from_slice(bi);
-        self.triples_to_check.bii.extend_from_slice(bii);
-        self.triples_to_check.ci.extend(&ci);
-        // then wait for the last one
         let cii = rcv_cii.rcv()?;
-        self.triples_to_check.cii.extend(&cii);
+        // note down the observed multiplication triple
+        self.triples_to_check.record_mul_triple(ai, aii, bi, bii, &ci, &cii);
         self.inner.io().wait_for_completion();
         Ok((ci, cii))
     }
@@ -250,10 +180,11 @@ where Sha256: FieldDigestExt<F>, ChaCha20Rng: FieldRngExt<F>
             }
 
             let leftover = prep.len() - self.triples_to_check.len();
+            let (prep_ai, prep_aii, prep_bi, prep_bii, prep_ci, prep_cii) = prep.as_mut_slices();
             let err = if self.inner.has_multi_threading() && self.triples_to_check.len() > self.inner.num_worker_threads() {
-                offline::sacrifice_mt(&mut self.inner, self.triples_to_check.len(), 1, &self.triples_to_check.ai, &self.triples_to_check.aii, &self.triples_to_check.bi, &self.triples_to_check.bii, &self.triples_to_check.ci, &self.triples_to_check.cii, &mut prep.ai[leftover..], &mut prep.aii[leftover..], &mut prep.bi[leftover..], &mut prep.bii[leftover..], &mut prep.ci[leftover..], &mut prep.cii[leftover..])
+                offline::sacrifice_mt(&mut self.inner, self.triples_to_check.len(), 1, self.triples_to_check.ai(), self.triples_to_check.aii(), self.triples_to_check.bi(), self.triples_to_check.bii(), self.triples_to_check.ci(), self.triples_to_check.cii(), &mut prep_ai[leftover..], &mut prep_aii[leftover..], &mut prep_bi[leftover..], &mut prep_bii[leftover..], &mut prep_ci[leftover..], &mut prep_cii[leftover..])
             }else{
-                offline::sacrifice(&mut self.inner, self.triples_to_check.len(), 1, &self.triples_to_check.ai, &self.triples_to_check.aii, &self.triples_to_check.bi, &self.triples_to_check.bii, &self.triples_to_check.ci, &self.triples_to_check.cii, &mut prep.ai[leftover..], &mut prep.aii[leftover..], &mut prep.bi[leftover..], &mut prep.bii[leftover..], &mut prep.ci[leftover..], &mut prep.cii[leftover..])
+                offline::sacrifice(&mut self.inner, self.triples_to_check.len(), 1, self.triples_to_check.ai(), self.triples_to_check.aii(), self.triples_to_check.bi(), self.triples_to_check.bii(), self.triples_to_check.ci(), self.triples_to_check.cii(), &mut prep_ai[leftover..], &mut prep_aii[leftover..], &mut prep_bi[leftover..], &mut prep_bii[leftover..], &mut prep_ci[leftover..], &mut prep_cii[leftover..])
             };
             // purge the sacrificed triples
             if leftover > 0 {
@@ -489,10 +420,9 @@ impl GF8InvBlackBox for FurukawaParty<GF8> {
                 )
             })?;
             // append triples
-            observed_triples.into_iter().flatten().for_each(|triple_vec| {
-                let triple_vec = triple_vec.unwrap();
-                self.triples_to_check.append(triple_vec);
-            });
+
+            let observed_triples = observed_triples.into_iter().flatten().collect::<MpcResult<Vec<_>>>()?;
+            self.triples_to_check.join_thread_mul_triple_recorders(observed_triples);
             Ok(())
         }else{
             chida::online::gf8_inv_layer(self, si, sii)
@@ -526,7 +456,7 @@ fn gf8_inv_layer_threadparty(party: &mut ThreadParty<MulTripleVector<GF8>>, si: 
     // x^3 = x^2 * x
     let mut x3 = (vec![GF8(0); n], vec![GF8(0); n]);
     chida::online::mul_no_sync(party, &mut x3.0, &mut x3.1, si, sii, &x2.0, &x2.1)?;
-    party.additional_data.record(si, sii, &x2.0, &x2.1, &x3.0, &x3.1);
+    party.additional_data.record_mul_triple(si, sii, &x2.0, &x2.1, &x3.0, &x3.1);
 
     let x6 = (square_layer(&x3.0), square_layer(&x3.1));
     let x12 = (square_layer(&x6.0), square_layer(&x6.1));
@@ -537,7 +467,7 @@ fn gf8_inv_layer_threadparty(party: &mut ThreadParty<MulTripleVector<GF8>>, si: 
     let mut x15_x14 = (vec![GF8(0); 2*n], vec![GF8(0); 2*n]); // VectorAesState::new(x12_x12.n);
     // x^15 = x^12 * x^3 and x^14 = x^12 * x^2 in one round
     chida::online::mul_no_sync(party, &mut x15_x14.0, &mut x15_x14.1, &x12_x12.0, &x12_x12.1, &x3_x2.0, &x3_x2.1)?;
-    party.additional_data.record(&x12_x12.0, &x12_x12.1, &x3_x2.0, &x3_x2.1, &x15_x14.0, &x15_x14.1);
+    party.additional_data.record_mul_triple(&x12_x12.0, &x12_x12.1, &x3_x2.0, &x3_x2.1, &x15_x14.0, &x15_x14.1);
 
     // x^15 square in-place x^240 = (x^15)^16
     for i in 0..n {
@@ -547,7 +477,7 @@ fn gf8_inv_layer_threadparty(party: &mut ThreadParty<MulTripleVector<GF8>>, si: 
     // x^254 = x^240 * x^14
     // write directly to output buffers si,sii
     chida::online::mul_no_sync(party, si, sii, &x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..])?;
-    party.additional_data.record(&x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..], si, sii);
+    party.additional_data.record_mul_triple(&x15_x14.0[..n], &x15_x14.1[..n], &x15_x14.0[n..], &x15_x14.1[n..], si, sii);
     Ok(())
 }
 

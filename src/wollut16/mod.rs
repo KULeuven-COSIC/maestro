@@ -4,7 +4,7 @@
 
 use std::time::Instant;
 
-use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox}, share::gf4::GF4};
+use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, chida::ChidaParty, network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, NoMulTripleRecording}, share::gf4::GF4};
 
 pub mod offline;
 pub mod online;
@@ -48,9 +48,9 @@ impl WL16Party {
             n = if n % 2 == 0 { n } else { n + 1 };
         }
         let mut new = if self.inner.has_multi_threading() {
-            offline::generate_random_ohv16_mt(self.inner.as_party_mut(), n)?
+            offline::generate_random_ohv16_mt(self.inner.as_party_mut(), &mut NoMulTripleRecording, n)?
         }else{
-            offline::generate_random_ohv16(self.inner.as_party_mut(), n)?
+            offline::generate_random_ohv16(self.inner.as_party_mut(), &mut NoMulTripleRecording, n)?
         };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;

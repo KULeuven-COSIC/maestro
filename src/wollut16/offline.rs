@@ -1,7 +1,7 @@
 use itertools::izip;
 use rayon::prelude::*;
 
-use crate::{chida, party::{error::MpcResult, MainParty, Party}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}, wollut16::{RndOhv16, RndOhvOutput}};
+use crate::{chida, party::{error::MpcResult, MainParty, MulTripleRecorder, Party}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}, wollut16::{RndOhv16, RndOhvOutput}};
 #[cfg(feature = "verbose-timing")]
 use {crate::party::PARTY_TIMER, std::time::Instant};
 
@@ -96,20 +96,20 @@ const SELECTOR_IDX_15: [bool; 15] = [
 ];
 
 // implements Protocol 7
-pub fn generate_random_ohv16<P: Party>(party: &mut P, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
+pub fn generate_random_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
     let n16 = if n % 16 == 0 { n/16 } else { n/16 + 1};
     // generate 4 random bits
     let r0 = party.generate_random(n16);
     let r1 = party.generate_random(n16);
     let r2 = party.generate_random(n16);
     let r3 = party.generate_random(n16);
-    generate_ohv16(party, n, r0, r1, r2, r3)
+    generate_ohv16(party, triple_rec, n, r0, r1, r2, r3)
 }
 
-pub fn generate_random_ohv16_mt<'a>(party: &'a mut MainParty, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
+pub fn generate_random_ohv16_mt<'a, Rec: MulTripleRecorder<BsBool16>>(party: &'a mut MainParty, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
     let n16 = if n % 16 == 0 { n/16 } else { n/16 + 1};
     let ranges = party.split_range_equally(n16);
-    let threads = party.create_thread_parties(ranges);
+    let threads = party.create_thread_parties_with_additional_data(ranges, |start, end| Some(triple_rec.create_thread_mul_triple_recorder(start, end)));
 
     let mut rnd_ohv = Vec::with_capacity(threads.len());
     
@@ -121,10 +121,18 @@ pub fn generate_random_ohv16_mt<'a>(party: &'a mut MainParty, n: usize) -> MpcRe
             let r1 = thread_party.generate_random(task_n);
             let r2 = thread_party.generate_random(task_n);
             let r3 = thread_party.generate_random(task_n);
-            generate_ohv16(&mut thread_party, task_n*16, r0, r1, r2, r3).unwrap()
+            let mut rec = thread_party.additional_data.take().unwrap();
+            let rnd_ohv = generate_ohv16(&mut thread_party, &mut rec, task_n*16, r0, r1, r2, r3).unwrap();
+            (rnd_ohv, rec)
         }).collect_into_vec(&mut rnd_ohv);
         Ok(())
     })?;
+
+    let (rnd_ohv, recs): (Vec<_>, Vec<_>) = rnd_ohv.into_iter().unzip();
+
+    // record observed triples
+    triple_rec.join_thread_mul_triple_recorders(recs);
+
     // make sure that only n rndohv are returned
     let rnd_ohv = rnd_ohv.into_iter().flatten().take(n).collect();
     party.wait_for_completion();
@@ -133,7 +141,7 @@ pub fn generate_random_ohv16_mt<'a>(party: &'a mut MainParty, n: usize) -> MpcRe
 }
 
 // implements Protocol 7 with fixed inputs
-fn generate_ohv16<P: Party>(party: &mut P, n: usize, r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>) -> MpcResult<Vec<RndOhvOutput>> {
+fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize, r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>) -> MpcResult<Vec<RndOhvOutput>> {
    let n16 = r0.len();
    debug_assert_eq!(n16, r1.len());
    debug_assert_eq!(n16, r2.len());
@@ -183,6 +191,7 @@ fn generate_ohv16<P: Party>(party: &mut P, n: usize, r0: Vec<RssShare<BsBool16>>
     let mut ci = vec![BsBool16::default(); 6*n16];
     let mut cii = vec![BsBool16::default(); 6*n16];
     chida::online::mul_no_sync(party, &mut ci, &mut cii, &ai, &aii, &bi, &bii)?;
+    triple_rec.record_mul_triple(&ai, &aii, &bi, &bii, &ci, &cii);
 
     // Round 2: compute (r_i * r_j) * r_k for k > j and r0r1 * r2r3
     // fill a2 with r01|r01|r02|r12|r01
@@ -219,6 +228,7 @@ fn generate_ohv16<P: Party>(party: &mut P, n: usize, r0: Vec<RssShare<BsBool16>>
     let mut c2i = vec![BsBool16::default(); 5*n16];
     let mut c2ii = vec![BsBool16::default(); 5*n16];
     chida::online::mul_no_sync(party, &mut c2i, &mut c2ii, &a2i, &a2ii, &b2i, &b2ii)?;
+    triple_rec.record_mul_triple(&a2i, &a2ii, &b2i, &b2ii, &c2i, &c2ii);
     
     let pairs: Vec<_> = ci.into_iter().zip(cii).map(|(si,sii)| RssShare::from(si, sii)).collect();
     let r01 = &pairs[..n16];
@@ -353,7 +363,7 @@ mod test {
     use itertools::izip;
     use rand::thread_rng;
 
-    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::test::TestSetup, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::{offline::{generate_random_ohv16, generate_random_ohv16_mt}, RndOhvOutput}};
+    use crate::{chida::{online::test::ChidaSetup, ChidaParty}, party::{test::TestSetup, NoMulTripleRecording}, share::{bs_bool16::BsBool16, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare}, wollut16::{offline::{generate_random_ohv16, generate_random_ohv16_mt}, RndOhvOutput}};
 
     use super::{generate_ohv16, un_bitslice4};
 
@@ -414,7 +424,7 @@ mod test {
 
         let program = |b0: Vec<RssShare<BsBool16>>, b1: Vec<RssShare<BsBool16>>, b2: Vec<RssShare<BsBool16>>, b3: Vec<RssShare<BsBool16>>| {
             move |p: &mut ChidaParty| {
-                generate_ohv16(p.as_party_mut(), 16, b0, b1, b2, b3).unwrap()
+                generate_ohv16(p.as_party_mut(), &mut NoMulTripleRecording, 16, b0, b1, b2, b3).unwrap()
             }
         };
         let (h1, h2, h3) = ChidaSetup::localhost_setup(
@@ -466,7 +476,7 @@ mod test {
         const N: usize = 10000;
         let program = || {
             |p: &mut ChidaParty| {
-                generate_random_ohv16(p.as_party_mut(), N).unwrap()
+                generate_random_ohv16(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap()
             }
         };
 
@@ -486,7 +496,7 @@ mod test {
         const N: usize = 10001;
         let program = || {
             |p: &mut ChidaParty| {
-                generate_random_ohv16_mt(p.as_party_mut(), N).unwrap()
+                generate_random_ohv16_mt(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap()
             }
         };
 
