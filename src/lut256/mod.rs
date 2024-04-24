@@ -58,8 +58,7 @@ impl RndOhv {
     pub fn lut(&self, offset: usize, table: &[[[u64; 4]; 8]; 256]) -> GF8 {
         let table = &table[offset];
         let mut res = 0u8;
-        for i in 0..8 {
-            let bit_table = &table[i];
+        for (i, bit_table) in table.iter().enumerate().take(8) {
             let part_0 = self.0[0] & bit_table[0];
             let part_1 = self.0[1] & bit_table[1];
             let part_2 = self.0[2] & bit_table[2];

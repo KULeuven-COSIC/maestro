@@ -541,9 +541,9 @@ where
     ) {
         debug_assert_eq!(bucket.len(), el.len() * sacrifice_bucket_size);
         let mut bucket_idx = 0;
-        for el_idx in 0..el.len() {
+        for elm in el {
             for _j in 0..sacrifice_bucket_size {
-                bucket[bucket_idx] += el[el_idx];
+                bucket[bucket_idx] += *elm;
                 bucket_idx += 1;
             }
         }

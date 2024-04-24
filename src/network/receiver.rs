@@ -70,7 +70,8 @@ impl<'a, F: Field> FieldSliceReceiver<'a, F> {
                     Ok(())
                 }
                 #[cfg(not(feature = "verbose-timing"))]
-                Ok(F::from_byte_slice(bytes, &mut self.slice))
+                F::from_byte_slice(bytes, self.slice);
+                Ok(())
             }
             Err(err) => Err(err),
         }
@@ -98,7 +99,8 @@ impl<'a> SliceReceiver<'a> {
                     let io_end = start.elapsed();
                     IO_TIMER.lock().unwrap().report_time("io", io_end);
                 }
-                Ok(self.slice.copy_from_slice(&bytes))
+                self.slice.copy_from_slice(&bytes);
+                Ok(())
             }
             Err(err) => Err(err),
         }

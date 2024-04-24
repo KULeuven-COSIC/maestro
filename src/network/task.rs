@@ -128,7 +128,7 @@ impl<T> TaskQueue<T> {
     pub fn pop_with_thread_id(&mut self, id: u64) -> Option<T> {
         self.queue_thread_id
             .get_mut(&id)
-            .map(|q| {
+            .and_then(|q| {
                 let popped = q.pop_front();
                 if popped.is_some() {
                     // we actually removed an element
@@ -136,7 +136,6 @@ impl<T> TaskQueue<T> {
                 }
                 popped
             })
-            .flatten()
     }
 
     pub fn peek(&mut self) -> Option<&mut T> {

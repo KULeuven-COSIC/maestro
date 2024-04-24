@@ -370,13 +370,13 @@ where
             .open_rss_to(&mut self.context, &a, self.party.inner.i)?;
         let mut b = b.unwrap(); // this is safe since we open to party.i
         for i in 0..b.len() {
-            b[i] = b[i].clone() + input[i].clone();
+            b[i] = b[i] + input[i];
         }
         self.party
             .inner
             .broadcast_round(&mut self.context, &mut [], &mut [], b.as_slice())?;
         Ok(a.into_iter()
-            .zip(b.into_iter())
+            .zip(b)
             .map(|(ai, bi)| self.party.public_constant(bi) - ai)
             .collect())
     }
@@ -408,7 +408,7 @@ where
             _ => unreachable!(),
         }
         Ok(a.into_iter()
-            .zip(b.into_iter())
+            .zip(b)
             .map(|(ai, bi)| self.party.public_constant(bi) - ai)
             .collect())
     }
@@ -440,7 +440,7 @@ where
         let rss: Vec<_> = si
             .iter()
             .zip(sii)
-            .map(|(si, sii)| RssShare::from(si.clone(), sii.clone()))
+            .map(|(si, sii)| RssShare::from(*si, *sii))
             .collect();
         self.party
             .inner
@@ -538,7 +538,7 @@ where
 
 impl GF8InvBlackBox for FurukawaParty<GF8> {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
-        <Self as ArithmeticBlackBox<GF8>>::constant(&self, value)
+        <Self as ArithmeticBlackBox<GF8>>::constant(self, value)
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
         if self.inner.has_multi_threading() && self.inner.num_worker_threads() < si.len() {

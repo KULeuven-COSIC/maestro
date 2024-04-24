@@ -27,7 +27,7 @@ pub struct GF4CircuitSemihonestParty(ChidaParty);
 
 impl GF4CircuitSemihonestParty {
     pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|chida_party| Self(chida_party))
+        ChidaParty::setup(connected, n_worker_threads).map(Self)
     }
 
     fn io(&self) -> &IoLayerOwned {

@@ -68,7 +68,7 @@ fn generate_ohv256_output<P: Party>(
     let output = un_bitslice(&ohv256);
     Ok(rand
         .into_iter()
-        .zip(output.into_iter())
+        .zip(output)
         .map(|(rand_rss, (ohv_si, ohv_sii))| RndOhv256Output {
             random_si: rand_rss.si,
             random_sii: rand_rss.sii,
@@ -204,14 +204,13 @@ fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv, RndOhv)> {
 fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {
     debug_assert_eq!(bs.len(), 8);
     let mut res = vec![(0u8, 0u8); bs[0].len() * 16];
-    for i in 0..8 {
-        let bit = &bs[i];
-        for j in 0..bit.len() {
+    for (i, bit) in bs.iter().enumerate().take(8) {
+        for (j,bit_j) in bit.iter().enumerate() {
             for k in 0..16 {
                 let mut si = res[16 * j + k].0;
                 let mut sii = res[16 * j + k].1;
-                si |= (((bit[j].si.as_u16() >> k) & 0x1) << i) as u8;
-                sii |= (((bit[j].sii.as_u16() >> k) & 0x1) << i) as u8;
+                si |= (((bit_j.si.as_u16() >> k) & 0x1) << i) as u8;
+                sii |= (((bit_j.sii.as_u16() >> k) & 0x1) << i) as u8;
                 res[16 * j + k].0 = si;
                 res[16 * j + k].1 = sii;
             }
