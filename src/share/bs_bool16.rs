@@ -64,10 +64,10 @@ impl Field for BsBool16 {
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
         debug_assert_eq!(v.len(), 2 * dest.len());
         dest.iter_mut()
-            .zip(v.into_iter().chunks(2).into_iter())
-            .for_each(|(dst, mut chunk)| {
-                let low = chunk.next().unwrap() as u16;
-                let high = chunk.next().unwrap() as u16;
+            .zip(v.chunks(2))
+            .for_each(|(dst, chunk)| {
+                let low = chunk[0] as u16;
+                let high = chunk[1] as u16;
                 dst.0 = low | (high << 8);
             });
     }
@@ -82,6 +82,7 @@ impl Neg for BsBool16 {
 
 impl Mul for BsBool16 {
     type Output = Self;
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn mul(self, rhs: Self) -> Self::Output {
         Self(self.0 & rhs.0)
     }
@@ -89,6 +90,7 @@ impl Mul for BsBool16 {
 
 impl Sub for BsBool16 {
     type Output = Self;
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn sub(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
@@ -96,12 +98,14 @@ impl Sub for BsBool16 {
 
 impl Add for BsBool16 {
     type Output = Self;
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
     }
 }
 
 impl AddAssign for BsBool16 {
+    #[allow(clippy::suspicious_op_assign_impl)]
     fn add_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0;
     }
@@ -138,7 +142,46 @@ impl<R: Rng + CryptoRng> FieldRngExt<BsBool16> for R {
 impl<D: Digest> FieldDigestExt<BsBool16> for D {
     fn update(&mut self, message: &[BsBool16]) {
         for m in message {
-            self.update(&[m.0 as u8, (m.0 >> 8) as u8]);
+            self.update([m.0 as u8, (m.0 >> 8) as u8]);
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+    use rand::thread_rng;
+    use crate::share::{bs_bool16::BsBool16, Field, FieldRngExt};
+
+
+    #[test]
+    fn serialization() {
+        let mut rng = thread_rng();
+        let list_even: Vec<BsBool16> = rng.generate(500);
+        let list_odd: Vec<BsBool16> = rng.generate(45);
+
+        assert_eq!(
+            list_even,
+            BsBool16::from_byte_vec(
+                BsBool16::as_byte_vec(&list_even, list_even.len()),
+                list_even.len()
+            )
+        );
+        assert_eq!(
+            list_odd,
+            BsBool16::from_byte_vec(BsBool16::as_byte_vec(&list_odd, list_odd.len()), list_odd.len())
+        );
+
+        let mut slice_even = [BsBool16::ZERO; 500];
+        let mut slice_odd = [BsBool16::ZERO; 45];
+
+        BsBool16::from_byte_slice(
+            BsBool16::as_byte_vec(&list_even, list_even.len()),
+            &mut slice_even,
+        );
+        assert_eq!(&list_even, &slice_even);
+
+        BsBool16::from_byte_slice(BsBool16::as_byte_vec(&list_odd, list_odd.len()), &mut slice_odd);
+        assert_eq!(&list_odd, &slice_odd);
+    }
+
 }
