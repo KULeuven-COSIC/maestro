@@ -1,4 +1,4 @@
-use itertools::izip;
+use itertools::{izip, Itertools};
 
 #[cfg(feature = "verbose-timing")]
 use {std::time::Instant, crate::party::PARTY_TIMER};
@@ -80,70 +80,27 @@ pub fn gf8_inv_layer(party: &mut WL16ASParty, si: &mut [GF8], sii: &mut [GF8]) -
         &mut al_prime,
         &mut al_prime_ii,
     )?;
+
     // Step 7 Preparation for multiplication triples for verification
     // Compute [a_h * a_l] := [v] + (e * a_h^2) + a_l^2
     izip!(v.iter_mut(), ah_i.iter(), al_i.iter())
         .for_each(|(vi, ahi, ali)| *vi = *vi + ahi.square_mul_e() + ali.square());
     izip!(v_ii.iter_mut(), ah_ii.iter(), al_ii.iter())
         .for_each(|(vii, ahii, alii)| *vii = *vii + ahii.square_mul_e() + alii.square());
-    let a_h_plus_a_l_i = v;
-    let a_h_plus_a_l_ii = v_ii;
+    let a_h_times_a_l_i = v;
+    let a_h_times_a_l_ii = v_ii;
+
     // Add triples to buffer
-    // [a_h],[a_l],[a_h + a_l]
-    party.gf4_triples_to_check.record_mul_triple(&ah_i,&ah_ii, &al_i, &al_ii, &a_h_plus_a_l_i, &a_h_plus_a_l_ii);
+    // [a_h],[a_l],[a_h * a_l]
+    party.gf4_triples_to_check.record_mul_triple(&ah_i,&ah_ii, &al_i, &al_ii, &a_h_times_a_l_i, &a_h_times_a_l_ii);
+    // [a_h], [v^-1], [a_h']
     party.gf4_triples_to_check.record_mul_triple(&ah_i, &ah_ii, &v_inv_i, &v_inv_ii, &ah_prime, &ah_prime_ii);
+
+    let a_h_plus_a_l_i = ah_i.into_iter().zip(al_i).map(|(ah,al)| ah + al).collect_vec();
+    let a_h_plus_a_l_ii = ah_ii.into_iter().zip(al_ii).map(|(ah,al)| ah + al).collect_vec();
+    // [a_h + a_l], [v^-1], [a_l']
     party.gf4_triples_to_check.record_mul_triple(&a_h_plus_a_l_i, &a_h_plus_a_l_ii, &v_inv_i, &v_inv_ii, &al_prime, &al_prime_ii);
-    // izip!(
-    //     ah_i,
-    //     ah_ii,
-    //     al_i,
-    //     al_ii,
-    //     a_h_plus_a_l_i,
-    //     a_h_plus_a_l_ii,
-    //     v_inv_i,
-    //     v_inv_ii,
-    //     ah_prime.clone(),
-    //     ah_prime_ii.clone(),
-    //     al_prime.clone(),
-    //     al_prime_ii.clone()
-    // )
-    // .for_each(
-    //     |(
-    //         ah_i,
-    //         ah_ii,
-    //         al_i,
-    //         al_ii,
-    //         a_h_plus_a_l_i,
-    //         a_h_plus_a_l_ii,
-    //         v_inv_i,
-    //         v_inv_ii,
-    //         ah_prime,
-    //         ah_prime_ii,
-    //         al_prime,
-    //         al_prime_ii,
-    //     )| {
-    //         // [a_h],[a_l],[a_h + a_l]
-    //         party.gf4_triples_to_check.push(
-    //             ah_i,
-    //             ah_ii,
-    //             al_i,
-    //             al_ii,
-    //             a_h_plus_a_l_i,
-    //             a_h_plus_a_l_ii,
-    //         );
-    //         party
-    //             .gf4_triples_to_check
-    //             .push(ah_i, ah_ii, v_inv_i, v_inv_ii, ah_prime, ah_prime_ii);
-    //         party.gf4_triples_to_check.push(
-    //             a_h_plus_a_l_i,
-    //             a_h_plus_a_l_ii,
-    //             v_inv_i,
-    //             v_inv_ii,
-    //             al_prime,
-    //             al_prime_ii,
-    //         );
-    //     },
-    // );
+    
     // Step 8 WOL-inv conversion
     un_wol_bitslice_gf4(&ah_prime, &al_prime, si);
     un_wol_bitslice_gf4(&ah_prime_ii, &al_prime_ii, sii);
@@ -350,7 +307,7 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
 
 #[cfg(test)]
 mod test {
-    use crate::{aes::test::{test_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::WL16ASSetup};
+    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::WL16ASSetup};
 
 
     #[test]
@@ -359,7 +316,17 @@ mod test {
     }
 
     #[test]
+    fn aes128_keyschedule() {
+        test_aes128_keyschedule_gf8::<WL16ASSetup, _>(None)
+    }
+
+    #[test]
     fn aes_128_no_keyschedule() {
         test_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(1, None)
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule() {
+        test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(1, None)
     }
 }
