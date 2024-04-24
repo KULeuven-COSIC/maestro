@@ -68,9 +68,9 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
 fn gf2_embed(s:BsBool16) -> [GF2p64;16] {
     let mut res = [GF2p64::ZERO;16];
     let s = s.as_u16();
-    for i in 0..16 {
+    for (i,r) in res.iter_mut().enumerate() {
         if s & 1 << i != 0 {
-            res[i] = GF2p64::ONE;
+            *r = GF2p64::ONE;
         }
     }
     res

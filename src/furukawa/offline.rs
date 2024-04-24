@@ -316,6 +316,7 @@ fn open_and_check<F: Field + PartialEq + Copy>(
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+#[allow(clippy::too_many_arguments)]
 pub fn sacrifice<F: Field + Copy + AddAssign>(
     party: &mut MainParty,
     n: usize,
@@ -375,6 +376,7 @@ where
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+#[allow(clippy::too_many_arguments)]
 pub fn sacrifice_mt<F: Field + Send + Sync>(
     party: &mut MainParty,
     n: usize,
@@ -495,6 +497,7 @@ where
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+#[allow(clippy::too_many_arguments)]
 fn sacrifice_party<P: Party, F: Field + Copy + AddAssign>(
     party: &mut P,
     n: usize,
