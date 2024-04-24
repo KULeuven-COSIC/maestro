@@ -1,3 +1,6 @@
+//! This module contains the offline phase components.
+//! 
+//! This is primarily the preprocessing protocol for the one-hot vector encoding.
 use itertools::izip;
 use rayon::prelude::*;
 
@@ -100,7 +103,7 @@ const SELECTOR_IDX_15: [bool; 15] = [
     false, true,
 ];
 
-// implements Protocol 7
+/// This function implements the random one-hot vector generation as in `Protocol 6`.
 pub fn generate_random_ohv16<P: Party>(party: &mut P, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
     let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1 };
     // generate 4 random bits
@@ -111,6 +114,7 @@ pub fn generate_random_ohv16<P: Party>(party: &mut P, n: usize) -> MpcResult<Vec
     generate_ohv16(party, n, r0, r1, r2, r3)
 }
 
+/// This function is a multi-threaded version of the random one-hot vector generation as in `Protocol 6`.
 pub fn generate_random_ohv16_mt(
     party: &mut MainParty,
     n: usize,
@@ -349,7 +353,7 @@ fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
     res
 }
 
-pub fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
+fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
     let mut res = vec![0u8; bs[0].len() * 16];
     for (i,bit) in bs.iter().enumerate() {
         for j in 0..bit.len() {

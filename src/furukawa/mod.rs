@@ -1,4 +1,4 @@
-//! This module implements the maliciously-secure MPC protocol by Furukawa et al., 
+//! This module implements the *maliciously-secure* oblivious AES protocol by Furukawa et al., 
 //! "High-Throughput Secure Three-Party Computation for Malicious Adversaries and an Honest Majority" 
 //! (<https://eprint.iacr.org/2016/944>).
 //!
@@ -38,7 +38,12 @@ use crate::{
 
 mod offline;
 
-// simd: how many parallel AES calls
+/// This function implements the AES benchmark.
+/// 
+/// The arguments are
+/// - `connected` - the local party
+/// - `simd` - number of parallel AES calls
+/// - `n_worker_threads` - number of worker threads
 pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
     let mut party = FurukawaParty::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();

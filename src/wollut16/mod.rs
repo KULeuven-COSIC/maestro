@@ -1,6 +1,15 @@
-//! This module implements the semi-honest oblivious AES protocol "WOL LUT 16".
+//! This module implements the *semi-honest* oblivious AES protocol "WOL LUT 16".
 //!
-//!
+//! At its core is a protocol to compute multiplicative inverses in `GF(2^8)`.
+//! This is done using the WOL transform as proposed by Wolkerstorfer et al. 
+//! in "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, 
+//! <https://doi.org/10.1007/3-540-45760-7_6> to convert between `GF(2^8)` and `GF(2^4)^2`.
+//! 
+//! Then a pre-processed look-up table of 16-bits is used to compute multiplicative inverses in `GF(2^4)`. 
+//! 
+//! This module notably contains
+//!   - [wollut16_benchmark] that implements the AES benchmark
+//!   - [WL16Party] the party wrapper for the protocol. [WL16Party] also implements [ArithmeticBlackBox]
 
 use std::time::Instant;
 
@@ -16,18 +25,19 @@ use crate::{
 pub mod offline;
 pub mod online;
 
-// Party for WOLLUT16
+/// The party wrapper for the protocol.
 pub struct WL16Party {
     inner: ChidaParty,
     prep_ohv: Vec<RndOhvOutput>,
     opt: bool,
 }
 
-// a random one-hot vector of size 16
+/// A random one-hot vector of size 16.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct RndOhv16(u16);
 
 /// Output of the random one-hot vector pre-processing.
+/// 
 /// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (3,3)-sharing of the corresponding `GF4` element that indicates
 /// the position of 1 in the vector.
 pub struct RndOhvOutput {
@@ -70,6 +80,12 @@ impl WL16Party {
     }
 }
 
+/// This function implements the AES benchmark.
+/// 
+/// The arguments are
+/// - `connected` - the local party
+/// - `simd` - number of parallel AES calls
+/// - `n_worker_threads` - number of worker threads
 pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
     let mut party = WL16Party::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();

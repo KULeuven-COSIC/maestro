@@ -1,5 +1,4 @@
 //! This module contains the online phase components.
-//!
 
 use crate::{
     aes::GF8InvBlackBox,
@@ -68,7 +67,13 @@ const GF4_BITSLICED_LUT: [[u16; 4]; 16] = [
     [28306, 6090, 7092, 15529],
 ];
 
-/// Placeholder for the LUT protocol
+/// This function implements the LUT inversion protocol.
+/// 
+/// The inputs are:
+/// - `party` - the local party `P_i` with a preprocessed lookup table
+/// - `v` - the sum share of the input value in `GF(2^4)`
+/// 
+/// The function returns a replicated share of the multiplicative inverse of the input value.
 pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<GF4>)> {
     if party.prep_ohv.len() < v.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
@@ -114,7 +119,7 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
 }
 
 #[inline]
-pub fn lut_with_rnd_ohv_bitsliced(
+fn lut_with_rnd_ohv_bitsliced(
     rnd_ohv: &[RndOhvOutput],
     ci: Vec<GF4>,
     cii: Vec<GF4>,
@@ -137,7 +142,7 @@ fn append(a: &[GF4], b: &[GF4]) -> Vec<GF4> {
     res
 }
 
-/// Share conversion protocol <<x>> to [[x]]
+/// Protocol to convert sum sharing into a replicated sharing
 fn ss_to_rss_layer(
     party: &mut WL16Party,
     xss_i: &[GF4],
@@ -163,20 +168,19 @@ fn ss_to_rss_layer(
     Ok(())
 }
 
-/**
-This function implements multiplicative inversion as in `Protocol 2`.
 
-Given a (2,3)-RSS shared vector [[x]] of elements in GF(2^8),
-the protocol computes the component-wise multiplicative inverse.
-
-The function inputs are:
-- `party` - the local party `P_i``
-- `si` - the first component of `[[x]]_i`
-- `sii` - the second component of `[[x]]_i`
-
-The output, the share [[x^-1]]_i, is written into `(s_i,s_ii)`.
-*/
-fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+/// This function implements multiplicative inversion as in `Protocol 2`.
+///
+/// Given a (2,3)-RSS shared vector `[[x]]` of elements in `GF(2^8)`,
+/// the protocol computes the component-wise multiplicative inverse.
+///
+/// The function inputs are:
+/// - `party` - the local party `P_i`
+/// - `si` - the first component of `[[x]]_i`
+/// - `sii` - the second component of `[[x]]_i`
+///
+/// The output, the share [[x^-1]]_i, is written into `(s_i,s_ii)`.
+pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     #[cfg(feature = "verbose-timing")]
     let total = Instant::now();
 
@@ -271,6 +275,7 @@ fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcR
     Ok(())
 }
 
+/// This function computes the WOL transform from `GF(2^8)` to `GF(2^4)^2`.
 pub fn wol_bitslice_gf4(x: &[GF8]) -> (Vec<BsGF4>, Vec<BsGF4>) {
     let n = if x.len() % 2 == 0 {
         x.len() / 2
@@ -298,6 +303,7 @@ pub fn wol_bitslice_gf4(x: &[GF8]) -> (Vec<BsGF4>, Vec<BsGF4>) {
     (xh, xl)
 }
 
+/// This function computes the reverse WOL transform from `GF(2^4)^2` to `GF(2^8)`.
 pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
     for i in 0..(x.len() / 2) {
         let (xh1, xh2) = xh[i].unpack();
@@ -312,7 +318,19 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
     }
 }
 
-fn gf8_inv_layer_opt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+
+/// This function is an optimized version of the multiplicative inversion as in `Protocol 2`.
+///
+/// Given a (2,3)-RSS shared vector `[[x]]`` of elements in `GF(2^8)`,
+/// the protocol computes the component-wise multiplicative inverse.
+///
+/// The function inputs are:
+/// - `party` - the local party `P_i`
+/// - `si` - the first component of `[[x]]_i`
+/// - `sii` - the second component of `[[x]]_i`
+///
+/// The output, the share `[[x^-1]]_i`, is written into `(s_i,s_ii)`.
+pub fn gf8_inv_layer_opt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     if party.prep_ohv.len() < si.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
@@ -400,7 +418,18 @@ fn gf8_inv_layer_opt_party<P: Party>(
     Ok(())
 }
 
-fn gf8_inv_layer_opt_mt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+/// This function is an multi-threaded optimized version of the multiplicative inversion as in `Protocol 2`.
+///
+/// Given a (2,3)-RSS shared vector `[[x]]`` of elements in `GF(2^8)`,
+/// the protocol computes the component-wise multiplicative inverse.
+///
+/// The function inputs are:
+/// - `party` - the local party `P_i`
+/// - `si` - the first component of `[[x]]_i`
+/// - `sii` - the second component of `[[x]]_i`
+///
+/// The output, the share `[[x^-1]]_i`, is written into `(s_i,s_ii)`.
+pub fn gf8_inv_layer_opt_mt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     if party.prep_ohv.len() < si.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
@@ -434,7 +463,15 @@ fn gf8_inv_layer_opt_mt(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) 
     Ok(())
 }
 
-fn lut_layer_opt<P: Party>(
+/// This function is an optimized implementation of the LUT inversion protocol.
+/// 
+/// The inputs are:
+/// - `party` - the local party `P_i`
+/// - `v` - the sum share of the input value in `GF(2^4)`
+/// - `rnd_ohv` - the random one-hot vector used for the look-up table
+/// 
+/// The function returns a replicated share of the multiplicative inverse of the input value.
+pub fn lut_layer_opt<P: Party>(
     party: &mut P,
     mut v: Vec<BsGF4>,
     rnd_ohv: &[RndOhvOutput],
@@ -512,7 +549,7 @@ fn ss_to_rss_layer_opt<P: Party>(
 }
 
 #[inline]
-pub fn lut_with_rnd_ohv_bitsliced_opt(
+fn lut_with_rnd_ohv_bitsliced_opt(
     rnd_ohv: &[RndOhvOutput],
     ci: Vec<BsGF4>,
     mut cii: Vec<BsGF4>,
