@@ -7,7 +7,7 @@ use crate::{
     network::task::Direction,
     party::{broadcast::Broadcast, error::MpcResult, Party},
     share::{
-        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, Field, FieldDigestExt, FieldRngExt, HasTwo, Invertible, RssShare
+        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare
     },
 };
 
@@ -96,6 +96,7 @@ fn verify_dot_product<F: Field + Copy + HasTwo + Invertible>(
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
+    F: InnerProduct,
 {
     let n = x_vec.len();
     debug_assert_eq!(n, y_vec.len());
@@ -104,8 +105,8 @@ where
         return check_triple(party, &x_vec[0], &y_vec[0], z);
     }
     // Compute dot products
-    let f1: Vec<_> = x_vec.iter().skip(1).step_by(2).collect();
-    let g1: Vec<_> = y_vec.iter().skip(1).step_by(2).collect();
+    let f1: Vec<RssShare<F>> = x_vec.iter().skip(1).step_by(2).map(|x| *x).collect();
+    let g1: Vec<RssShare<F>> = y_vec.iter().skip(1).step_by(2).map(|y| *y).collect();
     let f2: Vec<_> = x_vec
         .chunks(2)
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)
@@ -115,8 +116,8 @@ where
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)
         .collect();
     let mut hs = [F::ZERO; 2];
-    hs[0] = weak_dot_prod(f1, g1);
-    hs[1] = weak_dot_prod(&f2, &g2);
+    hs[0] = F::weak_inner_product(&f1, &g1);
+    hs[1] = F::weak_inner_product(&f2, &g2);
     let h = ss_to_rss_shares(party, &hs)?;
     let h1 = &h[0];
     let h2 = &h[1];
@@ -142,6 +143,7 @@ fn check_triple<F: Field + Copy>(
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
+    F: InnerProduct,
 {
     // Generate RSS sharing of random value
     let x_prime = party.inner.generate_random(1)[0];
@@ -208,28 +210,11 @@ fn weak_mult<F: Field + Copy + Sized>(
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
+    F: InnerProduct,
 {
     // Compute a sum sharing of x*y
-    let zs = x.si * y.si + (x.si + x.sii) * (y.si + y.sii);
+    let zs = F::weak_inner_product(&[*x], &[*y]);
     single_ss_to_rss_shares(party, zs)
-}
-
-/// Computes the dot product of vectors x and y given as replicated shares.
-/// The result is a sum sharing.
-///
-/// This function assumes that both vectors are of equal length.
-#[inline]
-fn weak_dot_prod<'a, I, F: Field + Copy + Sized + 'a>(x_vec: I, y_vec: I) -> F
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-    I: IntoIterator<Item = &'a RssShare<F>>,
-{
-    // Compute a sum sharing of the dot product
-    let prod: F = x_vec.into_iter().zip(y_vec).fold(F::ZERO, |sum, (x, y)| {
-        sum + x.si * y.si + (x.si + x.sii) * (y.si + y.sii)
-    });
-    prod
 }
 
 /// Converts a vector of sum sharings into a replicated sharing
@@ -298,7 +283,7 @@ mod test {
 
     use crate::{
         share::{
-            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, RssShare
+            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, InnerProduct, RssShare
         },
         wollut16_malsec::{
             mult_verification::verify_multiplication_triples, test::localhost_setup_wl16as,
@@ -306,7 +291,7 @@ mod test {
         },
     };
 
-    use super::{lagrange_deg2, ss_to_rss_shares, verify_dot_product, weak_dot_prod, weak_mult};
+    use super::{lagrange_deg2, ss_to_rss_shares, verify_dot_product, weak_mult};
 
     fn gen_rand_vec<R: Rng + CryptoRng, F: Field>(rng: &mut R, n: usize) -> Vec<F>
     where
@@ -353,7 +338,7 @@ mod test {
         let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
         let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>| {
             move |p: &mut WL16ASParty| {
-                let c = weak_dot_prod(&a, &b);
+                let c = GF2p64::weak_inner_product(&a, &b);
                 ss_to_rss_shares(p, &[c]).unwrap()[0]
             }
         };

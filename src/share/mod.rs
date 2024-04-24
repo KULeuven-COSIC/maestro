@@ -60,8 +60,15 @@ pub trait HasTwo: Field {
 }
 
 pub trait InnerProduct: Field {
+    /// Computes the dot product of vectors x and y.
+    ///
+    /// This function assumes that both vectors are of equal length.
     fn inner_product(a: &[Self], b: &[Self]) -> Self;
 
+    /// Computes the dot product of vectors x and y given as replicated shares.
+    /// The result is a sum sharing.
+    ///
+    /// This function assumes that both vectors are of equal length.    
     fn weak_inner_product(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
 }
 
