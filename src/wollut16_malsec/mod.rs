@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::BroadcastContext, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, Party}, share::{gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
+    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::BroadcastContext, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
 };
 
 mod mult_verification;
@@ -19,6 +19,7 @@ pub struct WL16ASParty{
     prep_ohv: Vec<RndOhvOutput>,
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<BsGF4>,
+    gf2_triples_to_check: MulTripleVector<BsBool16>,
     broadcast_context: BroadcastContext,
 }
 
@@ -28,6 +29,7 @@ impl WL16ASParty {
             inner: party,
             prep_ohv: Vec::new(),
             gf4_triples_to_check: MulTripleVector::new(),
+            gf2_triples_to_check: MulTripleVector::new(),
             broadcast_context: BroadcastContext::new(),
         })
     }

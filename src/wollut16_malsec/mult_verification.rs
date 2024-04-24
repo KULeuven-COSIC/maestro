@@ -7,8 +7,7 @@ use crate::{
     network::task::Direction,
     party::{broadcast::Broadcast, error::MpcResult, Party},
     share::{
-        gf2p64::{GF2p64, GF2p64Subfield},
-        Field, FieldDigestExt, FieldRngExt, HasTwo, Invertible, RssShare,
+        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, Field, FieldDigestExt, FieldRngExt, HasTwo, Invertible, RssShare
     },
 };
 
@@ -17,13 +16,16 @@ use super::WL16ASParty;
 /// Protocol `8` to verify the multiplication triples at the end of the protocol.
 pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool> {
     let r: GF2p64 = coin_flip(party)?;
-    let k = party.gf4_triples_to_check.len() * 2; //each BsGF4 contains two values
-    let n = k.checked_next_power_of_two().expect("n too large");
-    // Compute randomized vectors for inner product
+    let k1 = party.gf4_triples_to_check.len() * 2; //each BsGF4 contains two values
+    let k2 = party.gf2_triples_to_check.len() * 16; //each BsBool16 contains 16 values
+    let n = (k1+k2).checked_next_power_of_two().expect("n too large");
+
     let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
     let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
     let mut z = RssShare::from(GF2p64::ZERO, GF2p64::ZERO);
     let mut weight = GF2p64::ONE;
+
+    // Add GF4 triples
     for i in 0..party.gf4_triples_to_check.len() {
         let (ai1, ai2) = party.gf4_triples_to_check.a_i[i].unpack();
         let (aii1, aii2) = party.gf4_triples_to_check.a_ii[i].unpack();
@@ -41,7 +43,37 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
         weight *= r;
     }
     party.gf4_triples_to_check.shrink(0);
+
+    // Add GF2 triples 
+    // The embedding of GF2 is trivial, i.e. 0 -> 0 and 1 -> 1.
+    for i in 0..party.gf2_triples_to_check.len() {
+        let ai = gf2_embed(party.gf2_triples_to_check.a_i[i]);
+        let aii = gf2_embed(party.gf2_triples_to_check.a_ii[i]);
+        let bi = gf2_embed(party.gf2_triples_to_check.b_i[i]);
+        let bii = gf2_embed(party.gf2_triples_to_check.b_ii[i]);
+        let ci = gf2_embed(party.gf2_triples_to_check.c_i[i]);
+        let cii = gf2_embed(party.gf2_triples_to_check.c_ii[i]);
+        for j in 0..16 {
+            x_vec[k1 + 16 * i + j] = RssShare::from(ai[j],aii[j]).mul_by_sc(weight);
+            y_vec[k1 + 16 * i + j] = RssShare::from(bi[j],bii[j]);
+            z += RssShare::from(ci[j],cii[j]).mul_by_sc(weight);
+            weight *= r;
+        }
+    }
+    party.gf2_triples_to_check.shrink(0);
+
     verify_dot_product(party, &x_vec, &y_vec, &z)
+}
+
+fn gf2_embed(s:BsBool16) -> [GF2p64;16] {
+    let mut res = [GF2p64::ZERO;16];
+    let s = s.as_u16();
+    for i in 0..16 {
+        if s & 1 << i != 0 {
+            res[i] = GF2p64::ONE;
+        }
+    }
+    res
 }
 
 /// Embed
@@ -266,10 +298,7 @@ mod test {
 
     use crate::{
         share::{
-            gf2p64::GF2p64,
-            gf4::BsGF4,
-            test::{assert_eq, consistent, secret_share, secret_share_vector},
-            Field, FieldRngExt, RssShare,
+            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, RssShare
         },
         wollut16_malsec::{
             mult_verification::verify_multiplication_triples, test::localhost_setup_wl16as,
@@ -431,7 +460,7 @@ mod test {
     }
 
     #[test]
-    fn test_mul_verify_correctness() {
+    fn test_gf4_mul_verify_correctness() {
         let n = 31;
         let mut rng = thread_rng();
         let a_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
@@ -465,7 +494,41 @@ mod test {
     }
 
     #[test]
-    fn test_mul_verify_soundness() {
+    fn test_gf2_mul_verify_correctness() {
+        let n = 32;
+        let mut rng = thread_rng();
+        let a_vec: Vec<BsBool16> = gen_rand_vec::<_, BsBool16>(&mut rng, n);
+        let b_vec: Vec<BsBool16> = gen_rand_vec::<_, BsBool16>(&mut rng, n);
+        let c_vec: Vec<BsBool16> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+        let program =
+            |a: Vec<RssShare<BsBool16>>, b: Vec<RssShare<BsBool16>>, c: Vec<RssShare<BsBool16>>| {
+                move |p: &mut WL16ASParty| {
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        p.gf2_triples_to_check
+                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                    });
+                    verify_multiplication_triples(p).unwrap()
+                }
+            };
+        let (h1, h2, h3) = localhost_setup_wl16as(
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+            None,
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, true);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf4_mul_verify_soundness() {
         let n = 32;
         let mut rng = thread_rng();
         let a_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
@@ -484,6 +547,45 @@ mod test {
                 move |p: &mut WL16ASParty| {
                     izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
                         p.gf4_triples_to_check
+                            .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
+                    });
+                    verify_multiplication_triples(p).unwrap()
+                }
+            };
+        let (h1, h2, h3) = localhost_setup_wl16as(
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+            None,
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, false);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf2_mul_verify_soundness() {
+        let n = 32;
+        let mut rng = thread_rng();
+        let a_vec: Vec<BsBool16> = gen_rand_vec::<_, BsBool16>(&mut rng, n);
+        let b_vec: Vec<BsBool16> = gen_rand_vec::<_, BsBool16>(&mut rng, n);
+        let mut c_vec: Vec<BsBool16> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let mut r = gen_rand_vec::<_, BsBool16>(&mut rng, 1)[0];
+        if r.is_zero() {
+            r = BsBool16::ONE
+        }
+        c_vec[rng.gen_range(0..n)] += r;
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+        let program =
+            |a: Vec<RssShare<BsBool16>>, b: Vec<RssShare<BsBool16>>, c: Vec<RssShare<BsBool16>>| {
+                move |p: &mut WL16ASParty| {
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        p.gf2_triples_to_check
                             .push(a.si, a.sii, b.si, b.sii, c.si, c.sii);
                     });
                     verify_multiplication_triples(p).unwrap()
