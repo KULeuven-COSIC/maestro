@@ -30,10 +30,10 @@ fn inner_product(
 ) -> Vec<RssShare<BsBool16>> {
     debug_assert_eq!(elements.len(), selector.len());
     let mut res = vec![start; n];
-    for i in 0..elements.len() {
+    for (i, elem_i) in elements.iter().enumerate() {
         if selector[i] {
-            for j in 0..res.len() {
-                res[j] += elements[i][j];
+            for (j,res_j) in res.iter_mut().enumerate() {
+                *res_j += elem_i[j];
             }
         }
     }
@@ -111,8 +111,8 @@ pub fn generate_random_ohv16<P: Party>(party: &mut P, n: usize) -> MpcResult<Vec
     generate_ohv16(party, n, r0, r1, r2, r3)
 }
 
-pub fn generate_random_ohv16_mt<'a>(
-    party: &'a mut MainParty,
+pub fn generate_random_ohv16_mt(
+    party: &mut MainParty,
     n: usize,
 ) -> MpcResult<Vec<RndOhvOutput>> {
     let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1 };
@@ -336,11 +336,10 @@ fn generate_ohv16<P: Party>(
 
 fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
     let mut res = vec![(RndOhv16::new(0u16), RndOhv16::new(0u16)); 16 * bs[0].len()];
-    for i in 0..16 {
-        let bit = &bs[i];
-        for j in 0..bit.len() {
-            let si = bit[j].si.as_u16();
-            let sii = bit[j].sii.as_u16();
+    for (i,bit) in bs.iter().enumerate() {
+        for (j,bit_j) in bit.iter().enumerate() {
+            let si = bit_j.si.as_u16();
+            let sii = bit_j.sii.as_u16();
             for k in 0..16 {
                 res[16 * j + k].0 .0 |= ((si >> k) & 0x1) << i;
                 res[16 * j + k].1 .0 |= ((sii >> k) & 0x1) << i;
@@ -352,8 +351,7 @@ fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
 
 pub fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
     let mut res = vec![0u8; bs[0].len() * 16];
-    for i in 0..4 {
-        let bit = &bs[i];
+    for (i,bit) in bs.iter().enumerate() {
         for j in 0..bit.len() {
             for k in 0..16 {
                 let mut si = res[16 * j + k] & 0x0f;

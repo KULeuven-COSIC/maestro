@@ -42,7 +42,7 @@ impl GF2p64 {
     /// not constant time
     fn mul_by_x(&mut self) {
         let high_bit = self.0 >> (Self::NBITS - 1);
-        self.0 = self.0 << 1;
+        self.0 <<= 1;
         if high_bit != 0 {
             self.0 ^= Self::MOD_MINUS_XN;
         }
@@ -139,7 +139,7 @@ impl GF2p64 {
         )
     ))]
     pub fn mul_clmul_u64(&self, other: &Self) -> Self {
-        let (word, carry) = Self::clmul_u64(&self, other);
+        let (word, carry) = Self::clmul_u64(self, other);
         Self::propagate_carries(word, carry)
     }
 
@@ -173,7 +173,7 @@ impl GF2p64 {
 
     /// Weak inner product using basic multiplication
     pub fn fallback_weak_ip(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self {
-        a.into_iter().zip(b).fold(Self::ZERO, |sum, (x, y)| {
+        a.iter().zip(b).fold(Self::ZERO, |sum, (x, y)| {
             sum + x.si * y.si + (x.si + x.sii) * (y.si + y.sii)
         })
     }
@@ -240,12 +240,10 @@ impl Field for GF2p64 {
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
         debug_assert_eq!(v.len(), Self::NBYTES * dest.len());
         dest.iter_mut()
-            .zip(v.into_iter().chunks(Self::NBYTES).into_iter())
+            .zip(v.chunks(Self::NBYTES))
             .for_each(|(dst, c)| {
                 dst.0 = u64::from_be_bytes(
-                    c.collect::<Vec<u8>>()
-                        .try_into()
-                        .expect("chunk with incorrect length"),
+                    c.try_into().expect("chunk with incorrect length"),
                 );
             })
     }
