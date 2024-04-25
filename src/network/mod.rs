@@ -1,3 +1,8 @@
+//! This module provides the networking functionality.
+//! 
+//! That is the module essentially provides pair-wise TLS connections between all parties.
+//! 
+//! TODO: Check the doc strings in this file
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{
@@ -17,15 +22,25 @@ pub mod task;
 
 pub use receiver::{FieldSliceReceiver, FieldVectorReceiver};
 
+/// The network configuration of a party.
 pub struct Config {
     player_addr: Vec<Ipv4Addr>,
     player_ports: Vec<u16>,
+    player_certs: Vec<CertificateDer<'static>>,
     my_cert: CertificateDer<'static>,
     my_key: PrivateKeyDer<'static>,
-    player_certs: Vec<CertificateDer<'static>>,
 }
 
 impl Config {
+    
+    /// Creates a new network configuration for a party
+    /// 
+    /// The inputs are
+    /// - `player_addr` - the IP addresses of all parties
+    /// - `player_ports` - the ports of all parties
+    /// - `player_certs` - the TLS certificates of all parties
+    /// - `my_cert` - the TLS certificate of the local party
+    /// - `my_key` - the TLS private key of the local party
     pub fn new(
         player_addr: Vec<Ipv4Addr>,
         player_ports: Vec<u16>,
@@ -78,7 +93,7 @@ impl Config {
         ))
     }
 
-    // returns party index and config
+    /// Loads the [Config]uration from a file and returns the index of the local party.
     pub fn from_file(path: &Path) -> Result<(usize, Self), io::Error> {
         let file_content = fs::read_to_string(path)?;
         let parsed_config: SerializedConfig = toml::from_str(&file_content)
@@ -143,6 +158,7 @@ impl Config {
     }
 }
 
+/// The serialized network information for one party.
 #[derive(Deserialize)]
 struct SerializedPartyConfig {
     pub address: Ipv4Addr,
@@ -150,6 +166,7 @@ struct SerializedPartyConfig {
     pub certificate: String,
     pub private_key: Option<String>,
 }
+/// The serialized network configuration.
 #[derive(Deserialize)]
 struct SerializedConfig {
     pub party_index: usize,
@@ -158,8 +175,11 @@ struct SerializedConfig {
     pub p3: SerializedPartyConfig,
 }
 
+/// A communication channel between the local party and another party.
 pub struct CommChannel {
-    /// to which player (0,1,2)
+    /// Defines the party on the other end.
+    /// 
+    /// Permissible are `0,1,2`
     pub to: usize,
     stream: Option<Stream>,
     bytes_sent: u64,
@@ -167,12 +187,16 @@ pub struct CommChannel {
     rounds: usize,
 }
 
+/// A TLS connection used as part of a [CommChannel].
 pub enum Stream {
+    /// TLS connection as a client.
     Client(rustls::StreamOwned<ClientConnection, TcpStream>),
+    /// TLS connection as a server.
     Server(rustls::StreamOwned<ServerConnection, TcpStream>),
 }
 
 impl Stream {
+
     pub fn as_mut_write(&mut self) -> &mut dyn io::Write {
         match self {
             Stream::Client(stream) => stream,
@@ -187,6 +211,7 @@ impl Stream {
         }
     }
 
+    /// TODO: add description
     pub fn complete_handshake_blocking(&mut self) -> io::Result<()> {
         match self {
             Self::Client(stream) => stream.conn.complete_io(&mut stream.sock).map(|_| ()),
@@ -194,6 +219,7 @@ impl Stream {
         }
     }
 
+    /// Closes the TLS connection.
     pub fn teardown(self) -> io::Result<()> {
         match self {
             Self::Client(mut stream) => {
@@ -217,21 +243,27 @@ impl Stream {
     }
 }
 
-pub struct CreatedParty {
-    i: usize,
-    server_socket: TcpListener,
-}
 
+/// The communication interface of a party.
 pub struct ConnectedParty {
+    /// The party's index `i`.
     pub i: usize,
+    /// The network configuration.
     pub config: Config,
-    /// Channel to player i+1
+    /// Channel to party `i+1`.
     pub comm_next: CommChannel,
-    /// Channel to player i-1
+    /// Channel to party `i-1`.
     pub comm_prev: CommChannel,
 }
 
 impl ConnectedParty {
+
+    /// Establishes the basic network interface and connects to the other parties.
+    /// 
+    /// The inputs are
+    /// - `i` - the party's index
+    /// - `config` - the network configuration
+    /// - `timeout` - an optional timeout value
     pub fn bind_and_connect(
         i: usize,
         config: Config,
@@ -246,7 +278,17 @@ impl ConnectedParty {
     }
 }
 
+/// The basic network interface of a party
+pub struct CreatedParty {
+    i: usize,
+    server_socket: TcpListener,
+}
+
 impl CreatedParty {
+
+    /// Binds the interface of party to the given address and port.
+    /// 
+    /// This function also defines the index of the party.
     pub fn bind(i: usize, addr: IpAddr, port: u16) -> io::Result<Self> {
         let listener = TcpListener::bind((addr, port))?;
         Ok(Self {
@@ -255,6 +297,7 @@ impl CreatedParty {
         })
     }
 
+    /// Returns the port of the [CreatedParty].
     #[cfg(any(test, feature = "benchmark-helper"))]
     pub fn port(&self) -> io::Result<u16> {
         self.server_socket
@@ -262,6 +305,16 @@ impl CreatedParty {
             .map(|socket_addr| socket_addr.port())
     }
 
+    /// Establishes a connection with the other parties
+    /// 
+    /// The idea is that party `i` acts as server for party `i-1`.
+    /// 
+    /// The inputs are
+    /// - `self` - the basic network interface
+    /// - `config` - the network configuration
+    /// - `timeout` - an optional timeout value
+    /// 
+    /// If successful returns a [ConnectedParty].
     pub fn connect(self, config: Config, timeout: Option<Duration>) -> io::Result<ConnectedParty> {
         let (next, prev) = match self.i {
             0 => {
@@ -380,6 +433,7 @@ impl CommChannel {
         }
     }
 
+    /// Establishes a new communication channel where the local party acts as server.
     pub fn new_server(config: &Config, server_socket: TcpListener, to: usize) -> io::Result<Self> {
         // println!("Accepting connections from port {}", server_socket.local_addr().unwrap().port());
         let (sock, _) = server_socket.accept()?;
@@ -396,6 +450,7 @@ impl CommChannel {
         Ok(Self::new(to, Stream::Server(StreamOwned::new(conn, sock))))
     }
 
+    /// Establishes a new communication channel where the local party acts as client.
     pub fn new_client(config: &Config, to: usize, timeout: Option<Duration>) -> io::Result<Self> {
         // println!("Connecting to {}", config.player_ports[to]);
         let addr: std::net::Ipv4Addr = config.player_addr[to];
@@ -478,7 +533,7 @@ impl CommChannel {
         self.rounds
     }
 
-    /// closes the connection properly. This may block if data needs to be written
+    /// Closes the communication channel properly. This may block if data needs to be written
     pub fn teardown(&mut self) -> io::Result<()> {
         match self.stream.take() {
             Some(stream) => stream.teardown(),
