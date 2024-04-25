@@ -1,3 +1,6 @@
+//! This module provides the basic party for the MPC protocols.
+//! 
+//! TODO: Add documentation
 pub mod broadcast;
 mod commitment;
 pub mod correlated_randomness;
