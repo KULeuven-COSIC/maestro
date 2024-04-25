@@ -37,7 +37,7 @@ impl<F: Field> MulTripleRecorder<F> for NoMulTripleRecording {
         Self {}
     }
 
-    fn join_thread_mul_triple_recorders(&mut self, recorders: Vec<Self::ThreadMulTripleRecorder>) {
+    fn join_thread_mul_triple_recorders(&mut self, _recorders: Vec<Self::ThreadMulTripleRecorder>) {
         // do nothing
     }
 }

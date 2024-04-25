@@ -1,13 +1,15 @@
-use std::slice;
+use std::{slice, time::Instant};
 
+use itertools::izip;
 use rand_chacha::ChaCha20Rng;
+use rayon::{iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 use sha2::Sha256;
 
 use crate::{
     network::task::Direction,
     party::{broadcast::Broadcast, error::MpcResult, Party},
     share::{
-        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare
+        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, gf4::BsGF4, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare
     },
 };
 
@@ -16,7 +18,6 @@ use super::WL16ASParty;
 /// Protocol `8` to verify the multiplication triples at the end of the protocol.
 pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool> {
     let r: GF2p64 = coin_flip(party)?;
-    println!("After coinflip");
     let k1 = party.gf4_triples_to_check.len() * 2; //each BsGF4 contains two values
     let k2 = party.gf2_triples_to_check.len() * 16; //each BsBool16 contains 16 values
     let n = (k1+k2).checked_next_power_of_two().expect("n too large");
@@ -26,44 +27,136 @@ pub fn verify_multiplication_triples(party: &mut WL16ASParty) -> MpcResult<bool>
     let mut z = RssShare::from(GF2p64::ZERO, GF2p64::ZERO);
     let mut weight = GF2p64::ONE;
 
-    // Add GF4 triples
-    for (i, (a, b, c)) in party.gf4_triples_to_check.drain_into_rss_iter().enumerate() {
-        let (ai1, ai2) = a.si.unpack();
-        let (aii1, aii2) = a.sii.unpack();
-        let (bi1, bi2) = b.si.unpack();
-        let (bii1, bii2) = b.sii.unpack();
-        let (ci1, ci2) = c.si.unpack();
-        let (cii1, cii2) = c.sii.unpack();
-        x_vec[2 * i] = embed_sharing(ai1, aii1).mul_by_sc(weight);
-        y_vec[2 * i] = embed_sharing(bi1, bii1);
-        z += embed_sharing(ci1, cii1).mul_by_sc(weight);
-        weight *= r;
-        x_vec[2 * i + 1] = embed_sharing(ai2, aii2).mul_by_sc(weight);
-        y_vec[2 * i + 1] = embed_sharing(bi2, bii2);
-        z += embed_sharing(ci2, cii2).mul_by_sc(weight);
-        weight *= r;
+    if k1 > 0 {
+        let (ai, aii, bi, bii, ci, cii) = (party.gf4_triples_to_check.ai(), party.gf4_triples_to_check.aii(), party.gf4_triples_to_check.bi(), party.gf4_triples_to_check.bii(), party.gf4_triples_to_check.ci(), party.gf4_triples_to_check.cii());
+        (z, weight) = add_gf4_triples(&mut x_vec[..k1], &mut y_vec[..k1], ai, aii, bi, bii, ci, cii, z, r);
+        party.gf4_triples_to_check.clear();
     }
+
+    if k2 > 0 {
+        // Add GF2 triples 
+        // The embedding of GF2 is trivial, i.e. 0 -> 0 and 1 -> 1.
+        let (ai, aii, bi, bii, ci, cii) = (party.gf2_triples_to_check.ai(), party.gf2_triples_to_check.aii(), party.gf2_triples_to_check.bi(), party.gf2_triples_to_check.bii(), party.gf2_triples_to_check.ci(), party.gf2_triples_to_check.cii());
+        z = add_gf2_triples(&mut x_vec[k1..(k1+k2)], &mut y_vec[k1..(k1+k2)], ai, aii, bi, bii, ci, cii, z, weight, r);
+        party.gf2_triples_to_check.clear();
+    }
+    verify_dot_product_opt(party, x_vec, y_vec, z)
+}
+
+#[rustfmt::skip]
+pub fn verify_multiplication_triples_mt(party: &mut WL16ASParty) -> MpcResult<bool> {
+    let k1 = party.gf4_triples_to_check.len() * 2; //each BsGF4 contains two values
+    let k2 = party.gf2_triples_to_check.len() * 16; //each BsBool16 contains 16 values
+    let n = (k1+k2).checked_next_power_of_two().expect("n too large");
+    if (k1+k2) < (1 << 14) {
+        // don't use multi-threading for such small task
+        return verify_multiplication_triples(party);
+    }
+
+    let n_threads = party.inner.num_worker_threads();
+    let chunk_size_gf4 = party.inner.chunk_size_for_task(party.gf4_triples_to_check.len());
+    let chunk_size_gf2 = party.inner.chunk_size_for_task(party.gf2_triples_to_check.len());
+    let r: Vec<GF2p64> = coin_flip_n(party, 2*n_threads)?;
+
+    let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+    let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+
+    let mut z = RssShare::from(GF2p64::ZERO, GF2p64::ZERO);
+    if k1 > 0 {
+        let (ai, aii, bi, bii, ci, cii) = (party.gf4_triples_to_check.ai(), party.gf4_triples_to_check.aii(), party.gf4_triples_to_check.bi(), party.gf4_triples_to_check.bii(), party.gf4_triples_to_check.ci(), party.gf4_triples_to_check.cii());
+        z = party.inner.run_in_threadpool(|| {
+            let z_gf4 = r[..n_threads].par_iter()
+                .zip_eq(x_vec[..k1].par_chunks_mut(2*chunk_size_gf4))
+                .zip_eq(y_vec[..k1].par_chunks_mut(2*chunk_size_gf4))
+                .zip_eq(ai.par_chunks(chunk_size_gf4))
+                .zip_eq(aii.par_chunks(chunk_size_gf4))
+                .zip_eq(bi.par_chunks(chunk_size_gf4))
+                .zip_eq(bii.par_chunks(chunk_size_gf4))
+                .zip_eq(ci.par_chunks(chunk_size_gf4))
+                .zip_eq(cii.par_chunks(chunk_size_gf4))
+                .map(|((((((((r, x_vec), y_vec), ai), aii), bi), bii), ci), cii)| {
+                    let (z, _) = add_gf4_triples(x_vec, y_vec, ai, aii, bi, bii, ci, cii, RssShare::from(GF2p64::ZERO, GF2p64::ZERO), *r);
+                    z
+                })
+                .reduce(|| RssShare::from(GF2p64::ZERO, GF2p64::ZERO), |sum, rss| sum + rss);
+            Ok(z_gf4)
+        })?;
+        party.gf4_triples_to_check.clear();
+    }
+    
 
     // Add GF2 triples 
     // The embedding of GF2 is trivial, i.e. 0 -> 0 and 1 -> 1.
-    for (i, (a,b,c)) in party.gf2_triples_to_check.drain_into_rss_iter().enumerate() {
-        let ai = gf2_embed(a.si);
-        let aii = gf2_embed(a.sii);
-        let bi = gf2_embed(b.si);
-        let bii = gf2_embed(b.sii);
-        let ci = gf2_embed(c.si);
-        let cii = gf2_embed(c.sii);
-        for j in 0..16 {
-            x_vec[k1 + 16 * i + j] = RssShare::from(ai[j],aii[j]).mul_by_sc(weight);
-            y_vec[k1 + 16 * i + j] = RssShare::from(bi[j],bii[j]);
-            z += RssShare::from(ci[j],cii[j]).mul_by_sc(weight);
-            weight *= r;
-        }
+    if k2 > 0 {
+        let (ai, aii, bi, bii, ci, cii) = (party.gf2_triples_to_check.ai(), party.gf2_triples_to_check.aii(), party.gf2_triples_to_check.bi(), party.gf2_triples_to_check.bii(), party.gf2_triples_to_check.ci(), party.gf2_triples_to_check.cii());
+        z += party.inner.run_in_threadpool(|| {
+            let z_gf2 = r[n_threads..].par_iter()
+                .zip_eq(x_vec[k1..(k1+k2)].par_chunks_mut(16*chunk_size_gf2))
+                .zip_eq(y_vec[k1..(k1+k2)].par_chunks_mut(16*chunk_size_gf2))
+                .zip_eq(ai.par_chunks(chunk_size_gf2))
+                .zip_eq(aii.par_chunks(chunk_size_gf2))
+                .zip_eq(bi.par_chunks(chunk_size_gf2))
+                .zip_eq(bii.par_chunks(chunk_size_gf2))
+                .zip_eq(ci.par_chunks(chunk_size_gf2))
+                .zip_eq(cii.par_chunks(chunk_size_gf2))
+                .map(|((((((((r, x_vec), y_vec), ai), aii), bi), bii), ci), cii)| {
+                    add_gf2_triples(x_vec, y_vec, ai, aii, bi, bii, ci, cii, RssShare::from(GF2p64::ZERO, GF2p64::ZERO), *r, *r)
+                })
+                .reduce(|| RssShare::from(GF2p64::ZERO, GF2p64::ZERO), |sum, rss| sum + rss);
+            Ok(z_gf2)
+        })?;
+        party.gf2_triples_to_check.clear();
     }
+    verify_dot_product_opt(party, x_vec, y_vec, z)
+}
 
-    println!("Verify dot product");
+fn add_gf4_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>], ai: &[BsGF4], aii: &[BsGF4], bi: &[BsGF4], bii: &[BsGF4], ci: &[BsGF4], cii: &[BsGF4], z_init: RssShare<GF2p64>, rand: GF2p64) -> (RssShare<GF2p64>, GF2p64) {
+    debug_assert_eq!(x_vec.len(), y_vec.len());
+    debug_assert_eq!(x_vec.len(), 2*ai.len());
+    let mut z = z_init;
+    let mut weight = rand;
+    let mut i = 0;
+    izip!(ai, aii, bi, bii, ci, cii).for_each(|(ai, aii, bi, bii, ci, cii)| {
+        let (ai1, ai2) = ai.unpack();
+        let (aii1, aii2) = aii.unpack();
+        let (bi1, bi2) = bi.unpack();
+        let (bii1, bii2) = bii.unpack();
+        let (ci1, ci2) = ci.unpack();
+        let (cii1, cii2) = cii.unpack();
+        x_vec[i] = embed_sharing(ai1, aii1).mul_by_sc(weight);
+        y_vec[i] = embed_sharing(bi1, bii1);
+        z += embed_sharing(ci1, cii1).mul_by_sc(weight);
+        weight *= rand;
+        x_vec[i + 1] = embed_sharing(ai2, aii2).mul_by_sc(weight);
+        y_vec[i + 1] = embed_sharing(bi2, bii2);
+        z += embed_sharing(ci2, cii2).mul_by_sc(weight);
+        weight *= rand;
+        i += 2;
+    });
+    (z, weight)
+}
 
-    verify_dot_product(party, x_vec, y_vec, z)
+fn add_gf2_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>], ai: &[BsBool16], aii: &[BsBool16], bi: &[BsBool16], bii: &[BsBool16], ci: &[BsBool16], cii: &[BsBool16], z_init: RssShare<GF2p64>, mut weight: GF2p64, rand: GF2p64) -> RssShare<GF2p64> {
+    debug_assert_eq!(x_vec.len(), y_vec.len());
+    debug_assert_eq!(x_vec.len(), 16*ai.len());
+    let mut z = z_init;
+    let mut i = 0;
+    izip!(ai, aii, bi, bii, ci, cii).for_each(|(ai, aii, bi, bii, ci, cii)| {
+        let ai = gf2_embed(*ai);
+        let aii = gf2_embed(*aii);
+        let bi = gf2_embed(*bi);
+        let bii = gf2_embed(*bii);
+        let ci = gf2_embed(*ci);
+        let cii = gf2_embed(*cii);
+        for j in 0..16 {
+            x_vec[i + j] = RssShare::from(ai[j],aii[j]).mul_by_sc(weight);
+            y_vec[i + j] = RssShare::from(bi[j],bii[j]);
+            z += RssShare::from(ci[j],cii[j]).mul_by_sc(weight);
+            weight *= rand;
+        }
+        i += 16;
+    });
+    z
 }
 
 fn gf2_embed(s:BsBool16) -> [GF2p64;16] {
@@ -100,12 +193,13 @@ where
     F: InnerProduct,
 {
     let n = x_vec.len();
-    println!("n = {}", n);
+    // println!("n = {}", n);
     debug_assert_eq!(n, y_vec.len());
     debug_assert!(n & (n - 1) == 0 && n != 0);
     if n == 1 {
         return check_triple(party, x_vec[0], y_vec[0], z);
     }
+    let inner_prod_time = Instant::now();
     // Compute dot products
     let f1: Vec<RssShare<F>> = x_vec.iter().skip(1).step_by(2).copied().collect();
     let g1: Vec<RssShare<F>> = y_vec.iter().skip(1).step_by(2).copied().collect();
@@ -117,22 +211,159 @@ where
         .chunks(2)
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)
         .collect();
+    let inner_prod_time = inner_prod_time.elapsed();
+    let weak_inner_prod_time = Instant::now();
     let mut hs = [F::ZERO; 2];
     hs[0] = F::weak_inner_product(&f1, &g1);
     hs[1] = F::weak_inner_product(&f2, &g2);
+    let weak_inner_prod_time = weak_inner_prod_time.elapsed();
+    let ss_rss_time = Instant::now();
     let h = ss_to_rss_shares(party, &hs)?;
+    let ss_rss_time = ss_rss_time.elapsed();
     let h1 = &h[0];
     let h2 = &h[1];
     let h0 = z - *h1;
+    let coin_flip_time = Instant::now();
     // Coin flip
     let r = coin_flip(party)?;
     // For large F this is very unlikely
     debug_assert!(r != F::ZERO && r != F::ONE);
+    let coin_flip_time = coin_flip_time.elapsed();
+
+    let poly_time = Instant::now();
     // Compute polynomials
     let fr: Vec<_> = x_vec.chunks(2).map(|c| c[0] + (c[0] + c[1]) * r).collect();
     let gr: Vec<_> = y_vec.chunks(2).map(|c| c[0] + (c[0] + c[1]) * r).collect();
+    let poly_time = poly_time.elapsed();
     let hr = lagrange_deg2(&h0, h1, h2, r);
+    // println!("[vfy-dp] n={}, inner_prod_time={}s, weak_inner_prod_time={}s, ss_rss_time={}s, coin_flip_time={}s, poly_time={}s", n, inner_prod_time.as_secs_f32(), weak_inner_prod_time.as_secs_f32(), ss_rss_time.as_secs_f32(), coin_flip_time.as_secs_f32(), poly_time.as_secs_f32());
     verify_dot_product(party, fr, gr, hr)
+}
+
+#[inline]
+fn compute_poly<F: Field>(x: &mut [RssShare<F>], r: F) {
+    let mut i = 0;
+    for k in 0..x.len()/2 {
+        x[k] = x[i] + (x[i] + x[i+1])*r;
+        i += 2;
+    }
+}
+
+#[inline]
+fn compute_poly_dst<F: Field>(dst: &mut [RssShare<F>], x: &[RssShare<F>], r: F) {
+    debug_assert_eq!(2*dst.len(), x.len());
+    let mut i = 0;
+    for k in 0..dst.len() {
+        dst[k] = x[i] + (x[i] + x[i+1])*r;
+        i += 2;
+    }
+}
+
+fn verify_dot_product_opt<F: Field + Copy + HasTwo + Invertible + Send + Sync>(
+    party: &mut WL16ASParty,
+    mut x_vec: Vec<RssShare<F>>,
+    mut y_vec: Vec<RssShare<F>>,
+    z: RssShare<F>,
+) -> MpcResult<bool>
+where
+    Sha256: FieldDigestExt<F>,
+    ChaCha20Rng: FieldRngExt<F>,
+    F: InnerProduct,
+{
+    let n = x_vec.len();
+    // println!("n = {}", n);
+    debug_assert_eq!(n, y_vec.len());
+    debug_assert!(n & (n - 1) == 0 && n != 0);
+    if n == 1 {
+        return check_triple(party, x_vec[0], y_vec[0], z);
+    }
+    let multi_threading = party.inner.has_multi_threading() && n >= (1 << 13);
+    let mut chunk_size = if x_vec.len() % party.inner.num_worker_threads() == 0 {
+        x_vec.len() / party.inner.num_worker_threads()
+    }else{
+        x_vec.len() / party.inner.num_worker_threads() +1
+    };
+    // make sure chunk size is even
+    if chunk_size % 2 != 0 { chunk_size += 1 }
+
+    let inner_prod_time = Instant::now();
+    let mut hs = [F::ZERO; 2];
+    if !multi_threading {
+        hs[0] = F::weak_inner_product2(&x_vec[1..], &y_vec[1..]);
+        hs[1] = F::weak_inner_product3(&x_vec, &y_vec);
+    }else{
+        let mut h0 = F::ZERO;
+        let mut h1 = F::ZERO;
+        party.inner.run_in_threadpool_scoped(|scope| {
+            scope.spawn(|_| { 
+                h0 = x_vec[1..]
+                    .par_chunks(chunk_size)
+                    .zip_eq(y_vec[1..].par_chunks(chunk_size))
+                    .map(|(x,y)| F::weak_inner_product2(x, y))
+                    .reduce(|| F::ZERO, |sum, v| sum + v);
+            });
+            scope.spawn(|_| {
+                h1 = x_vec.par_chunks(chunk_size)
+                    .zip_eq(y_vec.par_chunks(chunk_size))
+                    .map(|(x,y)| F::weak_inner_product3(x, y))
+                    .reduce(|| F::ZERO, |sum, v| sum + v);
+            });
+        });
+        hs[0] = h0;
+        hs[1] = h1;
+    }
+    
+    let inner_prod_time = inner_prod_time.elapsed();
+    let ss_rss_time = Instant::now();
+    let h = ss_to_rss_shares(party, &hs)?;
+    let ss_rss_time = ss_rss_time.elapsed();
+    let h1 = &h[0];
+    let h2 = &h[1];
+    let h0 = z - *h1;
+    let coin_flip_time = Instant::now();
+    // Coin flip
+    let r = coin_flip(party)?;
+    // For large F this is very unlikely
+    debug_assert!(r != F::ZERO && r != F::ONE);
+    let coin_flip_time = coin_flip_time.elapsed();
+
+    let poly_time = Instant::now();
+    // Compute polynomials
+    let (fr, gr) = if !multi_threading {
+        compute_poly(&mut x_vec, r);
+        x_vec.truncate(x_vec.len()/2);
+        let fr = x_vec;
+        compute_poly(&mut y_vec, r);
+        y_vec.truncate(y_vec.len()/2);
+        let gr = y_vec;
+        (fr, gr)
+    }else{
+        let mut fr = vec![RssShare::from(F::ZERO, F::ZERO); x_vec.len()/2];
+        let mut gr = vec![RssShare::from(F::ZERO, F::ZERO); x_vec.len()/2];
+        party.inner.run_in_threadpool_scoped(|scope| {
+            scope.spawn(|_| {
+                fr.par_chunks_mut(chunk_size/2)
+                .zip_eq(x_vec.par_chunks(chunk_size))
+                .for_each(|(dst, x)| {
+                    compute_poly_dst(dst, x, r);
+                });
+            });
+
+            scope.spawn(|_| {
+                gr.par_chunks_mut(chunk_size/2)
+                .zip_eq(y_vec.par_chunks(chunk_size))
+                .for_each(|(dst, y)| {
+                    compute_poly_dst(dst, y, r);
+                });
+            });
+        });
+        (fr, gr)
+    };
+    
+    let poly_time = poly_time.elapsed();
+    let hr = lagrange_deg2(&h0, h1, h2, r);
+    // println!("[vfy-dp-opt] n={}, inner_prod_time={}s, ss_rss_time={}s, coin_flip_time={}s, poly_time={}s", n, inner_prod_time.as_secs_f32(), ss_rss_time.as_secs_f32(), coin_flip_time.as_secs_f32(), poly_time.as_secs_f32());
+    verify_dot_product_opt(party, fr, gr, hr)
 }
 
 /// Protocol [TODO Add Number at the end] CheckTriple
@@ -201,6 +432,18 @@ where
 {
     let r: RssShare<F> = party.inner.generate_random(1)[0];
     reconstruct(party, r)
+}
+
+/// Coin flip protocol returns a n random values in F
+///
+/// Generates a sharing of a n random values that is then reconstructed globally.
+fn coin_flip_n<F: Field + Copy>(party: &mut WL16ASParty, n: usize) -> MpcResult<Vec<F>>
+where
+    Sha256: FieldDigestExt<F>,
+    ChaCha20Rng: FieldRngExt<F>,
+{
+    let (r_i, r_ii): (Vec<_>, Vec<_>) = party.inner.generate_random(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
+    party.inner.open_rss(&mut party.broadcast_context, &r_i, &r_ii)
 }
 
 /// Computes the components wise multiplication of replicated shared x and y.
@@ -284,10 +527,10 @@ mod test {
     use rand::{thread_rng, CryptoRng, Rng};
 
     use crate::{
-        party::MulTripleRecorder, share::{
+        party::{test::TestSetup, MulTripleRecorder}, share::{
             bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, InnerProduct, RssShare
         }, wollut16_malsec::{
-            mult_verification::verify_multiplication_triples, test::localhost_setup_wl16as,
+            mult_verification::{verify_dot_product_opt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::{localhost_setup_wl16as, WL16ASSetup},
             WL16ASParty,
         }
     };
@@ -401,6 +644,37 @@ mod test {
             program(a2, b2, c2),
             program(a3, b3, c3),
             None,
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, true);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_inner_prod_correctness_mt() {
+        const N: usize = 1 << 15;
+        const N_THREADS: usize = 3;
+        let mut rng = thread_rng();
+        let a_vec: Vec<GF2p64> = gen_rand_vec::<_, GF2p64>(&mut rng, N);
+        let b_vec: Vec<GF2p64> = gen_rand_vec::<_, GF2p64>(&mut rng, N);
+        let c: GF2p64 = a_vec
+            .iter()
+            .zip(&b_vec)
+            .fold(GF2p64::ZERO, |s, (&a, b)| s + a * *b);
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share(&mut rng, &c);
+        let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>, c: RssShare<GF2p64>| {
+            move |p: &mut WL16ASParty| verify_dot_product_opt(p, a, b, c).unwrap()
+        };
+        let (h1, h2, h3) = WL16ASSetup::localhost_setup_multithreads(
+            N_THREADS,
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
         );
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
@@ -587,6 +861,97 @@ mod test {
         let (r2, _) = h2.join().unwrap();
         let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, false);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf2_and_gf4_mul_verify_correctness() {
+        let n = 31;
+        let mut rng = thread_rng();
+        let a_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let b_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let c_vec: Vec<BsGF4> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+
+        let x_vec: Vec<BsBool16> = gen_rand_vec(&mut rng, n);
+        let y_vec: Vec<BsBool16> = gen_rand_vec(&mut rng, n);
+        let z_vec: Vec<BsBool16> = x_vec.iter().zip(y_vec.iter()).map(|(x,y)| *x * *y).collect();
+        let (x1, x2, x3) = secret_share_vector(&mut rng, x_vec);
+        let (y1, y2, y3) = secret_share_vector(&mut rng, y_vec);
+        let (z1, z2, z3) = secret_share_vector(&mut rng, z_vec);
+
+        let program =
+            |a: Vec<RssShare<BsGF4>>, b: Vec<RssShare<BsGF4>>, c: Vec<RssShare<BsGF4>>, x: Vec<RssShare<BsBool16>>, y: Vec<RssShare<BsBool16>>, z: Vec<RssShare<BsBool16>>| {
+                move |p: &mut WL16ASParty| {
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        p.gf4_triples_to_check
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
+                    });
+                    izip!(x, y, z).for_each(|(x,y,z)| {
+                        p.gf2_triples_to_check.record_mul_triple(&[x.si], &[x.sii], &[y.si], &[y.sii], &[z.si], &[z.sii]);
+                    });
+                    verify_multiplication_triples(p).unwrap()
+                }
+            };
+        let (h1, h2, h3) = localhost_setup_wl16as(
+            program(a1, b1, c1, x1, y1, z1),
+            program(a2, b2, c2, x2, y2, z2),
+            program(a3, b3, c3, x3, y3, z3),
+            None,
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, true);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf2_and_gf4_mul_verify_correctness_mt() {
+        let n = 1 << 12;
+        const N_THREADS: usize = 3;
+        let mut rng = thread_rng();
+        let a_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let b_vec: Vec<BsGF4> = gen_rand_vec::<_, BsGF4>(&mut rng, n);
+        let c_vec: Vec<BsGF4> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+
+        let x_vec: Vec<BsBool16> = gen_rand_vec(&mut rng, n);
+        let y_vec: Vec<BsBool16> = gen_rand_vec(&mut rng, n);
+        let z_vec: Vec<BsBool16> = x_vec.iter().zip(y_vec.iter()).map(|(x,y)| *x * *y).collect();
+        let (x1, x2, x3) = secret_share_vector(&mut rng, x_vec);
+        let (y1, y2, y3) = secret_share_vector(&mut rng, y_vec);
+        let (z1, z2, z3) = secret_share_vector(&mut rng, z_vec);
+
+        let program =
+            |a: Vec<RssShare<BsGF4>>, b: Vec<RssShare<BsGF4>>, c: Vec<RssShare<BsGF4>>, x: Vec<RssShare<BsBool16>>, y: Vec<RssShare<BsBool16>>, z: Vec<RssShare<BsBool16>>| {
+                move |p: &mut WL16ASParty| {
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        p.gf4_triples_to_check
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
+                    });
+                    izip!(x, y, z).for_each(|(x,y,z)| {
+                        p.gf2_triples_to_check.record_mul_triple(&[x.si], &[x.sii], &[y.si], &[y.sii], &[z.si], &[z.sii]);
+                    });
+                    verify_multiplication_triples_mt(p).unwrap()
+                }
+            };
+        let (h1, h2, h3) = WL16ASSetup::localhost_setup_multithreads(
+            N_THREADS,
+            program(a1, b1, c1, x1, y1, z1),
+            program(a2, b2, c2, x2, y2, z2),
+            program(a3, b3, c3, x3, y3, z3),
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
     }

@@ -178,6 +178,22 @@ impl GF2p64 {
         })
     }
 
+    /// Weak inner product2 using basic multiplication
+    pub fn fallback_weak_ip2(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self {
+        a.iter().zip(b).step_by(2).fold(Self::ZERO, |sum, (x, y)| {
+            sum + x.si * y.si + (x.si + x.sii) * (y.si + y.sii)
+        })
+    }
+
+    /// Weak inner product3 using basic multiplication
+    pub fn fallback_weak_ip3(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self {
+        a.chunks(2).zip(b.chunks(2)).fold(Self::ZERO, |sum, (x, y)| {
+            let x = x[0] + (x[0]+x[1]) * Self::TWO;
+            let y = y[0] + (y[0]+y[1]) * Self::TWO;
+            sum + x.si * y.si + (x.si + x.sii) * (y.si + y.sii)
+        })
+    }
+
     /// Weak inner product using CLMUL with delayed carry propagation
     #[cfg(any(
         all(
@@ -195,6 +211,54 @@ impl GF2p64 {
     ))]
     pub fn clmul_weak_inner_product(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self {
         let (word, carry) = a.iter().zip(b).fold((0u64, 0u64), |(wrd, car), (a, b)| {
+            let (w1, c1) = Self::clmul_u64(&a.si, &b.si);
+            let (w2, c2) = Self::clmul_u64(&(a.si + a.sii), &(b.si + b.sii));
+            (wrd ^ w1 ^ w2, car ^ c1 ^ c2)
+        });
+        Self::propagate_carries(word, carry)
+    }
+
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    pub fn clmul_weak_inner_product2(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self {
+        let (word, carry) = a.iter().zip(b).step_by(2).fold((0u64, 0u64), |(wrd, car), (a, b)| {
+            let (w1, c1) = Self::clmul_u64(&a.si, &b.si);
+            let (w2, c2) = Self::clmul_u64(&(a.si + a.sii), &(b.si + b.sii));
+            (wrd ^ w1 ^ w2, car ^ c1 ^ c2)
+        });
+        Self::propagate_carries(word, carry)
+    }
+
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    pub fn clmul_weak_inner_product3(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self {
+        let (word, carry) = a.chunks(2).zip(b.chunks(2)).fold((0u64, 0u64), |(wrd, car), (a, b)| {
+            let a = a[0] + (a[0]+a[1])*Self::TWO;
+            let b = b[0] + (b[0]+b[1])*Self::TWO;
             let (w1, c1) = Self::clmul_u64(&a.si, &b.si);
             let (w2, c2) = Self::clmul_u64(&(a.si + a.sii), &(b.si + b.sii));
             (wrd ^ w1 ^ w2, car ^ c1 ^ c2)
@@ -377,6 +441,14 @@ impl InnerProduct for GF2p64 {
     fn weak_inner_product(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
         Self::fallback_weak_ip(a, b)
     }
+
+    fn weak_inner_product2(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
+        Self::fallback_weak_ip2(a, b)
+    }
+
+    fn weak_inner_product3(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
+        Self::fallback_weak_ip3(a, b)
+    }
 }
 
 #[cfg(any(
@@ -400,6 +472,14 @@ impl InnerProduct for GF2p64 {
 
     fn weak_inner_product(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
         Self::clmul_weak_inner_product(a, b)
+    }
+
+    fn weak_inner_product2(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
+        Self::clmul_weak_inner_product2(a, b)
+    }
+
+    fn weak_inner_product3(a: &[super::RssShare<Self>], b: &[super::RssShare<Self>]) -> Self {
+        Self::clmul_weak_inner_product3(a, b)
     }
 }
 

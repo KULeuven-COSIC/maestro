@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field, RssShare}, wollut16::RndOhvOutput
+    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
 };
 
 mod mult_verification;
@@ -52,7 +52,7 @@ impl WL16ASParty {
         let t = Instant::now();
         match mult_verification::verify_multiplication_triples(self) {
             Ok(true) => {
-                println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
+                // println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
                 Ok(())
             },
             Ok(false) => Err(MpcError::MultCheck),
@@ -117,7 +117,7 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
         self.inner.io()
     }
 
-    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
+    fn pre_processing(&mut self, _n_multiplications: usize) -> MpcResult<()> {
         unimplemented!()
     }
 
@@ -129,11 +129,11 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
         self.inner.generate_random(n)
     }
 
-    fn input_round(&mut self, my_input: &[GF8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+    fn input_round(&mut self, _my_input: &[GF8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
         unimplemented!()
     }
 
-    fn mul(&mut self, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF8], bi: &[GF8], bii: &[GF8]) -> MpcResult<()> {
+    fn mul(&mut self, _ci: &mut [GF8], _cii: &mut [GF8], _ai: &[GF8], _aii: &[GF8], _bi: &[GF8], _bii: &[GF8]) -> MpcResult<()> {
         unimplemented!()
     }
 

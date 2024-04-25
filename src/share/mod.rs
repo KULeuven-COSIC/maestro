@@ -70,6 +70,21 @@ pub trait InnerProduct: Field {
     ///
     /// This function assumes that both vectors are of equal length.    
     fn weak_inner_product(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
+
+    /// Computes the dot product of vectors x and y given as replicated shares 
+    /// considering only elements at even positions (0,2,4,6,...).
+    /// The result is a sum sharing.
+    ///
+    /// This function assumes that both vectors are of equal length.    
+    fn weak_inner_product2(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
+
+    /// Computes the dot product of vectors x' and y' where
+    /// `
+    /// x'[i] = x[2i] + (x[2i] + x[2i+1])* Self::TWO, and
+    /// y'[i] = y[2i] + (y[2i] + y[2i+1])* Self::TWO
+    /// `
+    /// and x, y are given as replicated shares.
+    fn weak_inner_product3(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
 }
 
 #[derive(Clone, Debug)]

@@ -368,6 +368,14 @@ impl MainParty {
         vec
     }
 
+    pub fn chunk_size_for_task(&self, task_size: usize) -> usize {
+        if task_size % self.num_worker_threads() == 0 {
+            task_size / self.num_worker_threads()
+        }else{
+            (task_size / self.num_worker_threads()) +1
+        }
+    }
+
     pub fn split_range_equally(&self, end_exclusive: usize) -> Vec<(usize, usize)> {
         let n_parts = self
             .thread_pool

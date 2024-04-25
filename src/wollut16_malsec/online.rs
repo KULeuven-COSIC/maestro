@@ -1,8 +1,6 @@
 use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
-use super::WL16ASParty;
-
 #[cfg(feature = "verbose-timing")]
 use {std::time::Instant, crate::party::PARTY_TIMER};
 
