@@ -119,7 +119,7 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
 }
 
 #[inline]
-fn lut_with_rnd_ohv_bitsliced(
+pub fn lut_with_rnd_ohv_bitsliced(
     rnd_ohv: &[RndOhvOutput],
     ci: Vec<GF4>,
     cii: Vec<GF4>,
@@ -551,7 +551,7 @@ fn ss_to_rss_layer_opt<P: Party>(
 }
 
 #[inline]
-fn lut_with_rnd_ohv_bitsliced_opt(
+pub fn lut_with_rnd_ohv_bitsliced_opt(
     rnd_ohv: &[RndOhvOutput],
     ci: Vec<BsGF4>,
     mut cii: Vec<BsGF4>,

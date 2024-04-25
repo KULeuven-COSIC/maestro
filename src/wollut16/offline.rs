@@ -350,7 +350,7 @@ fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
     res
 }
 
-fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
+pub fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
     let mut res = vec![0u8; bs[0].len() * 16];
     for (i, bit) in bs.iter().enumerate() {
         for j in 0..bit.len() {
