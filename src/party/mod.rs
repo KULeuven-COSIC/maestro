@@ -170,10 +170,6 @@ pub struct MainParty {
     thread_pool: Option<ThreadPool>,
 }
 
-struct MyTask<'a> {
-    id: &'a usize,
-}
-
 impl MainParty {
     pub fn setup(mut party: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         let mut rng = ChaCha20Rng::from_entropy();

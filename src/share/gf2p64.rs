@@ -35,7 +35,7 @@ impl GF2p64 {
     }
 
     /// A 64-bit vector representing the irreducible polynomial `X^64 + X^4 + X^3 + X + 1`.
-    const MODULUS: u64 = 0x80_00_00_00_00_00_00_1B;
+    //const MODULUS: u64 = 0x80_00_00_00_00_00_00_1B;
 
     /// MODULUS - X^64 = X^4+X^3+X+1
     const MOD_MINUS_XN: u64 = 0x00_00_00_00_00_00_00_1B;
