@@ -1,5 +1,5 @@
 //! This module implements the 16-bit vector field `GF(2)^16`.
-//! 
+//!
 //! This can also be seen as a bit-sliced vector of 16 booleans.
 use std::{
     borrow::Borrow,
@@ -13,7 +13,7 @@ use sha2::Digest;
 use super::{Field, FieldDigestExt, FieldRngExt};
 
 /// A vector in `GF(2)^16`, i.e., a bit-sliced vector of 16 booleans.
-/// 
+///
 /// *Note*: Addition and multiplication is done **element-wise**.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct BsBool16(u16);
@@ -31,14 +31,13 @@ impl BsBool16 {
 }
 
 impl Field for BsBool16 {
-    
     const NBYTES: usize = 2;
-    
+
     const ZERO: Self = Self(0x0000);
-    
+
     /// Each component is one
     const ONE: Self = Self(0xffff);
-    
+
     fn serialized_size(n_elements: usize) -> usize {
         2 * n_elements
     }

@@ -1,5 +1,5 @@
 //! This module implements the 64-bit finite field `GF(2^64)`.
-//! 
+//!
 //! The field modulus is `X^64 + X^4 + X^3 + X + 1`.
 //! Field elements are represented by the [GF2p64] data type.
 //!
@@ -51,7 +51,7 @@ impl GF2p64 {
     }
 
     /// Slow multiplication.
-    /// 
+    ///
     /// Uses addition as a fallback in case the `cmul` feature is not supported.
     #[deprecated(note = "Do not use directly, only exposed for benchmarking purposes.")]
     pub fn mul_using_add(mut self, other: &Self) -> Self {
@@ -130,8 +130,8 @@ impl GF2p64 {
         (word, carry)
     }
 
-    /// Multiplication using CLMUL, requires the `clmul` feature. 
-    /// 
+    /// Multiplication using CLMUL, requires the `clmul` feature.
+    ///
     /// Implemented along the lines of <https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs>.
     #[cfg(any(
         all(
@@ -153,7 +153,7 @@ impl GF2p64 {
     }
 
     /// Inner product using multiplication
-    /// 
+    ///
     /// This acts as a fallback in case the `clmul` feature is not supported.
     #[deprecated(note = "Do not use directly, only exposed for benchmarking purposes.")]
     pub fn fallback_inner_product(a: &[Self], b: &[Self]) -> Self {
@@ -161,8 +161,8 @@ impl GF2p64 {
     }
 
     /// Inner product using CLMUL with delayed carry propagation.
-    /// 
-    /// Requires the `clmul` feature. 
+    ///
+    /// Requires the `clmul` feature.
     #[cfg(any(
         all(
             feature = "clmul",
@@ -186,7 +186,7 @@ impl GF2p64 {
     }
 
     /// Weak inner product using basic multiplication.
-    /// 
+    ///
     /// This acts as a fallback in case the `clmul` feature is not supported.
     /// See [Self::clmul_weak_inner_product] for more details.
     #[deprecated(note = "Do not use directly, only exposed for benchmarking purposes.")]
@@ -197,10 +197,10 @@ impl GF2p64 {
     }
 
     /// Weak inner product using CLMUL with delayed carry propagation.
-    /// 
-    /// This function computes the inner product of two RSS-shared vectors. 
+    ///
+    /// This function computes the inner product of two RSS-shared vectors.
     /// The result is sum-shared.
-    /// Requires the `clmul` feature. 
+    /// Requires the `clmul` feature.
     #[cfg(any(
         all(
             feature = "clmul",
