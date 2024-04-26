@@ -1,3 +1,6 @@
+//! This module implements the 16-bit vector field `GF(2)^16`.
+//!
+//! This can also be seen as a bit-sliced vector of 16 booleans.
 use std::{
     borrow::Borrow,
     ops::{Add, AddAssign, Mul, Neg, Sub},
@@ -9,34 +12,35 @@ use sha2::Digest;
 
 use super::{Field, FieldDigestExt, FieldRngExt};
 
-/// a bit-sliced vector of 16 booleans
-/// or mathematically, this is an element in F_2^16
-/// this means, addition, multiplicaiton is done **element-wise**
+/// A vector in `GF(2)^16`, i.e., a bit-sliced vector of 16 booleans.
+///
+/// *Note*: Addition and multiplication is done **element-wise**.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct BsBool16(u16);
 
 impl BsBool16 {
-    /// bit 0 in bits will be the first element in the vector, bit 1 in bits the second...
+    /// Bit `0` in bits will be the first element in the vector, bit `1` in bits the second.
     pub fn new(bits: u16) -> Self {
         Self(bits)
     }
 
+    /// Returns a binary representation of the vector.
     pub fn as_u16(&self) -> u16 {
         self.0
     }
 }
 
 impl Field for BsBool16 {
-    fn serialized_size(n_elements: usize) -> usize {
-        2 * n_elements
-    }
-
     const NBYTES: usize = 2;
 
     const ZERO: Self = Self(0x0000);
 
     /// Each component is one
     const ONE: Self = Self(0xffff);
+
+    fn serialized_size(n_elements: usize) -> usize {
+        2 * n_elements
+    }
 
     fn is_zero(&self) -> bool {
         self.0 == 0
@@ -63,13 +67,11 @@ impl Field for BsBool16 {
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
         debug_assert_eq!(v.len(), 2 * dest.len());
-        dest.iter_mut()
-            .zip(v.chunks(2))
-            .for_each(|(dst, chunk)| {
-                let low = chunk[0] as u16;
-                let high = chunk[1] as u16;
-                dst.0 = low | (high << 8);
-            });
+        dest.iter_mut().zip(v.chunks(2)).for_each(|(dst, chunk)| {
+            let low = chunk[0] as u16;
+            let high = chunk[1] as u16;
+            dst.0 = low | (high << 8);
+        });
     }
 }
 
@@ -149,9 +151,8 @@ impl<D: Digest> FieldDigestExt<BsBool16> for D {
 
 #[cfg(test)]
 mod test {
-    use rand::thread_rng;
     use crate::share::{bs_bool16::BsBool16, Field, FieldRngExt};
-
+    use rand::thread_rng;
 
     #[test]
     fn serialization() {
@@ -168,7 +169,10 @@ mod test {
         );
         assert_eq!(
             list_odd,
-            BsBool16::from_byte_vec(BsBool16::as_byte_vec(&list_odd, list_odd.len()), list_odd.len())
+            BsBool16::from_byte_vec(
+                BsBool16::as_byte_vec(&list_odd, list_odd.len()),
+                list_odd.len()
+            )
         );
 
         let mut slice_even = [BsBool16::ZERO; 500];
@@ -180,8 +184,10 @@ mod test {
         );
         assert_eq!(&list_even, &slice_even);
 
-        BsBool16::from_byte_slice(BsBool16::as_byte_vec(&list_odd, list_odd.len()), &mut slice_odd);
+        BsBool16::from_byte_slice(
+            BsBool16::as_byte_vec(&list_odd, list_odd.len()),
+            &mut slice_odd,
+        );
         assert_eq!(&list_odd, &slice_odd);
     }
-
 }

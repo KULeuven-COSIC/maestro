@@ -9,7 +9,7 @@ use crate::{
     network::task::Direction,
     party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, MainParty, MulTripleVector, Party},
     share::{
-        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, gf4::BsGF4, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare
+        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, gf4::BsGF4, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare, RssShareVec
     },
 };
 
@@ -160,11 +160,11 @@ fn add_gf2_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>
 fn gf2_embed(s:BsBool16) -> [GF2p64;16] {
     let mut res = [GF2p64::ZERO;16];
     let s = s.as_u16();
-    for i in 0..16 {
+    res.iter_mut().enumerate().for_each(|(i,r)| {
         if s & 1 << i != 0 {
-            res[i] = GF2p64::ONE;
+            *r = GF2p64::ONE;
         }
-    }
+    });
     res
 }
 
@@ -192,7 +192,6 @@ where
     F: InnerProduct,
 {
     let n = x_vec.len();
-    // println!("n = {}", n);
     debug_assert_eq!(n, y_vec.len());
     debug_assert!(n & (n - 1) == 0 && n != 0);
     if n == 1 {
@@ -200,8 +199,8 @@ where
     }
     let inner_prod_time = Instant::now();
     // Compute dot products
-    let f1: Vec<RssShare<F>> = x_vec.iter().skip(1).step_by(2).copied().collect();
-    let g1: Vec<RssShare<F>> = y_vec.iter().skip(1).step_by(2).copied().collect();
+    let f1: RssShareVec<F> = x_vec.iter().skip(1).step_by(2).copied().collect();
+    let g1: RssShareVec<F> = y_vec.iter().skip(1).step_by(2).copied().collect();
     let f2: Vec<_> = x_vec
         .chunks(2)
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)
@@ -467,7 +466,7 @@ where
 fn ss_to_rss_shares<F: Field + Copy + Sized>(
     party: &mut MainParty,
     sum_shares: &[F],
-) -> MpcResult<Vec<RssShare<F>>>
+) -> MpcResult<RssShareVec<F>>
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
@@ -480,7 +479,7 @@ where
     party.receive_field_slice(Direction::Next, &mut s_ii)
         .rcv()?;
     party.wait_for_completion();
-    let res: Vec<RssShare<F>> = s_ii
+    let res: RssShareVec<F> = s_ii
         .iter()
         .zip(s_i)
         .map(|(sii, si)| RssShare::from(si, *sii))

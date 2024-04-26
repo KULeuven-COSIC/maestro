@@ -1,3 +1,6 @@
+//! This module provides implementations of various finite [Field]s and replicated secret sharing.
+//!
+//! The provided field operations are **not constant-time**.
 pub mod bs_bool16;
 pub mod gf2p64;
 pub mod gf4;
@@ -10,6 +13,7 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
+/// A finite field.
 pub trait Field:
     Default
     + Add<Output = Self>
@@ -37,37 +41,42 @@ pub trait Field:
     /// One the neutral element of multiplication
     const ONE: Self;
 
-    // Returns if the value is zero
+    /// Returns if the value is zero
     fn is_zero(&self) -> bool;
 
+    /// Serializes the field elements
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, len: usize) -> Vec<u8>;
 
+    /// Deserializes field elements from a byte vector
     fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
 
+    /// Deserializes field elements from a byte vector into a slice
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
 }
 
-/// Trait for fields that exposes a function for computing multiplicative inversion
+/// Field that provide a method to compute multiplicative inverses.
 pub trait Invertible: Field {
     /// Multiplicative Inverse (zero may map to zero)
     fn inverse(self) -> Self;
 }
 
-/// Trait exposes 2 as a field element. This only works for field with order > 2.
+/// Extension field of `GF(2)` that provides `2` as a constant.
 pub trait HasTwo: Field {
-    /// Multiplicative Inverse (zero may map to zero)
+    /// The polynomial `X` of degree `1` in the field over `GF(2)`,
+    /// i.e.,  `2` if one considers a binary representation of field elements.
     const TWO: Self;
 }
 
+/// Field that provides methods to compute inner products.
 pub trait InnerProduct: Field {
-    /// Computes the dot product of vectors x and y.
+    /// Computes the dot product of vectors `x` and `y`.
     ///
     /// This function assumes that both vectors are of equal length.
     fn inner_product(a: &[Self], b: &[Self]) -> Self;
 
-    /// Computes the dot product of vectors x and y given as replicated shares.
-    /// The result is a sum sharing.
+    /// Computes the (weak) dot product of replicated sharing vectors `[[x]]` and `[[y]]`.
     ///
+    /// The result is a sum sharing of the inner product.
     /// This function assumes that both vectors are of equal length.    
     fn weak_inner_product(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
 
@@ -87,17 +96,25 @@ pub trait InnerProduct: Field {
     fn weak_inner_product3(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
 }
 
+/// A party's RSS-share of a (2,3)-shared field element.
 #[derive(Clone, Debug)]
 pub struct RssShare<F: Field> {
+    /// The first share of the party.
     pub si: F,
+    /// The second share of the party.
     pub sii: F,
 }
 
+/// A vector of [RssShare]s.
+pub type RssShareVec<F> = Vec<RssShare<F>>;
+
 impl<F: Field> RssShare<F> {
+    /// Computes an RSS-share given two shares.
     pub fn from(si: F, sii: F) -> Self {
         Self { si, sii }
     }
 
+    /// Multiplies the RSS-share with a scalar.
     pub fn mul_by_sc(self, scalar: F) -> Self {
         Self {
             si: self.si * scalar,
@@ -148,12 +165,17 @@ impl<F: Field> AddAssign for RssShare<F> {
 
 impl<F: Field + Copy> Copy for RssShare<F> {}
 
+/// Field that provides methods to generate random values.
 pub trait FieldRngExt<F: Field> {
+    /// Generate a random vector of field elements of length `n`.
     fn generate(&mut self, n: usize) -> Vec<F>;
+    /// Fill the given buffer with random field elements.
     fn fill(&mut self, buf: &mut [F]);
 }
 
+/// Field that provides methods to feed elements into a hash function.
 pub trait FieldDigestExt<F: Field> {
+    /// Feeds a slice of field elements to a hash function.
     fn update(&mut self, message: &[F]);
 }
 
@@ -165,6 +187,8 @@ pub mod test {
     use rand::{rngs::ThreadRng, thread_rng, CryptoRng, Rng};
     use std::borrow::Borrow;
     use std::fmt::Debug;
+
+    use super::RssShareVec;
 
     pub fn consistent<F: Field + PartialEq + Debug>(
         share1: &RssShare<F>,
@@ -212,7 +236,7 @@ pub mod test {
     pub fn secret_share_vector<F: Field, R: Rng + CryptoRng>(
         rng: &mut R,
         elements: impl IntoIterator<Item = impl Borrow<F>>,
-    ) -> (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)
+    ) -> (RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)
     where
         R: FieldRngExt<F>,
     {
@@ -228,7 +252,7 @@ pub mod test {
 
     pub fn random_secret_shared_vector<F: Field>(
         n: usize,
-    ) -> (Vec<F>, Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)
+    ) -> (Vec<F>, RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)
     where
         ThreadRng: FieldRngExt<F>,
     {

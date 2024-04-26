@@ -8,6 +8,7 @@ fn bench_multiplication(c: &mut Criterion) {
     let x = elements[0];
     let y = elements[1];
 
+    #[allow(deprecated)]
     c.bench_function("Simple Multiplication", move |b| {
         b.iter(|| x.mul_using_add(&y))
     });

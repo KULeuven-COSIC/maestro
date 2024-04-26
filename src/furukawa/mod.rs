@@ -1,4 +1,6 @@
-//! This module implements the maliciously-secure MPC protocol by Furukawa et al., "High-Throughput Secure Three-Party Computation for Malicious Adversaries and an Honest Majority " (https://eprint.iacr.org/2016/944).
+//! This module implements the *maliciously-secure* oblivious AES protocol by Furukawa et al.,
+//! "High-Throughput Secure Three-Party Computation for Malicious Adversaries and an Honest Majority"
+//! (<https://eprint.iacr.org/2016/944>).
 //!
 //! In the pre-processing phase, multiplication triples are generated and checked via bucket cut-and-choose.
 //! The online phase proceeds like the semi-honest variant but before outputs are revealed, a post-sacrificing step checks
@@ -29,12 +31,17 @@ use crate::{
     party::{
         broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty
     },
-    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare},
+    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
 };
 
 mod offline;
 
-// simd: how many parallel AES calls
+/// This function implements the AES benchmark.
+///
+/// The arguments are
+/// - `connected` - the local party
+/// - `simd` - number of parallel AES calls
+/// - `n_worker_threads` - number of worker threads
 pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
     let mut party = FurukawaParty::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
@@ -291,7 +298,7 @@ where
         }
     }
 
-    pub fn my_input(&mut self, input: &[F]) -> MpcResult<Vec<RssShare<F>>> {
+    pub fn my_input(&mut self, input: &[F]) -> MpcResult<RssShareVec<F>> {
         let a = self.party.inner.generate_random(input.len());
         let b = self
             .party
@@ -299,13 +306,13 @@ where
             .open_rss_to(&mut self.context, &a, self.party.inner.i)?;
         let mut b = b.unwrap(); // this is safe since we open to party.i
         for i in 0..b.len() {
-            b[i] = b[i].clone() + input[i].clone();
+            b[i] += input[i];
         }
         self.party
             .inner
             .broadcast_round(&mut self.context, &mut [], &mut [], b.as_slice())?;
         Ok(a.into_iter()
-            .zip(b.into_iter())
+            .zip(b)
             .map(|(ai, bi)| self.party.public_constant(bi) - ai)
             .collect())
     }
@@ -314,7 +321,7 @@ where
         &mut self,
         input_party: usize,
         n_inputs: usize,
-    ) -> MpcResult<Vec<RssShare<F>>> {
+    ) -> MpcResult<RssShareVec<F>> {
         assert_ne!(self.party.inner.i, input_party);
         let a = self.party.inner.generate_random(n_inputs);
         let b = self
@@ -337,7 +344,7 @@ where
             _ => unreachable!(),
         }
         Ok(a.into_iter()
-            .zip(b.into_iter())
+            .zip(b)
             .map(|(ai, bi)| self.party.public_constant(bi) - ai)
             .collect())
     }
@@ -369,7 +376,7 @@ where
         let rss: Vec<_> = si
             .iter()
             .zip(sii)
-            .map(|(si, sii)| RssShare::from(si.clone(), sii.clone()))
+            .map(|(si, sii)| RssShare::from(*si, *sii))
             .collect();
         self.party
             .inner
@@ -405,7 +412,7 @@ where
         self.inner.constant(value)
     }
 
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F> {
         self.inner.generate_random(n)
     }
 
@@ -416,7 +423,7 @@ where
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
         let party_index = self.inner.i;
         let mut input_phase = self.start_input_phase();
 
@@ -467,7 +474,7 @@ where
 
 impl GF8InvBlackBox for FurukawaParty<GF8> {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
-        <Self as ArithmeticBlackBox<GF8>>::constant(&self, value)
+        <Self as ArithmeticBlackBox<GF8>>::constant(self, value)
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
         if self.inner.has_multi_threading() && self.inner.num_worker_threads() < si.len() {

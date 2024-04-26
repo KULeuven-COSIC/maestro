@@ -27,6 +27,8 @@ fn bench_inner_product(c: &mut Criterion) {
         let y: Vec<GF2p64> = rng.generate(n);
         let x1 = x.clone();
         let y1 = y.clone();
+
+        #[allow(deprecated)]
         group.bench_function(BenchmarkId::new("Basic", n), move |b| {
             b.iter(|| GF2p64::fallback_inner_product(&x, &y))
         });
@@ -51,7 +53,6 @@ fn bench_inner_product(c: &mut Criterion) {
 }
 
 fn bench_weak_inner_product(c: &mut Criterion) {
-    let mut rng = thread_rng();
     let mut group = c.benchmark_group("Weak Inner Product Benchmark");
 
     for k in 0..5 {
@@ -60,6 +61,8 @@ fn bench_weak_inner_product(c: &mut Criterion) {
         let y = random_rss(n);
         let x1 = x.clone();
         let y1 = y.clone();
+
+        #[allow(deprecated)]
         group.bench_function(BenchmarkId::new("Basic", n), move |b| {
             b.iter(|| GF2p64::fallback_weak_ip(&x, &y))
         });

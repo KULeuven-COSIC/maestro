@@ -1,3 +1,6 @@
+//! This module contains the offline phase components.
+//!
+//! This is primarily the preprocessing protocol for the one-hot vector encoding.
 use itertools::izip;
 use rayon::prelude::*;
 
@@ -32,7 +35,7 @@ fn inner_product(
     let mut res = vec![start; n];
     for (i, elem_i) in elements.iter().enumerate() {
         if selector[i] {
-            for (j,res_j) in res.iter_mut().enumerate() {
+            for (j, res_j) in res.iter_mut().enumerate() {
                 *res_j += elem_i[j];
             }
         }
@@ -100,9 +103,9 @@ const SELECTOR_IDX_15: [bool; 15] = [
     false, true,
 ];
 
-// implements Protocol 7
+/// This function implements the random one-hot vector generation as in `Protocol 6`.
 pub fn generate_random_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
-    let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1};
+    let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1 };
     // generate 4 random bits
     let r0 = party.generate_random(n16);
     let r1 = party.generate_random(n16);
@@ -111,8 +114,9 @@ pub fn generate_random_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: 
     generate_ohv16(party, triple_rec, n, r0, r1, r2, r3)
 }
 
+/// This function is a multi-threaded version of the random one-hot vector generation as in `Protocol 6`.
 pub fn generate_random_ohv16_mt<'a, Rec: MulTripleRecorder<BsBool16>>(party: &'a mut MainParty, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
-    let n16 = if n % 16 == 0 { n/16 } else { n/16 + 1};
+    let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1};
     let ranges = party.split_range_equally(n16);
     let threads = party.create_thread_parties_with_additional_data(ranges, |start, end| Some(triple_rec.create_thread_mul_triple_recorder(start, end)));
 
@@ -232,6 +236,7 @@ fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, tri
     let mut c2i = vec![BsBool16::default(); 5 * n16];
     let mut c2ii = vec![BsBool16::default(); 5 * n16];
     chida::online::mul_no_sync(party, &mut c2i, &mut c2ii, &a2i, &a2ii, &b2i, &b2ii)?;
+    triple_rec.record_mul_triple(&a2i, &a2ii, &b2i, &b2ii, &c2i, &c2ii);
 
     let pairs: Vec<_> = ci
         .into_iter()
@@ -332,8 +337,8 @@ fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, tri
 
 fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
     let mut res = vec![(RndOhv16::new(0u16), RndOhv16::new(0u16)); 16 * bs[0].len()];
-    for (i,bit) in bs.iter().enumerate() {
-        for (j,bit_j) in bit.iter().enumerate() {
+    for (i, bit) in bs.iter().enumerate() {
+        for (j, bit_j) in bit.iter().enumerate() {
             let si = bit_j.si.as_u16();
             let sii = bit_j.sii.as_u16();
             for k in 0..16 {
@@ -347,7 +352,7 @@ fn un_bitslice(bs: [Vec<RssShare<BsBool16>>; 16]) -> Vec<(RndOhv16, RndOhv16)> {
 
 pub fn un_bitslice4(bs: [Vec<RssShare<BsBool16>>; 4]) -> Vec<RssShare<GF4>> {
     let mut res = vec![0u8; bs[0].len() * 16];
-    for (i,bit) in bs.iter().enumerate() {
+    for (i, bit) in bs.iter().enumerate() {
         for j in 0..bit.len() {
             for k in 0..16 {
                 let mut si = res[16 * j + k] & 0x0f;

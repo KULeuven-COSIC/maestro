@@ -1,3 +1,6 @@
+//! This module provides the basic party for the MPC protocols.
+//! 
+//! TODO: Add documentation
 pub mod broadcast;
 mod commitment;
 pub mod correlated_randomness;
@@ -8,7 +11,7 @@ mod mul_triple_vec;
 use crate::network::task::{Direction, IoLayerOwned};
 use crate::network::{self, ConnectedParty};
 use crate::party::correlated_randomness::SharedRng;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare};
+use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec};
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -110,7 +113,7 @@ pub trait ArithmeticBlackBox<F: Field> {
     type Rng: FieldRngExt<F>;
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>>;
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F>;
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
     fn generate_alpha(&mut self, n: usize) -> Vec<F>;
     fn io(&self) -> &IoLayerOwned;
@@ -118,7 +121,7 @@ pub trait ArithmeticBlackBox<F: Field> {
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)>;
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>;
     fn constant(&self, value: F) -> RssShare<F>;
     fn mul(
         &mut self,
@@ -134,7 +137,7 @@ pub trait ArithmeticBlackBox<F: Field> {
 }
 
 pub trait Party {
-    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
     where
         ChaCha20Rng: FieldRngExt<F>;
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
@@ -170,10 +173,6 @@ pub struct MainParty {
     random_prev: SharedRng,
     random_local: ChaCha20Rng,
     thread_pool: Option<ThreadPool>,
-}
-
-struct MyTask<'a> {
-    id: &'a usize,
 }
 
 impl MainParty {
@@ -212,7 +211,7 @@ impl MainParty {
             random_prev: rand_prev,
             random_local: rng,
             stats: CombinedCommStats::empty(),
-            thread_pool: n_worker_threads.map(|n_workers| Self::build_thread_pool(n_workers)),
+            thread_pool: n_worker_threads.map(Self::build_thread_pool),
         })
     }
 
@@ -246,7 +245,7 @@ impl MainParty {
             random_prev: rand_prev,
             random_local: rng,
             stats: CombinedCommStats::empty(),
-            thread_pool: n_worker_threads.map(|n_workers| Self::build_thread_pool(n_workers)),
+            thread_pool: n_worker_threads.map(Self::build_thread_pool),
         })
     }
 
@@ -270,10 +269,7 @@ impl MainParty {
     }
 
     pub fn teardown(&mut self) -> MpcResult<()> {
-        self.thread_pool
-            .take()
-            .into_iter()
-            .for_each(|thread_pool| drop(thread_pool));
+        self.thread_pool.take().into_iter().for_each(drop);
         let io = self.io.take();
         debug_assert!(io.is_some());
         if let Some(io) = io {
@@ -487,7 +483,7 @@ where
 {
     next.generate(n)
         .into_iter()
-        .zip(prev.generate(n).into_iter())
+        .zip(prev.generate(n))
         .map(|(next, prev)| next - prev)
         .collect()
 }
@@ -497,7 +493,7 @@ fn generate_random<F: Field, R: Rng + CryptoRng>(
     next: &mut R,
     prev: &mut R,
     n: usize,
-) -> Vec<RssShare<F>>
+) -> RssShareVec<F>
 where
     R: FieldRngExt<F>,
 {
@@ -529,7 +525,7 @@ impl Party for MainParty {
         generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
-    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
     where
         ChaCha20Rng: FieldRngExt<F>,
     {

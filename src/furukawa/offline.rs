@@ -8,7 +8,7 @@ use crate::{
         error::{MpcError, MpcResult},
         MainParty, Party,
     },
-    share::{Field, FieldDigestExt, FieldRngExt, RssShare},
+    share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
 };
 use itertools::izip;
 use rand::Rng;
@@ -151,7 +151,7 @@ where
     Ok(correct_triples)
 }
 
-type OptimisticMulResult<F> = (Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<F>, Vec<F>);
+type OptimisticMulResult<F> = (RssShareVec<F>, RssShareVec<F>, Vec<F>, Vec<F>);
 
 #[allow(non_snake_case)]
 fn optimistic_mul_mt<F: Field + Send>(
@@ -219,11 +219,9 @@ fn shuffle<R: RngCore + CryptoRng, F: Field>(
     debug_assert_eq!(a.len(), cii.len());
 
     fn shuffle_from_random_tape<T>(tape: &[usize], slice: &mut [T]) {
-        let mut tape_idx = 0;
-        for i in (1..slice.len()).rev() {
+        for (tape_idx, i) in (1..slice.len()).rev().enumerate() {
             // invariant: elements with index > i have been locked in place.
             slice.swap(i, tape[tape_idx]);
-            tape_idx += 1;
         }
     }
 
@@ -317,6 +315,7 @@ fn open_and_check<F: Field + PartialEq + Copy>(
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+#[allow(clippy::too_many_arguments)]
 pub fn sacrifice<F: Field + Copy + AddAssign>(
     party: &mut MainParty,
     n: usize,
@@ -376,6 +375,7 @@ where
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+#[allow(clippy::too_many_arguments)]
 #[rustfmt::skip]
 pub fn sacrifice_mt<F: Field + Send + Sync>(
     party: &mut MainParty,
@@ -403,11 +403,20 @@ where
     let thread_parties = party.create_thread_parties(ranges);
 
     let contexts = party.run_in_threadpool(|| {
-        thread_parties.into_par_iter().zip_eq(ai_to_check.par_chunks(chunk_size)).zip_eq(aii_to_check.par_chunks(chunk_size)).zip_eq(bi_to_check.par_chunks(chunk_size)).zip_eq(bii_to_check.par_chunks(chunk_size))
-        .zip_eq(ci_to_check.par_chunks(chunk_size)).zip_eq(cii_to_check.par_chunks(chunk_size))
-        .zip_eq(ai_to_sacrifice.par_chunks_mut(sac_chunk_size)).zip_eq(aii_to_sacrifice.par_chunks_mut(sac_chunk_size))
-        .zip_eq(bi_to_sacrifice.par_chunks_mut(sac_chunk_size)).zip_eq(bii_to_sacrifice.par_chunks_mut(sac_chunk_size))
-        .zip_eq(ci_to_sacrifice.par_chunks_mut(sac_chunk_size)).zip_eq(cii_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        thread_parties
+	.into_par_iter()
+        .zip_eq(ai_to_check.par_chunks(chunk_size))
+        .zip_eq(aii_to_check.par_chunks(chunk_size))
+        .zip_eq(bi_to_check.par_chunks(chunk_size))
+        .zip_eq(bii_to_check.par_chunks(chunk_size))
+        .zip_eq(ci_to_check.par_chunks(chunk_size))
+        .zip_eq(cii_to_check.par_chunks(chunk_size))
+        .zip_eq(ai_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .zip_eq(aii_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .zip_eq(bi_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .zip_eq(bii_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .zip_eq(ci_to_sacrifice.par_chunks_mut(sac_chunk_size))
+        .zip_eq(cii_to_sacrifice.par_chunks_mut(sac_chunk_size))
         .map(|((((((((((((mut thread_party, ai_to_check), aii_to_check), bi_to_check), bii_to_check), ci_to_check), cii_to_check), ai_to_sacrifice), aii_to_sacrifice), bi_to_sacrifice), bii_to_sacrifice), ci_to_sacrifice), cii_to_sacrifice)| {
             let batch_size = thread_party.task_size();
             sacrifice_party(&mut thread_party, batch_size, sacrifice_bucket_size, ai_to_check, aii_to_check, bi_to_check, bii_to_check, ci_to_check, cii_to_check, ai_to_sacrifice, aii_to_sacrifice, bi_to_sacrifice, bii_to_sacrifice, ci_to_sacrifice, cii_to_sacrifice)
@@ -437,6 +446,7 @@ where
 ///  - `ai_to_sacrifice`, `aii_to_sacrifice`, `bi_to_sacrifice`, `bii_to_sacrifice`, `ci_to_sacrifice` and `cii_to_sacrifice` are slices of length `n * sacrifice_bucket_size` that contain the multiplication triple to sacrifice.
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
+#[allow(clippy::too_many_arguments)]
 fn sacrifice_party<P: Party, F: Field + Copy + AddAssign>(
     party: &mut P,
     n: usize,
@@ -481,9 +491,9 @@ where
     ) {
         debug_assert_eq!(bucket.len(), el.len() * sacrifice_bucket_size);
         let mut bucket_idx = 0;
-        for el_idx in 0..el.len() {
+        for elm in el {
             for _j in 0..sacrifice_bucket_size {
-                bucket[bucket_idx] += el[el_idx];
+                bucket[bucket_idx] += *elm;
                 bucket_idx += 1;
             }
         }

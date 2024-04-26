@@ -1,8 +1,8 @@
+#![doc = include_str!("../README.md")]
 #![allow(dead_code)]
 mod aes;
 mod benchmark;
 mod chida;
-mod dec;
 mod furukawa;
 mod gf4_circuit;
 mod lut256;

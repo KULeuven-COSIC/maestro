@@ -1,3 +1,20 @@
+//! This module implements the *semi-honest* oblivious AES protocol "GF(2^4) Circuit".
+//!
+//! The core is a sub-protocol to compute multiplicative inverses in `GF(2^8)`.
+//! This works as follows:
+//! 1) Use the WOL[^note] transform to convert the element `GF(2^8)` to `GF(2^4)^2`.
+//! 2) Compute the inverse of the `GF(2^4)^2` element using a single inversion in `GF(2^4)`.
+//!    The inverse of a `v` `GF(2^4)` is computed using `v^2, v^4, v^8`.
+//! 3) Use the reverse WOL transform to convert the result to `GF(2^8)`.
+//!
+//! This protocol does not require any pre-processing.
+//!
+//! This module notably contains
+//!   - [gf4_circuit_benchmark] that implements the AES benchmark
+//!   - [GF4CircuitSemihonestParty] the party wrapper for the protocol. [GF4CircuitSemihonestParty] also implements [ArithmeticBlackBox]
+//!
+//! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
+
 use std::time::{Duration, Instant};
 
 use itertools::{izip, Itertools};
@@ -18,16 +35,17 @@ use crate::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-        Field, FieldDigestExt, FieldRngExt, RssShare,
+        Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec,
     },
     wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4},
 };
 
+/// The party wrapper for the GF4 circuit protocol.
 pub struct GF4CircuitSemihonestParty(ChidaParty);
 
 impl GF4CircuitSemihonestParty {
     pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|chida_party| Self(chida_party))
+        ChidaParty::setup(connected, n_worker_threads).map(Self)
     }
 
     fn io(&self) -> &IoLayerOwned {
@@ -35,6 +53,12 @@ impl GF4CircuitSemihonestParty {
     }
 }
 
+/// This function implements the AES benchmark.
+///
+/// The arguments are
+/// - `connected` - the local party
+/// - `simd` - number of parallel AES calls
+/// - `n_worker_threads` - number of worker threads
 pub fn gf4_circuit_benchmark(
     connected: ConnectedParty,
     simd: usize,
@@ -131,7 +155,7 @@ where
         self.0.constant(value)
     }
 
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F> {
         self.0.generate_random(n)
     }
 
@@ -143,7 +167,7 @@ where
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
         self.0.input_round(my_input)
     }
 

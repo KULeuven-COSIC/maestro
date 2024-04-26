@@ -16,7 +16,7 @@ pub fn commit<Random: Rng + CryptoRng>(rand: &mut Random, msg: &[u8]) -> Vec<u8>
 
     let hash = hasher.finalize();
     commitment[COMMITMENT_SEC_PARAM..].copy_from_slice(&hash);
-    return Vec::from(commitment);
+    Vec::from(commitment)
 }
 
 pub fn open(commitment: &[u8], msg: &[u8]) -> MpcResult<()> {

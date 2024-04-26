@@ -18,7 +18,7 @@ Cargo.lock
 rep3-aes.iml
 
 # Sage
-sage/gf4.sage.py
+sage/*.sage.py
 
 # Config files
 keys/leuven.*
@@ -28,3 +28,4 @@ keys/openssl-config-*
 leuven.toml
 london.toml
 paris.toml
+

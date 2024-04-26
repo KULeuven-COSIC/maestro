@@ -85,7 +85,7 @@ pub fn benchmark_protocols(
             iterations,
             simd,
             n_worker_threads,
-            &prot,
+            prot,
         );
         results.push(agg);
         println!("Finished benchmark for {}", prot.protocol_name());
@@ -120,6 +120,12 @@ impl BenchmarkResult {
             online_comm_stats,
             additional_timers,
         }
+    }
+}
+
+impl Default for AggregatedBenchmarkResult {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -186,7 +192,7 @@ impl AggregatedBenchmarkResult {
             self.prep_comm_stats.write_to_csv(writer)?;
             write!(writer, ",")?;
             self.online_comm_stats.write_to_csv(writer)?;
-            writeln!(writer, "")?;
+            writeln!(writer)?;
         }
         Ok(())
     }

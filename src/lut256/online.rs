@@ -12,7 +12,7 @@ use crate::{
     aes::GF8InvBlackBox,
     network::task::{Direction, IoLayerOwned},
     party::{error::MpcResult, ArithmeticBlackBox, MainParty},
-    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare},
+    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
 };
 
 use super::{lut256_tables, offline, LUT256Party, RndOhv256Output};
@@ -126,7 +126,7 @@ where
         self.inner.constant(value)
     }
 
-    fn generate_random(&mut self, n: usize) -> Vec<RssShare<F>> {
+    fn generate_random(&mut self, n: usize) -> RssShareVec<F> {
         self.inner.generate_random(n)
     }
 
@@ -138,7 +138,7 @@ where
     fn input_round(
         &mut self,
         my_input: &[F],
-    ) -> MpcResult<(Vec<RssShare<F>>, Vec<RssShare<F>>, Vec<RssShare<F>>)> {
+    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
         self.inner.input_round(my_input)
     }
 

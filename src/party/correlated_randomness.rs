@@ -129,7 +129,7 @@ impl GlobalRng {
                 for i in 0..CR_SEC_PARAM {
                     common_seed[i] = seed[i] ^ next_seed[i] ^ prev_seed[i];
                 }
-                return Ok(Self(ChaCha20Rng::from_seed(common_seed)));
+                Ok(Self(ChaCha20Rng::from_seed(common_seed)))
             } else {
                 Err(MpcError::Commitment)
             }

@@ -7,7 +7,7 @@ use crate::{
         task::{Direction, IoLayer},
         FieldSliceReceiver, FieldVectorReceiver,
     },
-    share::{Field, FieldRngExt, RssShare},
+    share::{Field, FieldRngExt, RssShare, RssShareVec},
 };
 
 use super::{correlated_randomness::SharedRng, Party};
@@ -26,6 +26,7 @@ pub struct ThreadParty<T> {
 }
 
 impl<T> ThreadParty<T> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         i: usize,
         range_start: usize,
@@ -69,7 +70,7 @@ impl<T> Party for ThreadParty<T> {
         super::generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
-    fn generate_random<F: Field>(&mut self, n: usize) -> Vec<RssShare<F>>
+    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
     where
         ChaCha20Rng: FieldRngExt<F>,
     {

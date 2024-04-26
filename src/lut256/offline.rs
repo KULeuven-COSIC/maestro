@@ -68,7 +68,7 @@ fn generate_ohv256_output<P: Party>(
     let output = un_bitslice(&ohv256);
     Ok(rand
         .into_iter()
-        .zip(output.into_iter())
+        .zip(output)
         .map(|(rand_rss, (ohv_si, ohv_sii))| RndOhv256Output {
             random_si: rand_rss.si,
             random_sii: rand_rss.sii,
@@ -181,17 +181,17 @@ fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv, RndOhv)> {
             .zip(res.into_iter())
             .for_each(|(dst, (ohv_i, ohv_ii))| {
                 if k < 4 {
-                    dst.0[0] |= (ohv_i as u64) << 16 * k;
-                    dst.1[0] |= (ohv_ii as u64) << 16 * k;
+                    dst.0[0] |= (ohv_i as u64) << (16 * k);
+                    dst.1[0] |= (ohv_ii as u64) << (16 * k);
                 } else if k < 8 {
-                    dst.0[1] |= (ohv_i as u64) << 16 * (k - 4);
-                    dst.1[1] |= (ohv_ii as u64) << 16 * (k - 4);
+                    dst.0[1] |= (ohv_i as u64) << (16 * (k - 4));
+                    dst.1[1] |= (ohv_ii as u64) << (16 * (k - 4));
                 } else if k < 12 {
-                    dst.0[2] |= (ohv_i as u64) << 16 * (k - 8);
-                    dst.1[2] |= (ohv_ii as u64) << 16 * (k - 8);
+                    dst.0[2] |= (ohv_i as u64) << (16 * (k - 8));
+                    dst.1[2] |= (ohv_ii as u64) << (16 * (k - 8));
                 } else {
-                    dst.0[3] |= (ohv_i as u64) << 16 * (k - 12);
-                    dst.1[3] |= (ohv_ii as u64) << 16 * (k - 12);
+                    dst.0[3] |= (ohv_i as u64) << (16 * (k - 12));
+                    dst.1[3] |= (ohv_ii as u64) << (16 * (k - 12));
                 }
             });
     }
@@ -204,14 +204,13 @@ fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv, RndOhv)> {
 fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {
     debug_assert_eq!(bs.len(), 8);
     let mut res = vec![(0u8, 0u8); bs[0].len() * 16];
-    for i in 0..8 {
-        let bit = &bs[i];
-        for j in 0..bit.len() {
+    for (i, bit) in bs.iter().enumerate().take(8) {
+        for (j, bit_j) in bit.iter().enumerate() {
             for k in 0..16 {
                 let mut si = res[16 * j + k].0;
                 let mut sii = res[16 * j + k].1;
-                si |= (((bit[j].si.as_u16() >> k) & 0x1) << i) as u8;
-                sii |= (((bit[j].sii.as_u16() >> k) & 0x1) << i) as u8;
+                si |= (((bit_j.si.as_u16() >> k) & 0x1) << i) as u8;
+                sii |= (((bit_j.sii.as_u16() >> k) & 0x1) << i) as u8;
                 res[16 * j + k].0 = si;
                 res[16 * j + k].1 = sii;
             }
@@ -238,7 +237,7 @@ mod test {
             bs_bool16::BsBool16,
             gf8::GF8,
             test::{assert_eq, consistent, secret_share_vector},
-            Field, FieldRngExt, RssShare,
+            Field, FieldRngExt, RssShare, RssShareVec,
         },
     };
 
@@ -248,9 +247,9 @@ mod test {
         rng: &mut R,
         v: &Vec<Vec<F>>,
     ) -> (
-        Vec<Vec<RssShare<F>>>,
-        Vec<Vec<RssShare<F>>>,
-        Vec<Vec<RssShare<F>>>,
+        Vec<RssShareVec<F>>,
+        Vec<RssShareVec<F>>,
+        Vec<RssShareVec<F>>,
     )
     where
         R: FieldRngExt<F>,
@@ -294,7 +293,7 @@ mod test {
         }
     }
 
-    fn transpose<F: Field>(v: Vec<Vec<RssShare<F>>>) -> Vec<Vec<RssShare<F>>> {
+    fn transpose<F: Field>(v: Vec<RssShareVec<F>>) -> Vec<RssShareVec<F>> {
         let simd = v[0].len();
         assert!(v.iter().all(|vx| vx.len() == simd));
         let mut outer = Vec::with_capacity(simd);
