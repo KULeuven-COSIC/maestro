@@ -19,7 +19,7 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 use sha2::Sha256;
-use crate::{party::{MulTripleVector}};
+use crate::party::MulTripleVector;
 
 // required bucket size B for B=C for 2^10, 2^11, ..., 2^19; all batches > 2^19 use B=3; all batches < 2^10 use B=5
 const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];

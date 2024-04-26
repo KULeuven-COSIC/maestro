@@ -54,7 +54,7 @@ impl<'a, F: Field> FieldSliceReceiver<'a, F> {
         Self { inner, slice }
     }
 
-    pub fn rcv(mut self) -> Result<(), oneshot::RecvError> {
+    pub fn rcv(self) -> Result<(), oneshot::RecvError> {
         #[cfg(feature = "verbose-timing")]
         let start = Instant::now();
         match self.inner.recv() {
@@ -64,7 +64,7 @@ impl<'a, F: Field> FieldSliceReceiver<'a, F> {
                     let io_end = start.elapsed();
                     IO_TIMER.lock().unwrap().report_time("io", io_end);
                     let serialization_start = Instant::now();
-                    F::from_byte_slice(bytes, &mut self.slice);
+                    F::from_byte_slice(bytes, self.slice);
                     let ser_end = serialization_start.elapsed();
                     IO_TIMER.lock().unwrap().report_time("ser", ser_end);
                 }
