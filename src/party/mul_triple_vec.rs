@@ -86,13 +86,14 @@ impl<F: Clone> MulTripleVector<F> {
         self.cii.truncate(new_length);
     }
 
+    /// Also clears the allocated capacity
     pub fn clear(&mut self) {
-        self.ai.clear();
-        self.aii.clear();
-        self.bi.clear();
-        self.bii.clear();
-        self.ci.clear();
-        self.cii.clear();
+        self.ai = Vec::new();
+        self.aii = Vec::new();
+        self.bi = Vec::new();
+        self.bii = Vec::new();
+        self.ci = Vec::new();
+        self.cii = Vec::new();
     }
 
     fn append(&mut self, mut other: Self) {
