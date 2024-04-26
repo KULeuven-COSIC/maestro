@@ -38,9 +38,9 @@ mod offline;
 pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
     let mut party = FurukawaParty::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
-    let inputs = aes::random_state(&mut party, simd);
+    let inputs = aes::random_state(&mut party.inner, simd);
     // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(&mut party);
+    let ks = aes::random_keyschedule(&mut party.inner);
 
     let start = Instant::now();
     party.do_preprocessing(0, simd).unwrap();
@@ -82,9 +82,9 @@ impl BenchmarkProtocol for MalChidaBenchmark {
     ) -> BenchmarkResult {
         let mut party = FurukawaParty::setup(conn, n_worker_threads).unwrap();
         let _setup_comm_stats = party.io().reset_comm_stats();
-        let inputs = aes::random_state(&mut party, simd);
+        let inputs = aes::random_state(&mut party.inner, simd);
         // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party);
+        let ks = aes::random_keyschedule(&mut party.inner);
 
         println!("After setup");
 

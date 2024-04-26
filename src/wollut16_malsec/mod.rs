@@ -6,10 +6,10 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
+    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
 };
 
-mod mult_verification;
+pub mod mult_verification;
 mod offline;
 pub mod online;
 
@@ -50,9 +50,14 @@ impl WL16ASParty {
 
     fn verify_multiplications(&mut self) -> MpcResult<()> {
         let t = Instant::now();
-        match mult_verification::verify_multiplication_triples(self) {
+        let res = if self.inner.has_multi_threading() {
+            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check)
+        }else{
+            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check)
+        };
+        match res {
             Ok(true) => {
-                // println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
+                println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
                 Ok(())
             },
             Ok(false) => Err(MpcError::MultCheck),
@@ -77,15 +82,15 @@ impl BenchmarkProtocol for MalLUT16Benchmark {
         let prep_comm_stats = party.io().reset_comm_stats();
         println!("After pre-processing");
 
-        let input = aes::random_state(&mut party, simd);
+        let input = aes::random_state(&mut party.inner, simd);
         // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party);
+        let ks = aes::random_keyschedule(&mut party.inner);
 
         let start = Instant::now();
         let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
         println!("After AES: {}s", start.elapsed().as_secs_f64());
         // check all multipliction triples
-        party.verify_multiplications().unwrap();
+        party.finalize().unwrap();
         let duration = start.elapsed();
         let online_comm_stats = party.io().reset_comm_stats();
         println!("After online");
@@ -151,6 +156,14 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
     }
 }
 
+fn div16_ceil(n: usize) -> usize {
+    if n % 16 == 0 {
+        n / 16
+    }else{
+        n / 16 + 1
+    }
+}
+
 impl GF8InvBlackBox for WL16ASParty {
     #[inline]
     fn constant(&self, value: GF8) -> RssShare<GF8> {
@@ -160,7 +173,14 @@ impl GF8InvBlackBox for WL16ASParty {
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
         let n_rnd_ohv_ks = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
         let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
-        self.prepare_rand_ohv(n_rnd_ohv + n_rnd_ohv_ks)
+        self.prepare_rand_ohv(n_rnd_ohv + n_rnd_ohv_ks)?;
+        self.gf2_triples_to_check.reserve_for_more_triples(10 * n_blocks + div16_ceil(n_rnd_ohv_ks));
+
+        let n_mul_ks = (4 * 10 * n_keys * 3)/2; // 4 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
+        let n_mul = (16 * 10 * n_blocks * 3)/2; // 16 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
+        // allocate more memory for triples
+        self.gf4_triples_to_check.reserve_for_more_triples(n_mul_ks + n_mul);
+        Ok(())
     }
 
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {

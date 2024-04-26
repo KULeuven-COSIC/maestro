@@ -11,6 +11,7 @@ mod party;
 mod share;
 mod wollut16;
 mod wollut16_malsec;
+mod gf4_circuit_malsec;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -21,6 +22,7 @@ use crate::{
 use benchmark::BenchmarkProtocol;
 use chida::ChidaBenchmark;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use gf4_circuit_malsec::GF4CircuitASBenchmark;
 use itertools::Itertools;
 use network::ConnectedParty;
 use wollut16_malsec::MalLUT16Benchmark;
@@ -49,6 +51,7 @@ pub enum ProtocolVariant {
     GF4Circuit,
     Lut256,
     MalLut16,
+    MalGF4Circuit,
 }
 
 #[derive(Subcommand)]
@@ -209,6 +212,7 @@ impl ProtocolVariant {
             ProtocolVariant::Lut16 => &LUT16Benchmark,
             ProtocolVariant::Lut256 => &LUT256Benchmark,
             ProtocolVariant::MalLut16 => &MalLUT16Benchmark,
+            ProtocolVariant::MalGF4Circuit => &GF4CircuitASBenchmark,
         }
     }
 }

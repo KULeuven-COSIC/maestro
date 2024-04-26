@@ -1,5 +1,5 @@
 use crate::{
-    party::{error::MpcResult, ArithmeticBlackBox},
+    party::{error::MpcResult, ArithmeticBlackBox, Party},
     share::{gf8::GF8, RssShare},
 };
 #[cfg(feature = "verbose-timing")]
@@ -230,7 +230,7 @@ impl AesKeyState {
     }
 }
 
-pub fn random_state<Protocol: ArithmeticBlackBox<GF8>>(
+pub fn random_state<Protocol: Party>(
     party: &mut Protocol,
     size: usize,
 ) -> VectorAesState {
@@ -238,7 +238,7 @@ pub fn random_state<Protocol: ArithmeticBlackBox<GF8>>(
 }
 
 /// returns random key states for benchmarking purposes
-pub fn random_keyschedule<Protocol: ArithmeticBlackBox<GF8>>(
+pub fn random_keyschedule<Protocol: Party>(
     party: &mut Protocol,
 ) -> Vec<AesKeyState> {
     (0..11)

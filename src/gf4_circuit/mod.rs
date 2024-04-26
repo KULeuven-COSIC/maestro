@@ -13,7 +13,7 @@ use crate::{
     benchmark::{BenchmarkProtocol, BenchmarkResult},
     chida::{self, ChidaParty},
     network::{task::IoLayerOwned, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats, MainParty, Party},
+    party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats, MainParty, MulTripleRecorder, NoMulTripleRecording, Party},
     share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
@@ -43,9 +43,9 @@ pub fn gf4_circuit_benchmark(
     let mut party = GF4CircuitSemihonestParty::setup(connected, n_worker_threads).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
 
-    let input = aes::random_state(&mut party.0, simd);
+    let input = aes::random_state(party.0.as_party_mut(), simd);
     // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(&mut party.0);
+    let ks = aes::random_keyschedule(party.0.as_party_mut());
 
     let start = Instant::now();
     let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
@@ -87,9 +87,9 @@ impl BenchmarkProtocol for GF4CircuitBenchmark {
         let _setup_comm_stats = party.io().reset_comm_stats();
         println!("After setup");
 
-        let input = aes::random_state(&mut party.0, simd);
+        let input = aes::random_state(party.0.as_party_mut(), simd);
         // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party.0);
+        let ks = aes::random_keyschedule(party.0.as_party_mut());
 
         let start = Instant::now();
         let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
@@ -178,9 +178,9 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
         if self.0.has_multi_threading() && si.len() >= 2 * self.0.num_worker_threads() {
-            gf8_inv_via_gf4_mul_opt_mt(self.0.as_party_mut(), si, sii)
+            gf8_inv_via_gf4_mul_opt_mt(self.0.as_party_mut(), &mut NoMulTripleRecording, si, sii)
         } else {
-            gf8_inv_via_gf4_mul_opt(self.0.as_party_mut(), si, sii)
+            gf8_inv_via_gf4_mul_opt(self.0.as_party_mut(), &mut NoMulTripleRecording, si, sii)
         }
     }
 }
@@ -265,41 +265,46 @@ fn gf8_inv_via_gf4_mul<P: ArithmeticBlackBox<GF4>>(
     Ok(())
 }
 
-fn gf8_inv_via_gf4_mul_opt(
+pub fn gf8_inv_via_gf4_mul_opt<Rec: MulTripleRecorder<BsGF4>>(
     party: &mut MainParty,
+    triple_rec: &mut Rec,
     si: &mut [GF8],
     sii: &mut [GF8],
 ) -> MpcResult<()> {
-    gf8_inv_via_gf4_mul_opt_no_sync(party, si, sii)?;
+    gf8_inv_via_gf4_mul_opt_no_sync(party, triple_rec, si, sii)?;
     party.wait_for_completion();
     Ok(())
 }
 
-fn gf8_inv_via_gf4_mul_opt_mt(
+pub fn gf8_inv_via_gf4_mul_opt_mt<Rec: MulTripleRecorder<BsGF4>>(
     party: &mut MainParty,
+    triple_rec: &mut Rec,
     si: &mut [GF8],
     sii: &mut [GF8],
 ) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     let ranges = party.split_range_equally_even(si.len());
     let chunk_size = ranges[0].1 - ranges[0].0;
-    let thread_parties = party.create_thread_parties(ranges);
-    party.run_in_threadpool(|| {
+    let thread_parties = party.create_thread_parties_with_additional_data(ranges, |start, end| Some(triple_rec.create_thread_mul_triple_recorder(start, end)));
+    let observed_triples = party.run_in_threadpool(|| {
         thread_parties
             .into_par_iter()
             .zip_eq(si.par_chunks_mut(chunk_size))
             .zip_eq(sii.par_chunks_mut(chunk_size))
             .map(|((mut thread_party, si), sii)| {
-                gf8_inv_via_gf4_mul_opt_no_sync(&mut thread_party, si, sii)
+                let mut rec = thread_party.additional_data.take().unwrap();
+                gf8_inv_via_gf4_mul_opt_no_sync(&mut thread_party, &mut rec, si, sii).map(|()| rec)
             })
-            .collect::<MpcResult<Vec<()>>>()
+            .collect::<MpcResult<Vec<_>>>()
     })?;
+    triple_rec.join_thread_mul_triple_recorders(observed_triples);
     party.wait_for_completion();
     Ok(())
 }
 
-fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(
+fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party, Rec: MulTripleRecorder<BsGF4>>(
     party: &mut P,
+    triple_rec: &mut Rec,
     si: &mut [GF8],
     sii: &mut [GF8],
 ) -> MpcResult<()> {
@@ -315,6 +320,8 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(
     let mut vi = vec![BsGF4::default(); n];
     let mut vii = vec![BsGF4::default(); n];
     chida::online::mul_no_sync(party, &mut vi, &mut vii, &ah_i, &ah_ii, &al_i, &al_ii)?;
+    triple_rec.record_mul_triple(&ah_i, &ah_ii, &al_i, &al_ii, &vi, &vii);
+
     izip!(vi.iter_mut(), &ah_i, &al_i).for_each(|(dst, ah, al)| {
         *dst += ah.square_mul_e() + al.square();
         *dst = dst.square();
@@ -339,6 +346,7 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(
         &vp4_si,
         &vp4_sii,
     )?;
+    triple_rec.record_mul_triple(&vi, &vii, &vp4_si, &vp4_sii, &vp6_si, &vp6_sii);
 
     vp4_si.iter_mut().for_each(|x| *x = x.square());
     vp4_sii.iter_mut().for_each(|x| *x = x.square());
@@ -356,6 +364,7 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(
         &vp8_si,
         &vp8_sii,
     )?;
+    triple_rec.record_mul_triple(&vp6_si, &vp6_sii, &vp8_si, &vp8_sii, &v_inv_i, &v_inv_ii);
 
     // compute bh = ah * v_inv and bl = (ah + al) * v_inv
     let mut bh_bl_i = vec![BsGF4::default(); 2 * n];
@@ -381,6 +390,7 @@ fn gf8_inv_via_gf4_mul_opt_no_sync<P: Party>(
         &v_inv_v_inv_i,
         &v_inv_v_inv_ii,
     )?;
+    triple_rec.record_mul_triple(&ah_al_i, &ah_al_ii, &v_inv_v_inv_i, &v_inv_v_inv_ii, &bh_bl_i, &bh_bl_ii);
 
     un_wol_bitslice_gf4(&bh_bl_i[..n], &bh_bl_i[n..], si);
     un_wol_bitslice_gf4(&bh_bl_ii[..n], &bh_bl_ii[n..], sii);

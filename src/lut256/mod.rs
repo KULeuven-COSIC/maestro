@@ -82,9 +82,9 @@ pub fn lut256_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads
     let prep_duration = start_prep.elapsed();
     let prep_comm_stats = party.io().reset_comm_stats();
 
-    let input = aes::random_state(&mut party.inner, simd);
+    let input = aes::random_state(party.inner.as_party_mut(), simd);
     // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(&mut party.inner);
+    let ks = aes::random_keyschedule(party.inner.as_party_mut());
 
     let start = Instant::now();
     let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
@@ -132,9 +132,9 @@ impl BenchmarkProtocol for LUT256Benchmark {
         let prep_duration = start_prep.elapsed();
         let prep_comm_stats = party.io().reset_comm_stats();
         println!("After pre-processing");
-        let input = aes::random_state(&mut party.inner, simd);
+        let input = aes::random_state(party.inner.as_party_mut(), simd);
         // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party.inner);
+        let ks = aes::random_keyschedule(party.inner.as_party_mut());
 
         let start = Instant::now();
         let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();

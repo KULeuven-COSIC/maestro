@@ -91,9 +91,9 @@ pub fn chida_benchmark(
 ) {
     let mut party = ChidaBenchmarkParty::setup(connected, variant, n_worker_threads).unwrap();
     let setup_comm_stats = party.inner.0.io().reset_comm_stats();
-    let input = aes::random_state(&mut party.inner, simd);
+    let input = aes::random_state(party.inner.as_party_mut(), simd);
     // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(&mut party.inner);
+    let ks = aes::random_keyschedule(party.inner.as_party_mut());
 
     let start = Instant::now();
     let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
@@ -135,9 +135,9 @@ impl BenchmarkProtocol for ChidaBenchmark {
         let mut party =
             ChidaBenchmarkParty::setup(conn, ImplVariant::Optimized, n_worker_threads).unwrap();
         let _setup_comm_stats = party.inner.0.io().reset_comm_stats();
-        let input = aes::random_state(&mut party.inner, simd);
+        let input = aes::random_state(party.inner.as_party_mut(), simd);
         // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party.inner);
+        let ks = aes::random_keyschedule(party.inner.as_party_mut());
         println!("After setup");
 
         let start = Instant::now();
