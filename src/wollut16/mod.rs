@@ -5,6 +5,8 @@
 //! 1) Use the WOL[^note] transform to convert the element `GF(2^8)` to `GF(2^4)^2`.
 //! 2) Compute the inverse of the `GF(2^4)^2` element using a single inversion in `GF(2^4)`. To compute the `GF(2^4)` inversion a pre-processed lookup table of 16-bits is used.
 //! 3) Use the reverse WOL transform to convert the result to `GF(2^8)`.
+//! 
+//! The *maliciously-secure* variant of this protocol is found in [crate::wollut16_malsec].
 //!
 //! This module notably contains
 //!   - [wollut16_benchmark] that implements the AES benchmark

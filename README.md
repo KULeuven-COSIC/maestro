@@ -174,3 +174,12 @@ lut256		Prep. Throughput: 25978	Online Throughput: 386774	Prep. Time: 28.8702120
 
 ## Raw Data of the benchmarks reported in the paper
 todo
+
+## Documentation
+
+All details on the implemented protocols are found in the research paper. 
+
+To generate and view the code documentation run
+```
+cargo doc --open
+```
