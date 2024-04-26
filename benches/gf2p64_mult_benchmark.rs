@@ -1,5 +1,5 @@
 use criterion::*;
-use dist_dec::share::{gf2p64::GF2p64, FieldRngExt};
+use rep3_aes::share::{gf2p64::GF2p64, FieldRngExt};
 use rand::*;
 
 fn bench_multiplication(c: &mut Criterion) {

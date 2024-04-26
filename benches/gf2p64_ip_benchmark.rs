@@ -1,5 +1,5 @@
 use criterion::*;
-use dist_dec::share::{gf2p64::GF2p64, FieldRngExt, RssShare};
+use rep3_aes::share::{gf2p64::GF2p64, FieldRngExt, RssShare};
 use rand::{rngs::ThreadRng, thread_rng};
 
 pub fn random_rss(n: usize) -> Vec<RssShare<GF2p64>>
