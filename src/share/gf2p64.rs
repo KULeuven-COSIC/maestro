@@ -208,15 +208,13 @@ impl GF2p64 {
         target_feature = "pclmulqdq"
     ))]
     pub fn fast_clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
-        use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128, _mm_setzero_si128};
-        let wrdcar: __m128i =  a.iter().zip(b).fold(_mm_setzero_si128(), |wrdcar, (a, b)| {
-            unsafe { 
+        use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128, _mm_setzero_si128, _mm_xor_si128};
+        let wrdcar: __m128i = unsafe { a.iter().zip(b).fold(_mm_setzero_si128(), |wrdcar, (a, b)| {
                 let x = _mm_set_epi64x(0, a.0 as i64);
                 let y = _mm_set_epi64x(0, b.0 as i64);
                 let res = _mm_clmulepi64_si128(x, y, 0);
                 _mm_xor_si128(wrdcar, res)
-            }
-        });
+        })};
         let mut cc: [u64; 2] = [0u64, 0u64];
         unsafe { _mm_storeu_si128(&mut cc as *mut _ as *mut __m128i, wrdcar) };
         let word = cc[0];
