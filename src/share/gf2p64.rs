@@ -101,9 +101,6 @@ impl GF2p64 {
     fn clmul_u64(&self, other: &Self) -> (u64, u64) {
         use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
 
-        let mut word = 0u64;
-        let mut carry = 0u64;
-
         let x: __m128i = unsafe { _mm_set_epi64x(0, self.0 as i64) };
         let y: __m128i = unsafe { _mm_set_epi64x(0, other.0 as i64) };
         let clmul: __m128i = unsafe { _mm_clmulepi64_si128(x, y, 0) };
@@ -182,6 +179,23 @@ impl GF2p64 {
             let (w, c) = Self::clmul_u64(a, b);
             (wrd ^ w, car ^ c)
         });
+        Self::propagate_carries(word, carry)
+    }
+
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "aarch64",
+        target_feature = "neon",
+        target_feature = "aes"
+    ))]
+    pub fn fast_clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
+        use std::arch::aarch64::vmull_p64;
+        let wrdcar =  a.iter().zip(b).fold(0, |wrdcar, (a, b)| {
+            let res = unsafe { vmull_p64(a.0, b.0) };
+            wrdcar ^ res
+        });
+        let word = wrdcar as u64;
+        let carry = (wrdcar >> 64) as u64;        
         Self::propagate_carries(word, carry)
     }
 

@@ -47,3 +47,8 @@ required-features = ["clmul"]
 name = "gf2p64_ip_benchmark"
 harness = false
 required-features = ["clmul"]
+
+[[bench]]
+name = "clmul_bench"
+harness = false
+required-features = ["clmul"]
