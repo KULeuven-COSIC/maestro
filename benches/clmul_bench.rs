@@ -4,7 +4,7 @@ use rand::thread_rng;
 
 fn clmul_bench_variants(c: &mut Criterion) {
     let mut rng = thread_rng();
-    let n: usize = 32768;
+    let n: usize = 2*32768;
     let x: Vec<GF2p64> = rng.generate(n);
     let y: Vec<GF2p64> = rng.generate(n);
     let x1 = x.clone();
@@ -12,17 +12,19 @@ fn clmul_bench_variants(c: &mut Criterion) {
     let x2 = x.clone();
     let y2 = y.clone();
 
+    /* 
     #[allow(deprecated)]
     c.bench_function("Basic", move |b| {
         b.iter(|| GF2p64::fallback_inner_product(&x, &y))
     });
+    */
 
     c.bench_function("Delayed", move |b| {
-        b.iter(|| GF2p64::clmul_inner_product(&x1, &y1))
+        b.iter(|| GF2p64::clmul_inner_product(&x, &y))
     });
 
     c.bench_function("Delayed u128", move |b| {
-        b.iter(|| GF2p64::fast_clmul_inner_product(&x2, &y2))
+        b.iter(|| GF2p64::fast_clmul_inner_product(&x1, &y1))
     });
    
 }

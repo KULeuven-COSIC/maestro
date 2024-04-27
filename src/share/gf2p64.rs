@@ -189,13 +189,38 @@ impl GF2p64 {
         target_feature = "aes"
     ))]
     pub fn fast_clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
-        use std::arch::aarch64::vmull_p64;
+        use std::arch::aarch64::{vaddq_p128, vmull_p64};
         let wrdcar =  a.iter().zip(b).fold(0, |wrdcar, (a, b)| {
-            let res = unsafe { vmull_p64(a.0, b.0) };
-            wrdcar ^ res
+            unsafe { 
+                let res = vmull_p64(a.0, b.0);
+                vaddq_p128(wrdcar,res)
+            }
         });
         let word = wrdcar as u64;
         let carry = (wrdcar >> 64) as u64;        
+        Self::propagate_carries(word, carry)
+    }
+
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "x86_64",
+        target_feature = "sse2",
+        target_feature = "pclmulqdq"
+    ))]
+    pub fn fast_clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
+        use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
+        let wrdcar =  a.iter().zip(b).fold(0, |wrdcar, (a, b)| {
+            unsafe { 
+                let x = _mm_set_epi64x(0, a.0 as i64);
+                let y = _mm_set_epi64x(0, b.0 as i64);
+                let res = _mm_clmulepi64_si128(x, y, 0);
+                _mm_xor_si128(wrdcar, res)
+            }
+        });
+        let mut cc: [u64; 2] = [0u64, 0u64];
+        unsafe { _mm_storeu_si128(&mut cc as *mut _ as *mut __m128i, wrdcar) };
+        let word = cc[0];
+        let carry = cc[1];  
         Self::propagate_carries(word, carry)
     }
 
@@ -770,6 +795,23 @@ mod test {
         assert_eq!(
             GF2p64::fallback_inner_product(&a, &b),
             GF2p64::inner_product(&a, &b)
+        )
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "aarch64",
+        target_feature = "neon",
+        target_feature = "aes"
+    ))]
+    fn fast_test_inner_product() {
+        let mut rng = thread_rng();
+        let a: Vec<GF2p64> = rng.generate(29);
+        let b: Vec<GF2p64> = rng.generate(29);
+        assert_eq!(
+            GF2p64::inner_product(&a, &b),
+            GF2p64::fast_clmul_inner_product(&a, &b)
         )
     }
 
