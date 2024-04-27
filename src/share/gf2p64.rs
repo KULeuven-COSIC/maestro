@@ -119,24 +119,32 @@ impl GF2p64 {
         target_feature = "pclmulqdq"
     ))]
     fn propagate_carry_fast(word: u64, carry: u64) -> Self {
-        use std::arch::aarch64::vmull_p64;
+        use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128, _mm_xor_si128};
         unsafe{
-            use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
-            let poly = _mm_set_epi64x(0, GF2p64::MOD_MINUS_XN);
-            let carry = _mm_set_epi64x((carry >> (Self::NBITS - 4)) ^ (carry >> (Self::NBITS - 3)) ^ (carry >> (Self::NBITS - 1)), carry);
+            let carry2 = (carry >> (Self::NBITS - 4)) ^ (carry >> (Self::NBITS - 3)) ^ (carry >> (Self::NBITS - 1));
+            let poly = _mm_set_epi64x(0, GF2p64::MOD_MINUS_XN as i64);
+            let carry = _mm_set_epi64x(carry2 as i64, carry as i64);
             let w = _mm_xor_si128(_mm_clmulepi64_si128(carry, poly, 0),_mm_clmulepi64_si128(carry, poly, 1));
             let mut res: [u64; 2] = [0u64, 0u64];
-            unsafe { _mm_storeu_si128(&mut res as *mut _ as *mut __m128i, w) };
+            _mm_storeu_si128(&mut res as *mut _ as *mut __m128i, w);
             Self(word ^ res[0])
         }
     }
 
-    #[cfg(all(
-        feature = "clmul",
-        target_arch = "aarch64",
-        target_feature = "neon",
-        target_feature = "aes"
-    ))] 
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
     pub fn mul_clmul_u64_fast(&self, other: &Self) -> Self {
         let (word, carry) = Self::clmul_u64(self, other);
         Self::propagate_carry_fast(word, carry)
@@ -864,13 +872,21 @@ mod test {
         )
     }
 
-    #[test]
-    #[cfg(all(
-        feature = "clmul",
-        target_arch = "aarch64",
-        target_feature = "neon",
-        target_feature = "aes"
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
     ))]
+    #[test]
     fn test_fast_mul() {
         let mut rng = thread_rng();
         let a: Vec<GF2p64> = rng.generate(128);
