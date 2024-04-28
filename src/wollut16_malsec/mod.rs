@@ -1,4 +1,18 @@
-//! This module implements the maliciously-secure oblivious AES protocol "WOL LUT 16".
+//! This module implements the *maliciously-secure* oblivious AES protocol "WOL LUT 16".
+//! 
+//! The core is a sub-protocol (`Protocol 3`) to compute multiplicative inverses in `GF(2^8)`.
+//! This works as follows:
+//! 1) Use the WOL[^note] transform to convert the element `GF(2^8)` to `GF(2^4)^2`.
+//! 2) Compute the inverse of the `GF(2^4)^2` element using a single inversion in `GF(2^4)`. To compute the `GF(2^4)` inversion a pre-processed lookup table of 16-bits is used.
+//! 3) Use the reverse WOL transform to convert the result to `GF(2^8)`.
+//! 
+//! The main difference to the *semi-honest* WOL LUT 16 in [crate::wollut16] is that we in addition have a verification phase for multiplication triples generated during the protocol execution.
+//! TODO: Add brief text on consistency check for views of different parties.
+//!
+//! This module notably contains
+//!   - [WL16ASParty] the party wrapper for the protocol.
+//!
+//! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 
 use std::time::Instant;
 

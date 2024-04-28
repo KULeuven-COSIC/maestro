@@ -91,6 +91,65 @@ impl GF2p64 {
         Self(word)
     }
 
+
+    /// Carry propagation for CLMUL (cf. <https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs>)
+    /// Requires the `clmul` feature.
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "aarch64",
+        target_feature = "neon",
+        target_feature = "aes"
+    ))]
+    fn propagate_carry_fast(word: u64, carry: u64) -> Self {
+        use std::arch::aarch64::vmull_p64;
+        unsafe{
+            let c1 = vmull_p64(carry,GF2p64::MOD_MINUS_XN);
+            let carry = (carry >> (Self::NBITS - 4)) ^ (carry >> (Self::NBITS - 3)) ^ (carry >> (Self::NBITS - 1));
+            let c2 = vmull_p64(carry,GF2p64::MOD_MINUS_XN);
+            Self(word ^ c1 as u64 ^ c2 as u64)
+        }
+    }
+
+    /// Carry propagation for CLMUL (cf. <https://github.com/gendx/horcrux/blob/main/horcrux/src/gf2n.rs>)
+    /// Requires the `clmul` feature.
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "x86_64",
+        target_feature = "sse2",
+        target_feature = "pclmulqdq"
+    ))]
+    fn propagate_carry_fast(word: u64, carry: u64) -> Self {
+        use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128, _mm_xor_si128};
+        unsafe{
+            let carry2 = (carry >> (Self::NBITS - 4)) ^ (carry >> (Self::NBITS - 3)) ^ (carry >> (Self::NBITS - 1));
+            let poly = _mm_set_epi64x(0, GF2p64::MOD_MINUS_XN as i64);
+            let carry = _mm_set_epi64x(carry2 as i64, carry as i64);
+            let w = _mm_xor_si128(_mm_clmulepi64_si128(carry, poly, 0),_mm_clmulepi64_si128(carry, poly, 1));
+            let mut res: [u64; 2] = [0u64, 0u64];
+            _mm_storeu_si128(&mut res as *mut _ as *mut __m128i, w);
+            Self(word ^ res[0])
+        }
+    }
+
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    pub fn mul_clmul_u64_fast(&self, other: &Self) -> Self {
+        let (word, carry) = Self::clmul_u64(self, other);
+        Self::propagate_carry_fast(word, carry)
+    }
+
     /// Carryless multiplication for x86 architecture, requires the `clmul` feature.
     #[cfg(all(
         feature = "clmul",
@@ -100,9 +159,6 @@ impl GF2p64 {
     ))]
     fn clmul_u64(&self, other: &Self) -> (u64, u64) {
         use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
-
-        let mut word = 0u64;
-        let mut carry = 0u64;
 
         let x: __m128i = unsafe { _mm_set_epi64x(0, self.0 as i64) };
         let y: __m128i = unsafe { _mm_set_epi64x(0, other.0 as i64) };
@@ -182,6 +238,46 @@ impl GF2p64 {
             let (w, c) = Self::clmul_u64(a, b);
             (wrd ^ w, car ^ c)
         });
+        Self::propagate_carries(word, carry)
+    }
+
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "aarch64",
+        target_feature = "neon",
+        target_feature = "aes"
+    ))]
+    pub fn fast_clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
+        use std::arch::aarch64::{vaddq_p128, vmull_p64};
+        let wrdcar =  a.iter().zip(b).fold(0, |wrdcar, (a, b)| {
+            unsafe { 
+                let res = vmull_p64(a.0, b.0);
+                vaddq_p128(wrdcar,res)
+            }
+        });
+        let word = wrdcar as u64;
+        let carry = (wrdcar >> 64) as u64;        
+        Self::propagate_carry_fast(word, carry)
+    }
+
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "x86_64",
+        target_feature = "sse2",
+        target_feature = "pclmulqdq"
+    ))]
+    pub fn fast_clmul_inner_product(a: &[Self], b: &[Self]) -> Self {
+        use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128, _mm_setzero_si128, _mm_xor_si128};
+        let wrdcar: __m128i = unsafe { a.iter().zip(b).fold(_mm_setzero_si128(), |wrdcar, (a, b)| {
+                let x = _mm_set_epi64x(0, a.0 as i64);
+                let y = _mm_set_epi64x(0, b.0 as i64);
+                let res = _mm_clmulepi64_si128(x, y, 0);
+                _mm_xor_si128(wrdcar, res)
+        })};
+        let mut cc: [u64; 2] = [0u64, 0u64];
+        unsafe { _mm_storeu_si128(&mut cc as *mut _ as *mut __m128i, wrdcar) };
+        let word = cc[0];
+        let carry = cc[1];  
         Self::propagate_carries(word, carry)
     }
 
@@ -827,6 +923,47 @@ mod test {
             GF2p64::fallback_inner_product(&a, &b),
             GF2p64::inner_product(&a, &b)
         )
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "aarch64",
+        target_feature = "neon",
+        target_feature = "aes"
+    ))]
+    fn fast_test_inner_product() {
+        let mut rng = thread_rng();
+        let a: Vec<GF2p64> = rng.generate(29);
+        let b: Vec<GF2p64> = rng.generate(29);
+        assert_eq!(
+            GF2p64::inner_product(&a, &b),
+            GF2p64::fast_clmul_inner_product(&a, &b)
+        )
+    }
+
+    #[cfg(any(
+        all(
+            feature = "clmul",
+            target_arch = "x86_64",
+            target_feature = "sse2",
+            target_feature = "pclmulqdq"
+        ),
+        all(
+            feature = "clmul",
+            target_arch = "aarch64",
+            target_feature = "neon",
+            target_feature = "aes"
+        )
+    ))]
+    #[test]
+    fn test_fast_mul() {
+        let mut rng = thread_rng();
+        let a: Vec<GF2p64> = rng.generate(128);
+        let b: Vec<GF2p64> = rng.generate(128);
+        a.into_iter().zip(b).for_each(|(a, b)| {
+            assert_eq!(a*b, GF2p64::mul_clmul_u64_fast(&a,&b))
+        });
     }
 
     #[cfg(any(
