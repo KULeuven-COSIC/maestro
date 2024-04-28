@@ -39,17 +39,24 @@ def print_throughput(view):
     assert((view['simd'] == list(view['simd'])[0]).all())
     prep_avg = '-'
     prep_throughput = '-'
+    
+    online_avg = view['online-time'].mean()
+    online_throughput = math.floor(simd/online_avg)
+    
     if list(view['pre-processing-time'])[0] != 0:
         prep_avg = view['pre-processing-time'].mean()
         prep_throughput = math.floor(simd/prep_avg)
-    online_avg = view['online-time'].mean()
-    online_throughput = math.floor(simd/online_avg)
+        total_throughput = math.floor(simd/(prep_avg+online_avg))
+    else:
+        total_throughput = online_throughput
+    
+    
     
     prep_data_sent = view['pre-processing-bytes-sent-to-next'].max() + view['pre-processing-bytes-sent-to-prev'].max()
     prep_data_received = view['pre-processing-bytes-received-from-next'].max() + view['pre-processing-bytes-received-from-prev'].max()
     online_data_sent = view['online-bytes-sent-to-next'].max() + view['online-bytes-sent-to-prev'].max()
     online_data_received = view['online-bytes-received-from-next'].max() + view['online-bytes-received-from-prev'].max()
-    print(f'Prep. Throughput: {prep_throughput}\tOnline Throughput: {online_throughput}\tPrep. Time: {prep_avg}s\tOnline Time: {online_avg}s\tPrep. Data: {max(prep_data_sent, prep_data_received)} byte\tOnline Data: {max(online_data_sent, online_data_received)} byte')
+    print(f'Prep. Throughput: {prep_throughput}\tOnline Throughput: {online_throughput}\tTotal throughout: {total_throughput}\tPrep. Time: {prep_avg}s\tOnline Time: {online_avg}s\tPrep. Data: {max(prep_data_sent, prep_data_received)} byte\tOnline Data: {max(online_data_sent, online_data_received)} byte')
 
 protocols = list(set(df['protocol']))
 protocols.sort()
