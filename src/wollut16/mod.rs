@@ -155,7 +155,7 @@ impl BenchmarkProtocol for LUT16Benchmark {
         let online_comm_stats = party.io().reset_comm_stats();
         println!("After online");
         let _ = aes::output(&mut party.inner, output).unwrap();
-        println!("After outout");
+        println!("After output");
         party.inner.teardown().unwrap();
         println!("After teardown");
 

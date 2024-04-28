@@ -17,6 +17,8 @@ pub mod online;
 pub struct WL16ASParty{
     inner: MainParty,
     prep_ohv: Vec<RndOhvOutput>,
+    check_after_prep: bool,
+    check_after_sbox: bool,
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<BsGF4>,
     gf2_triples_to_check: MulTripleVector<BsBool16>,
@@ -24,10 +26,12 @@ pub struct WL16ASParty{
 }
 
 impl WL16ASParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
+            check_after_prep,
+            check_after_sbox,
             gf4_triples_to_check: MulTripleVector::new(),
             gf2_triples_to_check: MulTripleVector::new(),
             broadcast_context: BroadcastContext::new(),
@@ -40,6 +44,9 @@ impl WL16ASParty {
         }else{
             offline::generate_random_ohv16(self, n)?
         };
+        if self.check_after_prep {
+            self.verify_multiplications()?;
+        }
         if self.prep_ohv.is_empty() {
             self.prep_ohv = new;
         } else {
@@ -67,45 +74,70 @@ impl WL16ASParty {
 }
 
 pub struct MalLUT16Benchmark;
+pub struct MalLUT16PrepCheckBenchmark;
+
+pub struct MalLUT16AllCheckBenchmark;
+
+fn run(conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, check_after_prep: bool, check_after_sbox: bool) -> BenchmarkResult {
+    let mut party = WL16ASParty::setup(conn, check_after_prep, check_after_sbox, n_worker_threads).unwrap();
+    let _setup_comm_stats = party.io().reset_comm_stats();
+    println!("After setup");
+    let start_prep = Instant::now();
+    party.do_preprocessing(0, simd).unwrap();
+    let prep_duration = start_prep.elapsed();
+    let prep_comm_stats = party.io().reset_comm_stats();
+    println!("After pre-processing");
+
+    let input = aes::random_state(&mut party.inner, simd);
+    // create random key states for benchmarking purposes
+    let ks = aes::random_keyschedule(&mut party.inner);
+
+    let start = Instant::now();
+    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+    println!("After AES: {}s", start.elapsed().as_secs_f64());
+    // check all multipliction triples
+    party.finalize().unwrap();
+    let duration = start.elapsed();
+    let online_comm_stats = party.io().reset_comm_stats();
+    println!("After online");
+    let _ = aes::output(&mut party, output).unwrap();
+    println!("After output");
+    party.inner.teardown().unwrap();
+    println!("After teardown");
+
+    BenchmarkResult::new(
+        prep_duration,
+        duration,
+        prep_comm_stats,
+        online_comm_stats,
+        party.inner.get_additional_timers(),
+    )
+}
 
 impl BenchmarkProtocol for MalLUT16Benchmark {
     fn protocol_name(&self) -> String {
         "mal-lut16".to_string()
     }
     fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-        let mut party = WL16ASParty::setup(conn, n_worker_threads).unwrap();
-        let _setup_comm_stats = party.io().reset_comm_stats();
-        println!("After setup");
-        let start_prep = Instant::now();
-        party.do_preprocessing(0, simd).unwrap();
-        let prep_duration = start_prep.elapsed();
-        let prep_comm_stats = party.io().reset_comm_stats();
-        println!("After pre-processing");
+        run(conn, simd, n_worker_threads, false, false)
+    }
+}
 
-        let input = aes::random_state(&mut party.inner, simd);
-        // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party.inner);
+impl BenchmarkProtocol for MalLUT16PrepCheckBenchmark {
+    fn protocol_name(&self) -> String {
+        "mal-lut16-prep-check".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        run(conn, simd, n_worker_threads, true, false)
+    }
+}
 
-        let start = Instant::now();
-        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-        println!("After AES: {}s", start.elapsed().as_secs_f64());
-        // check all multipliction triples
-        party.finalize().unwrap();
-        let duration = start.elapsed();
-        let online_comm_stats = party.io().reset_comm_stats();
-        println!("After online");
-        let _ = aes::output(&mut party, output).unwrap();
-        println!("After outout");
-        party.inner.teardown().unwrap();
-        println!("After teardown");
-
-        BenchmarkResult::new(
-            prep_duration,
-            duration,
-            prep_comm_stats,
-            online_comm_stats,
-            party.inner.get_additional_timers(),
-        )
+impl BenchmarkProtocol for MalLUT16AllCheckBenchmark {
+    fn protocol_name(&self) -> String {
+        "mal-lut16-all-check".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        run(conn, simd, n_worker_threads, true, true)
     }
 }
 
@@ -197,6 +229,9 @@ impl GF8InvBlackBox for WL16ASParty {
         // remove used pre-processing material
         self.prep_ohv.truncate(remainning);
         self.inner.io().wait_for_completion();
+        if self.check_after_sbox {
+            self.verify_multiplications()?;
+        }
         Ok(())
     }
 }
@@ -214,7 +249,7 @@ mod test {
 
     pub fn localhost_setup_wl16as<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,WL16ASParty)>, JoinHandle<(T2,WL16ASParty)>, JoinHandle<(T3,WL16ASParty)>) {
         fn adapter<T, Fx: FnOnce(&mut WL16ASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16ASParty) {
-            let mut party = WL16ASParty::setup(conn, n_worker_threads).unwrap();
+            let mut party = WL16ASParty::setup(conn, false, false, n_worker_threads).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

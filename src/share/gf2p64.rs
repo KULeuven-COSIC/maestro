@@ -509,6 +509,76 @@ impl InnerProduct for GF2p64 {
     }
 }
 
+pub struct GF2p64InnerProd {
+    #[cfg(not(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    )))]
+    el: GF2p64,
+    #[cfg(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    ))]
+    word: u64,
+    #[cfg(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    ))]
+    carry: u64,
+}
+
+impl GF2p64InnerProd {
+    #[cfg(not(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    )))]
+    pub fn new() -> Self {
+        Self { el: GF2p64::ZERO }
+    }
+
+    #[cfg(not(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    )))]
+    pub fn add_prod(&mut self, a: &GF2p64, b: &GF2p64) {
+        self.el += *a * *b;
+    }
+
+    #[cfg(not(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    )))]
+    pub fn sum(self) -> GF2p64 {
+        self.el
+    }
+
+    #[cfg(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    ))]
+    pub fn new() -> Self {
+        Self { word: 0u64, carry: 0u64 }
+    }
+
+    #[cfg(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    ))]
+    pub fn add_prod(&mut self, a: &GF2p64, b: &GF2p64) {
+        let (w, c) = GF2p64::clmul_u64(a, b);
+        self.word ^= w;
+        self.carry ^= c;
+    }
+
+    #[cfg(any(
+        all(feature = "clmul",target_arch = "x86_64", target_feature = "sse2", target_feature = "pclmulqdq"),
+        all(feature = "clmul", target_arch = "aarch64", target_feature = "neon", target_feature = "aes")
+    ))]
+    pub fn sum(self) -> GF2p64 {
+        GF2p64::propagate_carries(self.word, self.carry)
+    }
+}
+
 impl Debug for GF2p64 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "GF2p64(0x{:016x})", self.0)
@@ -655,7 +725,7 @@ mod test {
     ))]
     use crate::share::test::random_secret_shared_vector;
 
-    use super::GF2p64;
+    use super::{GF2p64, GF2p64InnerProd};
 
     fn get_test_values() -> Vec<GF2p64> {
         vec![
@@ -781,5 +851,20 @@ mod test {
             GF2p64::fallback_weak_ip(&a, &b),
             GF2p64::clmul_weak_inner_product(&a, &b)
         )
+    }
+    
+    #[test]
+    fn test_inner_gf2p64_inner_prod_correctness() {
+        let mut rng = thread_rng();
+        let a: Vec<GF2p64> = rng.generate(29);
+        let b: Vec<GF2p64> = rng.generate(29);
+
+        let expected = GF2p64::inner_product(&a, &b);
+        let mut actual = GF2p64InnerProd::new();
+        for (a,b) in a.iter().zip(b.iter()) {
+            actual.add_prod(a, b);
+        }
+        let actual = actual.sum();
+        assert_eq!(expected, actual);
     }
 }

@@ -9,7 +9,7 @@ use crate::{
     network::task::Direction,
     party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, MainParty, MulTripleVector, Party},
     share::{
-        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64Subfield}, gf4::BsGF4, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare, RssShareVec
+        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare, RssShareVec
     },
 };
 
@@ -19,6 +19,8 @@ pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut Broadc
     let k1 = gf4_triples.len() * 2; //each BsGF4 contains two values
     let k2 = gf2_triples.len() * 16; //each BsBool16 contains 16 values
     let n = (k1+k2).checked_next_power_of_two().expect("n too large");
+
+    let add_triples_time = Instant::now();
 
     let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
     let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
@@ -38,6 +40,7 @@ pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut Broadc
         z = add_gf2_triples(&mut x_vec[k1..(k1+k2)], &mut y_vec[k1..(k1+k2)], ai, aii, bi, bii, ci, cii, z, weight, r);
         gf2_triples.clear();
     }
+    println!("add_triples_time={}s", add_triples_time.elapsed().as_secs_f64());
     verify_dot_product_opt(party, context, x_vec, y_vec, z)
 }
 
@@ -50,6 +53,7 @@ pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut Bro
         // don't use multi-threading for such small task
         return verify_multiplication_triples(party, context, gf4_triples, gf2_triples);
     }
+    let add_triples_time = Instant::now();
 
     let n_threads = party.num_worker_threads();
     let chunk_size_gf4 = party.chunk_size_for_task(gf4_triples.len());
@@ -105,6 +109,7 @@ pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut Bro
         })?;
         gf2_triples.clear();
     }
+    println!("Add triples: {}", add_triples_time.elapsed().as_secs_f64());
     verify_dot_product_opt(party, context, x_vec, y_vec, z)
 }
 
@@ -112,6 +117,8 @@ fn add_gf4_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>
     debug_assert_eq!(x_vec.len(), y_vec.len());
     debug_assert_eq!(x_vec.len(), 2*ai.len());
     let mut z = z_init;
+    let mut z_i = GF2p64InnerProd::new();
+    let mut z_ii = GF2p64InnerProd::new();
     let mut weight = rand;
     let mut i = 0;
     izip!(ai, aii, bi, bii, ci, cii).for_each(|(ai, aii, bi, bii, ci, cii)| {
@@ -123,14 +130,20 @@ fn add_gf4_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>
         let (cii1, cii2) = cii.unpack();
         x_vec[i] = embed_sharing(ai1, aii1).mul_by_sc(weight);
         y_vec[i] = embed_sharing(bi1, bii1);
-        z += embed_sharing(ci1, cii1).mul_by_sc(weight);
+        z_i.add_prod(&ci1.embed(), &weight);
+        z_ii.add_prod(&cii1.embed(), &weight);
+        // z += embed_sharing(ci1, cii1).mul_by_sc(weight);
         weight *= rand;
         x_vec[i + 1] = embed_sharing(ai2, aii2).mul_by_sc(weight);
         y_vec[i + 1] = embed_sharing(bi2, bii2);
-        z += embed_sharing(ci2, cii2).mul_by_sc(weight);
+        z_i.add_prod(&ci2.embed(), &weight);
+        z_ii.add_prod(&cii2.embed(), &weight);
+        // z += embed_sharing(ci2, cii2).mul_by_sc(weight);
         weight *= rand;
         i += 2;
     });
+    z.si += z_i.sum();
+    z.sii += z_ii.sum();
     (z, weight)
 }
 
@@ -138,6 +151,8 @@ fn add_gf2_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>
     debug_assert_eq!(x_vec.len(), y_vec.len());
     debug_assert_eq!(x_vec.len(), 16*ai.len());
     let mut z = z_init;
+    let mut z_i = GF2p64InnerProd::new();
+    let mut z_ii = GF2p64InnerProd::new();
     let mut i = 0;
     izip!(ai, aii, bi, bii, ci, cii).for_each(|(ai, aii, bi, bii, ci, cii)| {
         let ai = gf2_embed(*ai);
@@ -149,11 +164,15 @@ fn add_gf2_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>
         for j in 0..16 {
             x_vec[i + j] = RssShare::from(ai[j],aii[j]).mul_by_sc(weight);
             y_vec[i + j] = RssShare::from(bi[j],bii[j]);
-            z += RssShare::from(ci[j],cii[j]).mul_by_sc(weight);
+            z_i.add_prod(&ci[j], &weight);
+            z_ii.add_prod(&cii[j], &weight);
+            // z += RssShare::from(,cii[j]).mul_by_sc(weight);
             weight *= rand;
         }
         i += 16;
     });
+    z.si += z_i.sum();
+    z.sii += z_ii.sum();
     z
 }
 
@@ -197,7 +216,7 @@ where
     if n == 1 {
         return check_triple(party, context, x_vec[0], y_vec[0], z);
     }
-    let inner_prod_time = Instant::now();
+    // let inner_prod_time = Instant::now();
     // Compute dot products
     let f1: RssShareVec<F> = x_vec.iter().skip(1).step_by(2).copied().collect();
     let g1: RssShareVec<F> = y_vec.iter().skip(1).step_by(2).copied().collect();
@@ -209,30 +228,30 @@ where
         .chunks(2)
         .map(|c| c[0] + (c[0] + c[1]) * F::TWO)
         .collect();
-    let inner_prod_time = inner_prod_time.elapsed();
-    let weak_inner_prod_time = Instant::now();
+    // let inner_prod_time = inner_prod_time.elapsed();
+    // let weak_inner_prod_time = Instant::now();
     let mut hs = [F::ZERO; 2];
     hs[0] = F::weak_inner_product(&f1, &g1);
     hs[1] = F::weak_inner_product(&f2, &g2);
-    let weak_inner_prod_time = weak_inner_prod_time.elapsed();
-    let ss_rss_time = Instant::now();
+    // let weak_inner_prod_time = weak_inner_prod_time.elapsed();
+    // let ss_rss_time = Instant::now();
     let h = ss_to_rss_shares(party, &hs)?;
-    let ss_rss_time = ss_rss_time.elapsed();
+    // let ss_rss_time = ss_rss_time.elapsed();
     let h1 = &h[0];
     let h2 = &h[1];
     let h0 = z - *h1;
-    let coin_flip_time = Instant::now();
+    // let coin_flip_time = Instant::now();
     // Coin flip
     let r = coin_flip(party, context)?;
     // For large F this is very unlikely
     debug_assert!(r != F::ZERO && r != F::ONE);
-    let coin_flip_time = coin_flip_time.elapsed();
+    // let coin_flip_time = coin_flip_time.elapsed();
 
-    let poly_time = Instant::now();
+    // let poly_time = Instant::now();
     // Compute polynomials
     let fr: Vec<_> = x_vec.chunks(2).map(|c| c[0] + (c[0] + c[1]) * r).collect();
     let gr: Vec<_> = y_vec.chunks(2).map(|c| c[0] + (c[0] + c[1]) * r).collect();
-    let poly_time = poly_time.elapsed();
+    // let poly_time = poly_time.elapsed();
     let hr = lagrange_deg2(&h0, h1, h2, r);
     // println!("[vfy-dp] n={}, inner_prod_time={}s, weak_inner_prod_time={}s, ss_rss_time={}s, coin_flip_time={}s, poly_time={}s", n, inner_prod_time.as_secs_f32(), weak_inner_prod_time.as_secs_f32(), ss_rss_time.as_secs_f32(), coin_flip_time.as_secs_f32(), poly_time.as_secs_f32());
     verify_dot_product(party, context, fr, gr, hr)
@@ -361,7 +380,7 @@ where
     
     let poly_time = poly_time.elapsed();
     let hr = lagrange_deg2(&h0, h1, h2, r);
-    // println!("[vfy-dp-opt] n={}, inner_prod_time={}s, ss_rss_time={}s, coin_flip_time={}s, poly_time={}s", n, inner_prod_time.as_secs_f32(), ss_rss_time.as_secs_f32(), coin_flip_time.as_secs_f32(), poly_time.as_secs_f32());
+    println!("[vfy-dp-opt] n={}, inner_prod_time={}s, ss_rss_time={}s, coin_flip_time={}s, poly_time={}s", n, inner_prod_time.as_secs_f32(), ss_rss_time.as_secs_f32(), coin_flip_time.as_secs_f32(), poly_time.as_secs_f32());
     verify_dot_product_opt(party, context, fr, gr, hr)
 }
 
@@ -517,7 +536,7 @@ mod test {
         party::{broadcast::{Broadcast, BroadcastContext}, test::{PartySetup, TestSetup}, MainParty, MulTripleRecorder, MulTripleVector}, share::{
             bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, InnerProduct, RssShare
         }, wollut16_malsec::{
-            mult_verification::{verify_dot_product_opt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::{localhost_setup_wl16as, WL16ASSetup},
+            mult_verification::{verify_dot_product_opt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::localhost_setup_wl16as,
             WL16ASParty,
         }
     };
