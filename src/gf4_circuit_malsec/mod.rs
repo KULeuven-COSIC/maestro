@@ -9,14 +9,16 @@ use crate::{aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, Benchmar
 
 pub struct GF4CircuitASParty {
     inner: MainParty,
+    check_after_sbox: bool,
     broadcast_context: BroadcastContext,
     gf4_triples_to_check: MulTripleVector<BsGF4>,
 }
 
 impl GF4CircuitASParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, check_after_sbox: bool) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
+            check_after_sbox,
             broadcast_context: BroadcastContext::new(),
             gf4_triples_to_check: MulTripleVector::new(),
         })
@@ -41,43 +43,70 @@ impl GF4CircuitASParty {
 }
 
 pub struct GF4CircuitASBenchmark;
+pub struct GF4CircuitAllCheckASBenchmark;
+
+fn run(
+    conn: ConnectedParty,
+    simd: usize,
+    n_worker_threads: Option<usize>,
+    check_after_sbox: bool,
+) -> BenchmarkResult {
+    let mut party = GF4CircuitASParty::setup(conn, n_worker_threads, check_after_sbox).unwrap();
+    let _setup_comm_stats = party.io().reset_comm_stats();
+    println!("After setup");
+
+    let input = aes::random_state(&mut party.inner, simd);
+    // create random key states for benchmarking purposes
+    let ks = aes::random_keyschedule(&mut party.inner);
+
+    let start = Instant::now();
+    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
+    party.finalize().unwrap();
+    let duration = start.elapsed();
+    println!("After online");
+    let online_comm_stats = party.io().reset_comm_stats();
+    let _ = aes::output(&mut party, output).unwrap();
+    println!("After output");
+    party.inner.teardown().unwrap();
+    println!("After teardown");
+
+    BenchmarkResult::new(
+        Duration::from_secs(0),
+        duration,
+        CombinedCommStats::empty(),
+        online_comm_stats,
+        party.inner.get_additional_timers(),
+    )
+}
 
 impl BenchmarkProtocol for GF4CircuitASBenchmark {
     fn protocol_name(&self) -> String {
         "mal-gf4-circuit".to_string()
     }
+
     fn run(
-        &self,
-        conn: ConnectedParty,
-        simd: usize,
-        n_worker_threads: Option<usize>,
-    ) -> BenchmarkResult {
-        let mut party = GF4CircuitASParty::setup(conn, n_worker_threads).unwrap();
-        let _setup_comm_stats = party.io().reset_comm_stats();
-        println!("After setup");
+            &self,
+            conn: ConnectedParty,
+            simd: usize,
+            n_worker_threads: Option<usize>,
+        ) -> BenchmarkResult {
+        run(conn, simd, n_worker_threads, false)
+    }
+    
+}
 
-        let input = aes::random_state(&mut party.inner, simd);
-        // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party.inner);
+impl BenchmarkProtocol for GF4CircuitAllCheckASBenchmark {
+    fn protocol_name(&self) -> String {
+        "mal-gf4-circuit-all-check".to_string()
+    }
 
-        let start = Instant::now();
-        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-        party.finalize().unwrap();
-        let duration = start.elapsed();
-        println!("After online");
-        let online_comm_stats = party.io().reset_comm_stats();
-        let _ = aes::output(&mut party, output).unwrap();
-        println!("After output");
-        party.inner.teardown().unwrap();
-        println!("After teardown");
-
-        BenchmarkResult::new(
-            Duration::from_secs(0),
-            duration,
-            CombinedCommStats::empty(),
-            online_comm_stats,
-            party.inner.get_additional_timers(),
-        )
+    fn run(
+            &self,
+            conn: ConnectedParty,
+            simd: usize,
+            n_worker_threads: Option<usize>,
+        ) -> BenchmarkResult {
+        run(conn, simd, n_worker_threads, true)
     }
 }
 
@@ -142,10 +171,14 @@ impl GF8InvBlackBox for GF4CircuitASParty {
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
         if self.inner.has_multi_threading() && si.len() >= 2 * self.inner.num_worker_threads() {
-            gf4_circuit::gf8_inv_via_gf4_mul_opt_mt(&mut self.inner, &mut self.gf4_triples_to_check, si, sii)
+            gf4_circuit::gf8_inv_via_gf4_mul_opt_mt(&mut self.inner, &mut self.gf4_triples_to_check, si, sii)?;
         } else {
-            gf4_circuit::gf8_inv_via_gf4_mul_opt(&mut self.inner, &mut self.gf4_triples_to_check, si, sii)
+            gf4_circuit::gf8_inv_via_gf4_mul_opt(&mut self.inner, &mut self.gf4_triples_to_check, si, sii)?;
         }
+        if self.check_after_sbox {
+            self.verify_multiplications()?;
+        }
+        Ok(())
     }
 }
 
@@ -160,7 +193,7 @@ mod test {
 
     fn localhost_setup_gf4_circuit_as<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,GF4CircuitASParty)>, JoinHandle<(T2,GF4CircuitASParty)>, JoinHandle<(T3,GF4CircuitASParty)>) {
         fn adapter<T, Fx: FnOnce(&mut GF4CircuitASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,GF4CircuitASParty) {
-            let mut party = GF4CircuitASParty::setup(conn, n_worker_threads).unwrap();
+            let mut party = GF4CircuitASParty::setup(conn, n_worker_threads, false).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

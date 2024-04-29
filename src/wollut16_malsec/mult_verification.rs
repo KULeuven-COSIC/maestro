@@ -40,7 +40,7 @@ pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut Broadc
         z = add_gf2_triples(&mut x_vec[k1..(k1+k2)], &mut y_vec[k1..(k1+k2)], ai, aii, bi, bii, ci, cii, z, weight, r);
         gf2_triples.clear();
     }
-    println!("add_triples_time={}s", add_triples_time.elapsed().as_secs_f64());
+    // println!("add_triples_time={}s", add_triples_time.elapsed().as_secs_f64());
     verify_dot_product_opt(party, context, x_vec, y_vec, z)
 }
 
@@ -109,7 +109,7 @@ pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut Bro
         })?;
         gf2_triples.clear();
     }
-    println!("Add triples: {}", add_triples_time.elapsed().as_secs_f64());
+    // println!("Add triples: {}", add_triples_time.elapsed().as_secs_f64());
     verify_dot_product_opt(party, context, x_vec, y_vec, z)
 }
 
@@ -304,7 +304,7 @@ where
     // make sure chunk size is even
     if chunk_size % 2 != 0 { chunk_size += 1 }
 
-    let inner_prod_time = Instant::now();
+    // let inner_prod_time = Instant::now();
     let mut hs = [F::ZERO; 2];
     if !multi_threading {
         hs[0] = F::weak_inner_product2(&x_vec[1..], &y_vec[1..]);
@@ -331,21 +331,21 @@ where
         hs[1] = h1;
     }
     
-    let inner_prod_time = inner_prod_time.elapsed();
-    let ss_rss_time = Instant::now();
+    // let inner_prod_time = inner_prod_time.elapsed();
+    // let ss_rss_time = Instant::now();
     let h = ss_to_rss_shares(party, &hs)?;
-    let ss_rss_time = ss_rss_time.elapsed();
+    // let ss_rss_time = ss_rss_time.elapsed();
     let h1 = &h[0];
     let h2 = &h[1];
     let h0 = z - *h1;
-    let coin_flip_time = Instant::now();
+    // let coin_flip_time = Instant::now();
     // Coin flip
     let r = coin_flip(party, context)?;
     // For large F this is very unlikely
     debug_assert!(r != F::ZERO && r != F::ONE);
-    let coin_flip_time = coin_flip_time.elapsed();
+    // let coin_flip_time = coin_flip_time.elapsed();
 
-    let poly_time = Instant::now();
+    // let poly_time = Instant::now();
     // Compute polynomials
     let (fr, gr) = if !multi_threading {
         compute_poly(&mut x_vec, r);
@@ -378,9 +378,9 @@ where
         (fr, gr)
     };
     
-    let poly_time = poly_time.elapsed();
+    // let poly_time = poly_time.elapsed();
     let hr = lagrange_deg2(&h0, h1, h2, r);
-    println!("[vfy-dp-opt] n={}, inner_prod_time={}s, ss_rss_time={}s, coin_flip_time={}s, poly_time={}s", n, inner_prod_time.as_secs_f32(), ss_rss_time.as_secs_f32(), coin_flip_time.as_secs_f32(), poly_time.as_secs_f32());
+    // println!("[vfy-dp-opt] n={}, inner_prod_time={}s, ss_rss_time={}s, coin_flip_time={}s, poly_time={}s", n, inner_prod_time.as_secs_f32(), ss_rss_time.as_secs_f32(), coin_flip_time.as_secs_f32(), poly_time.as_secs_f32());
     verify_dot_product_opt(party, context, fr, gr, hr)
 }
 

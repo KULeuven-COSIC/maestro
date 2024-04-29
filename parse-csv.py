@@ -56,7 +56,7 @@ def print_throughput(view):
     prep_data_received = view['pre-processing-bytes-received-from-next'].max() + view['pre-processing-bytes-received-from-prev'].max()
     online_data_sent = view['online-bytes-sent-to-next'].max() + view['online-bytes-sent-to-prev'].max()
     online_data_received = view['online-bytes-received-from-next'].max() + view['online-bytes-received-from-prev'].max()
-    print(f'Prep. Throughput: {prep_throughput}\tOnline Throughput: {online_throughput}\tTotal throughout: {total_throughput}\tPrep. Time: {prep_avg}s\tOnline Time: {online_avg}s\tPrep. Data: {max(prep_data_sent, prep_data_received)} byte\tOnline Data: {max(online_data_sent, online_data_received)} byte')
+    print(f'Prep. Throughput: {prep_throughput}\tOnline Throughput: {online_throughput}\tTotal througput: {total_throughput}\t\tPrep. Time: {prep_avg}s\tOnline Time: {online_avg}s\tPrep. Data: {max(prep_data_sent, prep_data_received)} byte\tOnline Data: {max(online_data_sent, online_data_received)} byte')
 
 protocols = list(set(df['protocol']))
 protocols.sort()
