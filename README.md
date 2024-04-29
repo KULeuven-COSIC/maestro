@@ -173,7 +173,23 @@ lut256		Prep. Throughput: 25978	Online Throughput: 386774	Prep. Time: 28.8702120
 
 
 ## Raw Data of the benchmarks reported in the paper
-todo
+The raw data of the experiments that are reported in the paper can be found in the `benchmark-data` folder. The csv data format is the same as described above.
+
+- `benchmark-data/10Gbit/semi-honest-X` where X denotes the batch size (100000, 250000, 500000, 750000, 1500000, 2000000) contains data of the semi-honest protocols run with batch size X.
+- `benchmark-data/10Gbit/malsec-X` where X denotes the batch size (100000, 250000, 500000, 750000, 1500000, 2000000) contains data of the malisious secure protocols run with batch size X.
+- `benchmark-data/1Gbit` contains data of all protocols in the 1Gbit/s network.
+- `benchmark-data/50Mbps-100msrtt` contains data of all protocols in the WAN network (50 Mbit/s with 100ms round trip time)
+
+The protocol names denote the following variants reported in the paper.
+- `chida`, `lut16`, `gf4-circuit` and `lut256` denote the semi-honest protocols GF(2^8)-Circuit, LUT-16, GF(2^4)-Circuit and (2,3) LUT-256, respectively.
+- `mal-chida` denotes the actively secure GF(2^8)-Circuit protocol variant
+- `mal-lut16`, `mal-lut16-prep-check` and `mal-lut16-all-check` denote maliciously secure variants of LUT-16 where 
+  - `mal-lut16` performs one multiplication check at the end,
+  - `mal-lut16-prep-check` performs one multiplication check at the end of the pre-processing and one multiplication check at the end of the online phase. This is denoted as LUT-16 (prep) in the paper.
+  - `mal-lut16-all-check` performs one multiplication check at the end of the pre-processing, and one multiplication check after each S-box. This is denoted as LUT-16 (prep+sbox)
+- `mal-gf4-circuit` and `mal-gf4-circuit-all-check` denote the maliciously secure variants of GF(2^4)-Circuit where
+  - `mal-gf4-circuit` performs one multiplication check at the end,
+  - `mal-gf4-circuit-all-check` performs one multiplication check after each S-box. This is denoted as (sbox) in the paper.
 
 ## Documentation
 
