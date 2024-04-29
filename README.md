@@ -175,11 +175,18 @@ lut256		Prep. Throughput: 25978	Online Throughput: 386774	Prep. Time: 28.8702120
 ## Raw Data of the benchmarks reported in the paper
 The raw data of the experiments that are reported in the paper can be found in the `benchmark-data` folder. The csv data format is the same as described above.
 
+### High-Throughput
 - `benchmark-data/10Gbit/semi-honest-X` where X denotes the batch size (100000, 250000, 500000, 750000, 1500000, 2000000) contains data of the semi-honest protocols run with batch size X.
-- `benchmark-data/10Gbit/malsec-X` where X denotes the batch size (100000, 250000, 500000, 750000, 1500000, 2000000) contains data of the malisious secure protocols run with batch size X.
+- `benchmark-data/10Gbit/malsec-X` where X denotes the batch size (100000, 250000, 500000, 750000, 1500000, 2000000) contains data of the malicious secure protocols run with batch size X.
 - `benchmark-data/1Gbit` contains data of all protocols in the 1Gbit/s network.
 - `benchmark-data/50Mbps-100msrtt` contains data of all protocols in the WAN network (50 Mbit/s with 100ms round trip time)
 
+### Latency
+- `benchmark-data/10Gbit-latency` contains data for 1 AES block in the 10 Gbit/s network,
+- `benchmark-data/1Gbit-latency` contains data for 1 AES block in the 1 Gbit/s network,
+- `benchmark-data/50Mbps-100msrtt-latency` contains data for 1 AES block in the WAN network.
+
+### Protocol Names
 The protocol names denote the following variants reported in the paper.
 - `chida`, `lut16`, `gf4-circuit` and `lut256` denote the semi-honest protocols GF(2^8)-Circuit, LUT-16, GF(2^4)-Circuit and (2,3) LUT-256, respectively.
 - `mal-chida` denotes the actively secure GF(2^8)-Circuit protocol variant
