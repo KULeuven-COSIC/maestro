@@ -68,8 +68,8 @@ The `benchmark` command runs the specified protocols `<REP>` times, each computi
 
 The protocols are
 
-- `chida`: the baseline work from [Chida et al., "High-Throughput Secure AES Computation" in WAHC'18](https://doi.org/10.1145/3267973.3267977).
-- `mal-chida`: the maliciously secure adaptation of the `chida` baseline
+- `chida`: the baseline work from [Chida et al., "High-Throughput Secure AES Computation" in WAHC'18](https://doi.org/10.1145/3267973.3267977). In the paper this is named GF(2^8)-Circuit
+- `mal-chida`: the maliciously secure adaptation of the `chida` baseline. In the paper this is named Mal. GF(2^8)-Circuit
 - `lut16`: Protocol 2 and Protocol 4 with pre-processing from Protocol 6
 - `gf4-circuit`: Protocol 2 where GF(2^4) inversion is computed via x^2 * x^4 * x^8
 - `lut256`: S-box computed via 8-bit LUT (Protocol 4) with pre-processing from Protocol 5
