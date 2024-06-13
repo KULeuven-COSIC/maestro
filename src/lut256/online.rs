@@ -11,7 +11,7 @@ use sha2::Sha256;
 use crate::{
     aes::GF8InvBlackBox,
     network::task::{Direction, IoLayerOwned},
-    party::{error::MpcResult, ArithmeticBlackBox, MainParty},
+    party::{error::MpcResult, ArithmeticBlackBox, MainParty, NoMulTripleRecording},
     share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
 };
 
@@ -28,9 +28,9 @@ impl GF8InvBlackBox for LUT256Party {
         let n_prep = n_rnd_ohv + n_rnd_ohv_ks;
         let mut prep =
             if self.inner.has_multi_threading() && 2 * n_prep > self.inner.num_worker_threads() {
-                offline::generate_rndohv256_mt(self.inner.as_party_mut(), n_prep)?
+                offline::generate_rndohv256_mt::<_, GF8>(self.inner.as_party_mut(), &mut NoMulTripleRecording,  n_prep)?
             } else {
-                offline::generate_rndohv256(self.inner.as_party_mut(), n_prep)?
+                offline::generate_rndohv256(self.inner.as_party_mut(), &mut NoMulTripleRecording, n_prep)?
             };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = prep;

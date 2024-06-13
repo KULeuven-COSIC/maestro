@@ -20,7 +20,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
+    aes::{self, GF8InvBlackBox}, benchmark::{BenchmarkProtocol, BenchmarkResult}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
 };
 
 pub mod mult_verification;
@@ -33,30 +33,34 @@ pub struct WL16ASParty{
     prep_ohv: Vec<RndOhvOutput>,
     check_after_prep: bool,
     check_after_sbox: bool,
+    use_bitstring_check: bool,
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<BsGF4>,
     gf2_triples_to_check: MulTripleVector<BsBool16>,
+    gf64_triples_to_check: MulTripleVector<GF2p64>,
     broadcast_context: BroadcastContext,
 }
 
 impl WL16ASParty {
-    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, use_bitstring_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             check_after_prep,
             check_after_sbox,
+            use_bitstring_check,
             gf4_triples_to_check: MulTripleVector::new(),
             gf2_triples_to_check: MulTripleVector::new(),
+            gf64_triples_to_check: MulTripleVector::new(),
             broadcast_context: BroadcastContext::new(),
         })
     }
 
     fn prepare_rand_ohv(&mut self, n: usize) -> MpcResult<()> {
         let mut new = if self.inner.has_multi_threading() && self.inner.num_worker_threads() <= n {
-            offline::generate_random_ohv16_mt(self, n)?
+            offline::generate_random_ohv16_mt(self, n, self.use_bitstring_check)?
         }else{
-            offline::generate_random_ohv16(self, n)?
+            offline::generate_random_ohv16(self, n, self.use_bitstring_check)?
         };
         if self.check_after_prep {
             self.verify_multiplications()?;
@@ -72,9 +76,9 @@ impl WL16ASParty {
     fn verify_multiplications(&mut self) -> MpcResult<()> {
         let t = Instant::now();
         let res = if self.inner.has_multi_threading() {
-            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check)
+            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check)
         }else{
-            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check)
+            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check)
         };
         match res {
             Ok(true) => {
@@ -92,8 +96,10 @@ pub struct MalLUT16PrepCheckBenchmark;
 
 pub struct MalLUT16AllCheckBenchmark;
 
-fn run(conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, check_after_prep: bool, check_after_sbox: bool) -> BenchmarkResult {
-    let mut party = WL16ASParty::setup(conn, check_after_prep, check_after_sbox, n_worker_threads).unwrap();
+pub struct MalLUT16BitStringBenchmark;
+
+fn run(conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, check_after_prep: bool, check_after_sbox: bool, use_bitstring_check: bool) -> BenchmarkResult {
+    let mut party = WL16ASParty::setup(conn, check_after_prep, check_after_sbox, use_bitstring_check, n_worker_threads).unwrap();
     let _setup_comm_stats = party.io().reset_comm_stats();
     println!("After setup");
     let start_prep = Instant::now();
@@ -133,7 +139,7 @@ impl BenchmarkProtocol for MalLUT16Benchmark {
         "mal-lut16".to_string()
     }
     fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-        run(conn, simd, n_worker_threads, false, false)
+        run(conn, simd, n_worker_threads, false, false, false)
     }
 }
 
@@ -142,7 +148,7 @@ impl BenchmarkProtocol for MalLUT16PrepCheckBenchmark {
         "mal-lut16-prep-check".to_string()
     }
     fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-        run(conn, simd, n_worker_threads, true, false)
+        run(conn, simd, n_worker_threads, true, false, false)
     }
 }
 
@@ -151,7 +157,16 @@ impl BenchmarkProtocol for MalLUT16AllCheckBenchmark {
         "mal-lut16-all-check".to_string()
     }
     fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-        run(conn, simd, n_worker_threads, true, true)
+        run(conn, simd, n_worker_threads, true, true, false)
+    }
+}
+
+impl BenchmarkProtocol for MalLUT16BitStringBenchmark {
+    fn protocol_name(&self) -> String {
+        "mal-lut16-bitstring".to_string()
+    }
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
+        run(conn, simd, n_worker_threads, false, false, true)
     }
 }
 
@@ -219,8 +234,14 @@ impl GF8InvBlackBox for WL16ASParty {
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
         let n_rnd_ohv_ks = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
         let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
+        if self.use_bitstring_check {
+            self.gf64_triples_to_check.reserve_for_more_triples(div16_ceil(n_rnd_ohv_ks+n_rnd_ohv)*16*3);
+        }else{
+            self.gf2_triples_to_check.reserve_for_more_triples(10 * n_blocks + div16_ceil(n_rnd_ohv_ks));
+        }
+        
         self.prepare_rand_ohv(n_rnd_ohv + n_rnd_ohv_ks)?;
-        self.gf2_triples_to_check.reserve_for_more_triples(10 * n_blocks + div16_ceil(n_rnd_ohv_ks));
+        
 
         let n_mul_ks = (4 * 10 * n_keys * 3)/2; // 4 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
         let n_mul = (16 * 10 * n_blocks * 3)/2; // 16 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
@@ -263,7 +284,7 @@ mod test {
 
     pub fn localhost_setup_wl16as<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,WL16ASParty)>, JoinHandle<(T2,WL16ASParty)>, JoinHandle<(T3,WL16ASParty)>) {
         fn adapter<T, Fx: FnOnce(&mut WL16ASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16ASParty) {
-            let mut party = WL16ASParty::setup(conn, false, false, n_worker_threads).unwrap();
+            let mut party = WL16ASParty::setup(conn, false, false, false, n_worker_threads).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

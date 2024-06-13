@@ -15,8 +15,7 @@ use rand::{CryptoRng, Rng};
 use sha2::Digest;
 
 use super::{
-    gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible,
-    RssShare,
+    bs_bool16::BsBool16, gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare
 };
 
 /// An element of `GF(2^64) := GF(2)[X] / X^64 + X^4 + X^3 + X + 1`
@@ -388,6 +387,31 @@ impl GF2p64 {
             (wrd ^ w1 ^ w2, car ^ c1 ^ c2)
         });
         Self::propagate_carries(word, carry)
+    }
+
+    #[inline]
+    pub fn extend_from_bit(vec: &mut Vec<Self>, bit: &BsBool16) {
+        let mut x = bit.as_u16();
+        for _ in 0..16 {
+            vec.push(Self::new(x & 1));
+            x >>= 1;
+        }
+    }
+
+    #[inline]
+    pub fn extend_from_bitstring(vec: &mut Vec<Self>, bitstring: &[BsBool16], simd_len: usize) {
+        debug_assert!(bitstring.len() <= Self::NBITS * simd_len);
+        let mut transposed = vec![Self::ZERO; 16*simd_len];
+        bitstring.chunks_exact(simd_len).enumerate().for_each(|(bitpos, simd_bit)| {
+            simd_bit.iter().enumerate().for_each(|(j,bit)| {
+                let mut bit = bit.as_u16() as u64;
+                for i in 0..16 {
+                    transposed[16*j+i].0 |= (bit & 1) << bitpos;
+                    bit >>= 1;
+                }
+            })
+        });
+        vec.extend_from_slice(&transposed);
     }
 }
 
@@ -799,10 +823,11 @@ impl GF2p64Subfield for GF4 {
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use rand::thread_rng;
 
     use crate::share::{
-        gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, FieldRngExt, InnerProduct, Invertible,
+        bs_bool16::BsBool16, gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, FieldRngExt, InnerProduct, Invertible
     };
 
     #[cfg(any(
@@ -1003,5 +1028,37 @@ mod test {
         }
         let actual = actual.sum();
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_extend_from_bit() {
+        let inputs = (0..16).map(|i| BsBool16::new(i as u16)).collect_vec();
+        let mut v = Vec::new();
+        for (i,inp) in inputs.into_iter().enumerate() {
+            GF2p64::extend_from_bit(&mut v, &inp);
+            assert_eq!(v.len(), 16*(i+1));
+            let bits = inp.as_u16();
+            for j in 0..16 {
+                assert_eq!(v[v.len()-16+j], GF2p64::new((bits >> j) & 0x1));
+            }
+        }
+    }
+
+    #[test]
+    fn test_extend_from_bitstring() {
+        // simple case
+
+        fn test(string: &[BsBool16], expected: GF2p64) {
+            let mut v = Vec::new();
+            GF2p64::extend_from_bitstring(&mut v, string, 1);
+            assert_eq!(v.len(), 16);
+            assert_eq!(v[0], expected);
+            for i in 1..16 {
+                assert_eq!(v[i], GF2p64::ZERO);
+            }
+        }
+
+        test(&[BsBool16::new(0b1)], GF2p64::new(1u64));
+        test(&[BsBool16::new(1), BsBool16::new(0), BsBool16::new(1), BsBool16::new(0), BsBool16::new(1), BsBool16::new(1), BsBool16::new(0), BsBool16::new(1)], GF2p64::new(0b10110101u64));
     }
 }

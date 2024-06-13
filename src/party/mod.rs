@@ -21,7 +21,7 @@ use std::thread;
 
 use self::error::MpcResult;
 pub use self::thread_party::ThreadParty;
-pub use self::mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording, MulTripleVector};
+pub use self::mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording, MulTripleVector, BitStringMulTripleRecorder};
 use std::time::Duration;
 #[cfg(feature = "verbose-timing")]
 use {

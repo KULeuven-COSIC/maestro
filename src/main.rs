@@ -25,7 +25,7 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitAllCheckASBenchmark};
 use itertools::Itertools;
 use network::ConnectedParty;
-use wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16PrepCheckBenchmark};
+use wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16PrepCheckBenchmark, MalLUT16BitStringBenchmark};
 
 use crate::chida::ImplVariant;
 
@@ -53,6 +53,7 @@ pub enum ProtocolVariant {
     MalLut16,
     MalLut16PrepCheck,
     MalLut16AllCheck,
+    MalLut16Bitstring,
     MalGF4Circuit,
     MalGF4CircuitAllCheck,
 }
@@ -215,6 +216,7 @@ impl ProtocolVariant {
             ProtocolVariant::Lut16 => &LUT16Benchmark,
             ProtocolVariant::Lut256 => &LUT256Benchmark,
             ProtocolVariant::MalLut16 => &MalLUT16Benchmark,
+            ProtocolVariant::MalLut16Bitstring => &MalLUT16BitStringBenchmark,
             ProtocolVariant::MalGF4Circuit => &GF4CircuitASBenchmark,
             ProtocolVariant::MalLut16PrepCheck => &MalLUT16PrepCheckBenchmark,
             ProtocolVariant::MalLut16AllCheck => &MalLUT16AllCheckBenchmark,

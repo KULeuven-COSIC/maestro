@@ -27,9 +27,9 @@ impl GF4CircuitASParty {
     pub fn verify_multiplications(&mut self) -> MpcResult<()> {
         if self.gf4_triples_to_check.len() > 0 {
             let res = if self.inner.has_multi_threading() {
-                wollut16_malsec::mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut MulTripleVector::new())
+                wollut16_malsec::mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut MulTripleVector::new(), &mut MulTripleVector::new())
             }else{
-                wollut16_malsec::mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut MulTripleVector::new())
+                wollut16_malsec::mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut MulTripleVector::new(), &mut MulTripleVector::new())
             };
             match res {
                 Ok(true) => Ok(()),

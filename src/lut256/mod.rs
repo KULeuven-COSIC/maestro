@@ -19,7 +19,7 @@ use crate::{
     share::gf8::GF8,
 };
 mod lut256_tables;
-mod offline;
+pub mod offline;
 mod online;
 
 /// A random one-hot vector of size `256`.

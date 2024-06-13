@@ -353,6 +353,9 @@ fn gf8_inv_layer_opt_party<P: Party>(
 ) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     debug_assert_eq!(si.len(), prep_ohv.len());
+    #[cfg(feature = "verbose-timing")]
+    let total = Instant::now();
+
     let (mut ah_i, mut al_i) = wol_bitslice_gf4(si);
     let (ah_ii, mut al_ii) = wol_bitslice_gf4(sii);
     let v = izip!(ah_i.iter(), ah_ii.iter(), al_i.iter(), al_ii.iter())
@@ -363,7 +366,24 @@ fn gf8_inv_layer_opt_party<P: Party>(
             e_mul_ah2 + al2 + ah_mul_al
         })
         .collect();
+
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_local1", total.elapsed());
+    #[cfg(feature = "verbose-timing")]
+    let local_time = Instant::now();
+
     let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v, prep_ohv)?;
+
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_lut_total", local_time.elapsed());
+    #[cfg(feature = "verbose-timing")]
+    let local_time = Instant::now();
 
     // local mult
     al_i.iter_mut().zip(ah_i.iter()).for_each(|(l, h)| *l += *h);
@@ -400,6 +420,13 @@ fn gf8_inv_layer_opt_party<P: Party>(
     // re-share
     let mut ah_prime_ii = ah_ii;
     let mut al_prime_ii = ah_plus_al_ii;
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_local2", local_time.elapsed());
+    #[cfg(feature = "verbose-timing")]
+    let local_time = Instant::now();
     ss_to_rss_layer_opt(
         party,
         &mut ah_prime_ss,
@@ -407,12 +434,30 @@ fn gf8_inv_layer_opt_party<P: Party>(
         &mut ah_prime_ii,
         &mut al_prime_ii,
     )?;
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_ss_rss_total", local_time.elapsed());
+    #[cfg(feature = "verbose-timing")]
+    let local_time = Instant::now();
     let ah_prime_i = ah_prime_ss;
     let al_prime_i = al_prime_ss;
 
     // un-bitslice
     un_wol_bitslice_gf4(&ah_prime_i, &al_prime_i, si);
     un_wol_bitslice_gf4(&ah_prime_ii, &al_prime_ii, sii);
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_local3", local_time.elapsed());
+
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_total", total.elapsed());
     Ok(())
 }
 
@@ -499,13 +544,34 @@ pub fn lut_layer_opt<P: Party>(
             *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
         });
     }
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_lut_bs", lut_open_time.elapsed());
+    #[cfg(feature = "verbose-timing")]
+    let send_time = Instant::now();
 
     let ci = v;
     party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
     party.send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
 
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_lut_send", send_time.elapsed());
+    #[cfg(feature = "verbose-timing")]
+    let rcv_time = Instant::now();
+
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
+    #[cfg(feature = "verbose-timing")]
+    PARTY_TIMER
+        .lock()
+        .unwrap()
+        .report_time("gf8_inv_layer_lut_rcv", rcv_time.elapsed());
+
     #[cfg(feature = "verbose-timing")]
     PARTY_TIMER
         .lock()
