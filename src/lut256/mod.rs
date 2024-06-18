@@ -21,6 +21,7 @@ use crate::{
 mod lut256_tables;
 pub mod offline;
 mod online;
+pub mod lut256_ss;
 
 /// A random one-hot vector of size `256`.
 #[derive(Clone, Copy)]
@@ -42,6 +43,17 @@ pub struct RndOhv256Output {
     pub si: RndOhv,
     /// share i+1 of one-hot vector
     pub sii: RndOhv,
+    /// (2,3) sharing of the position of the 1 in the vector
+    pub random_si: GF8,
+    pub random_sii: GF8,
+}
+
+/// Output of the random one-hot vector pre-processing.
+///
+/// Contains a (3,3)-sharing of a size `256` one-hot vector `RndOhv` and a (2,3)-sharing of the corresponding `GF8` element that indicates
+/// the position of 1 in the vector.
+pub struct RndOhv256OutputSS {
+    pub ohv: RndOhv,
     /// (2,3) sharing of the position of the 1 in the vector
     pub random_si: GF8,
     pub random_sii: GF8,

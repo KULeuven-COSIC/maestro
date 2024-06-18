@@ -7,10 +7,10 @@ use crate::{
     chida,
     lut256::RndOhv,
     party::{error::MpcResult, BitStringMulTripleRecorder, MainParty, MulTripleRecorder, Party},
-    share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare},
+    share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}, wollut16,
 };
 
-use super::RndOhv256Output;
+use super::{RndOhv256Output, RndOhv256OutputSS};
 
 pub fn generate_rndohv256<Rec: BitStringMulTripleRecorder>(party: &mut MainParty, mul_triple_recorder: &mut Rec, amount: usize) -> MpcResult<Vec<RndOhv256Output>> {
     let n_blocks = if amount % 16 == 0 {
@@ -63,6 +63,79 @@ where Rec::ThreadMulTripleRecorder: BitStringMulTripleRecorder
     let res = ohv.into_iter().flatten().take(amount).collect();
     party.wait_for_completion();
     Ok(res)
+}
+
+pub fn generate_rndohv256_ss<Rec: MulTripleRecorder<BsBool16>>(party: &mut MainParty, mul_triple_recorder: &mut Rec, amount: usize) -> MpcResult<Vec<RndOhv256OutputSS>> {
+    let n_blocks = amount.div_ceil(16);
+    let bits = random_8_bits(party, n_blocks);
+    let res = generate_ohv256_ss_output(party, mul_triple_recorder, amount, bits)?;
+    party.wait_for_completion();
+    Ok(res)
+}
+
+pub fn generate_rndohv256_ss_mt<Rec: MulTripleRecorder<BsBool16>>(party: &mut MainParty, mul_triple_recorder: &mut Rec, amount: usize) -> MpcResult<Vec<RndOhv256OutputSS>> {
+    let n_blocks = amount.div_ceil(16);
+    let ranges = party.split_range_equally(n_blocks);
+    let thread_parties = party.create_thread_parties_with_additional_data(ranges, |start, end| Some(mul_triple_recorder.create_thread_mul_triple_recorder(start, end)));
+    let mut res = Vec::with_capacity(thread_parties.len());
+    party.run_in_threadpool(|| {
+        thread_parties
+            .into_par_iter()
+            .map(|mut thread_party| {
+                let bits = random_8_bits(&mut thread_party, n_blocks);
+                let mut recorder = thread_party.additional_data.take().unwrap();
+                let amount = 16*thread_party.task_size();
+                let out = generate_ohv256_ss_output(&mut thread_party, &mut recorder, amount, bits).unwrap();
+                (out, recorder)
+            })
+            .collect_into_vec(&mut res);
+        Ok(())
+    })?;
+    let (ohv, rec): (Vec<_>, _) = res.into_iter().unzip();
+    mul_triple_recorder.join_thread_mul_triple_recorders(rec);
+
+    let res = ohv.into_iter().flatten().take(amount).collect();
+    party.wait_for_completion();
+    Ok(res)
+}
+
+fn random_8_bits<P: Party>(party: &mut P, n_blocks: usize) -> [Vec<RssShare<BsBool16>>; 8] {
+    [
+        party.generate_random(n_blocks), party.generate_random(n_blocks), party.generate_random(n_blocks), party.generate_random(n_blocks),
+        party.generate_random(n_blocks), party.generate_random(n_blocks), party.generate_random(n_blocks), party.generate_random(n_blocks)
+    ]
+}
+
+fn generate_ohv256_ss_output<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize, random_bits: [Vec<RssShare<BsBool16>>; 8]) -> MpcResult<Vec<RndOhv256OutputSS>> {
+    let n16 = random_bits[0].len();
+    debug_assert!(random_bits.iter().all(|v| v.len() == n16));
+
+    let [r0, r1, r2, r3, r4, r5, r6, r7] = random_bits;
+    
+    // these two can also be realized in one call to generate_ohv_16_bitslice with double the size
+    let lower = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r0, &r1, &r2, &r3)?;
+    let upper = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r4, &r5, &r6, &r7)?;
+
+    // tensor prod
+    let mut bits = Vec::with_capacity(256);
+    for upper_bit in upper {
+        bits.extend(lower.iter().map(|lower_bit| {
+            let bit: Vec<BsBool16> = izip!(party.generate_alpha::<BsBool16>(lower_bit.len()), &upper_bit, lower_bit).map(|(alpha, x, y)| {
+                alpha + x.si * y.si + (x.si + x.sii)*(y.si + y.sii)
+            }).collect_vec();
+            bit
+        }));
+    }
+
+    let ohvs = un_bitslice_ss(&bits);
+    let rand = un_bitslice8(&[r0, r1, r2, r3, r4, r5, r6, r7]);
+    Ok(ohvs.into_iter().zip(rand).map(|(ohv, rand)| RndOhv256OutputSS {
+        ohv,
+        random_si: rand.si,
+        random_sii: rand.sii,
+    })
+    .take(n)
+    .collect())
 }
 
 /// bits are in lsb-first order
@@ -215,6 +288,41 @@ fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv, RndOhv)> {
         .collect()
 }
 
+fn un_bitslice_ss(bs: &[Vec<BsBool16>]) -> Vec<RndOhv> {
+    debug_assert_eq!(bs.len(), 256);
+    let mut rnd_ohv_res = vec![[0u64; 4]; 16 * bs[0].len()];
+    for k in 0..16 {
+        let mut res = vec![0u16; 16 * bs[0].len()];
+        for i in 0..16 {
+            let bit = &bs[16 * k + i];
+            for j in 0..bit.len() {
+                let si = bit[j].as_u16();
+                for k in 0..16 {
+                    res[16 * j + k] |= ((si >> k) & 0x1) << i;
+                }
+            }
+        }
+        rnd_ohv_res
+            .iter_mut()
+            .zip(res.into_iter())
+            .for_each(|(dst, ohv)| {
+                if k < 4 {
+                    dst[0] |= (ohv as u64) << (16 * k);
+                } else if k < 8 {
+                    dst[1] |= (ohv as u64) << (16 * (k - 4));
+                } else if k < 12 {
+                    dst[2] |= (ohv as u64) << (16 * (k - 8));
+                } else {
+                    dst[3] |= (ohv as u64) << (16 * (k - 12));
+                }
+            });
+    }
+    rnd_ohv_res
+        .into_iter()
+        .map(|ohv| RndOhv::new(ohv))
+        .collect()
+}
+
 fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {
     debug_assert_eq!(bs.len(), 8);
     let mut res = vec![(0u8, 0u8); bs[0].len() * 16];
@@ -243,7 +351,7 @@ mod test {
     use crate::{
         chida::{online::test::ChidaSetup, ChidaParty},
         lut256::{
-            offline::{generate_ohv256_output, generate_rndohv256, generate_rndohv256_mt},
+            offline::{generate_ohv256_output, generate_ohv256_ss_output, generate_rndohv256, generate_rndohv256_mt, generate_rndohv256_ss, generate_rndohv256_ss_mt},
             RndOhv,
         },
         party::{test::TestSetup, MulTripleVector, NoMulTripleRecording},
@@ -856,6 +964,104 @@ mod test {
             let a = trip1.0.si + trip2.0.si + trip3.0.si;
             let b = trip1.1.si + trip2.1.si + trip3.1.si;
             assert_eq(trip1.2, trip2.2, trip3.2, a*b);
+        });
+    }
+
+    fn into_8_array<T>(vec: Vec<T>) -> [T; 8] {
+        assert_eq!(vec.len(), 8);
+        let mut it = vec.into_iter();
+        [it.next().unwrap(), it.next().unwrap(), it.next().unwrap(), it.next().unwrap(), it.next().unwrap(), it.next().unwrap(), it.next().unwrap(), it.next().unwrap(),]
+    }
+
+    #[test]
+    fn ohv256_ss_output() {
+        let input = generate_ohv_input(8, 256);
+        let mut rng = thread_rng();
+        let shares = secret_share_vecvec(&mut rng, &input);
+        let program = |share: [Vec<RssShare<BsBool16>>; 8]| {
+            move |p: &mut ChidaParty| generate_ohv256_ss_output(p.as_party_mut(), &mut NoMulTripleRecording, 256*16, share).unwrap()
+        };
+
+        let share1 = into_8_array(shares.0);
+        let share2 = into_8_array(shares.1);
+        let share3 = into_8_array(shares.2);
+
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(share1), program(share2), program(share3));
+        let (ohv1, _) = h1.join().unwrap();
+        let (ohv2, _) = h2.join().unwrap();
+        let (ohv3, _) = h3.join().unwrap();
+        assert_eq!(ohv1.len(), 256*16);
+        assert_eq!(ohv2.len(), 256*16);
+        assert_eq!(ohv3.len(), 256*16);
+        let expected = (0..256).flat_map(|i| repeat_n(i, 16));
+        izip!(ohv1, ohv2, ohv3, expected).for_each(|(s1, s2, s3, expected)| {
+            consistent(
+                &RssShare::from(s1.random_si, s1.random_sii),
+                &RssShare::from(s2.random_si, s2.random_sii),
+                &RssShare::from(s3.random_si, s3.random_sii),
+            );
+            // random GF8 reconstructs to expected
+            assert_eq!(
+                s1.random_si + s2.random_si + s3.random_si,
+                GF8(expected as u8)
+            );
+            // reconstructed bitvec has correct bit set
+            reconstruct_and_check_rndohv(s1.ohv, s2.ohv, s3.ohv, expected as u8);
+        });
+    }
+
+    #[test]
+    fn rnd_ohv256_ss() {
+        const N: usize = 147;
+        let program = || {
+            move |p: &mut ChidaParty| generate_rndohv256_ss(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap()
+        };
+
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup(program(), program(), program());
+        let (ohv1, _) = h1.join().unwrap();
+        let (ohv2, _) = h2.join().unwrap();
+        let (ohv3, _) = h3.join().unwrap();
+        assert_eq!(ohv1.len(), N);
+        assert_eq!(ohv2.len(), N);
+        assert_eq!(ohv3.len(), N);
+        izip!(ohv1, ohv2, ohv3).for_each(|(s1, s2, s3)| {
+            consistent(
+                &RssShare::from(s1.random_si, s1.random_sii),
+                &RssShare::from(s2.random_si, s2.random_sii),
+                &RssShare::from(s3.random_si, s3.random_sii),
+            );
+            // reconstruct random GF8
+            let index = s1.random_si + s2.random_si + s3.random_si;
+            // reconstructed bitvec has correct bit set
+            reconstruct_and_check_rndohv(s1.ohv, s2.ohv, s3.ohv, index.0);
+        });
+    }
+
+    #[test]
+    fn rnd_ohv256_ss_mt() {
+        const N: usize = 2367;
+        const N_THREADS: usize = 3;
+        let program = || |p: &mut ChidaParty| generate_rndohv256_ss_mt(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap();
+        let (h1, h2, h3) =
+            ChidaSetup::localhost_setup_multithreads(N_THREADS, program(), program(), program());
+        let (ohv1, _) = h1.join().unwrap();
+        let (ohv2, _) = h2.join().unwrap();
+        let (ohv3, _) = h3.join().unwrap();
+        assert_eq!(ohv1.len(), N);
+        assert_eq!(ohv2.len(), N);
+        assert_eq!(ohv3.len(), N);
+        izip!(ohv1, ohv2, ohv3).for_each(|(s1, s2, s3)| {
+            consistent(
+                &RssShare::from(s1.random_si, s1.random_sii),
+                &RssShare::from(s2.random_si, s2.random_sii),
+                &RssShare::from(s3.random_si, s3.random_sii),
+            );
+            // reconstruct random GF8
+            let index = s1.random_si + s2.random_si + s3.random_si;
+            // reconstructed bitvec has correct bit set
+            reconstruct_and_check_rndohv(s1.ohv, s2.ohv, s3.ohv, index.0);
         });
     }
 }

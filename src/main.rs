@@ -24,6 +24,7 @@ use chida::ChidaBenchmark;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitAllCheckASBenchmark};
 use itertools::Itertools;
+use lut256::lut256_ss::Lut256SSBenchmark;
 use network::ConnectedParty;
 use wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16PrepCheckBenchmark, MalLUT16BitStringBenchmark};
 
@@ -50,6 +51,7 @@ pub enum ProtocolVariant {
     Lut16,
     GF4Circuit,
     Lut256,
+    Lut256Ss,
     MalLut16,
     MalLut16PrepCheck,
     MalLut16AllCheck,
@@ -215,6 +217,7 @@ impl ProtocolVariant {
             ProtocolVariant::GF4Circuit => &GF4CircuitBenchmark,
             ProtocolVariant::Lut16 => &LUT16Benchmark,
             ProtocolVariant::Lut256 => &LUT256Benchmark,
+            ProtocolVariant::Lut256Ss => &Lut256SSBenchmark,
             ProtocolVariant::MalLut16 => &MalLUT16Benchmark,
             ProtocolVariant::MalLut16Bitstring => &MalLUT16BitStringBenchmark,
             ProtocolVariant::MalGF4Circuit => &GF4CircuitASBenchmark,

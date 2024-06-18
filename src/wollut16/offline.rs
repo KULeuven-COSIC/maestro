@@ -147,7 +147,7 @@ pub fn generate_random_ohv16_mt<'a, Rec: MulTripleRecorder<BsBool16>>(party: &'a
 
 // implements Protocol 7 with fixed inputs
 #[inline]
-fn generate_ohv16_bitslice<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, r0: &Vec<RssShare<BsBool16>>, r1: &Vec<RssShare<BsBool16>>, r2: &Vec<RssShare<BsBool16>>, r3: &Vec<RssShare<BsBool16>>) -> MpcResult<[Vec<RssShare<BsBool16>>; 16]> {
+pub fn generate_ohv16_bitslice<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, r0: &Vec<RssShare<BsBool16>>, r1: &Vec<RssShare<BsBool16>>, r2: &Vec<RssShare<BsBool16>>, r3: &Vec<RssShare<BsBool16>>) -> MpcResult<[Vec<RssShare<BsBool16>>; 16]> {
    let n16 = r0.len();
    debug_assert_eq!(n16, r1.len());
    debug_assert_eq!(n16, r2.len());
