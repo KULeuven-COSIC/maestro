@@ -12,3 +12,4 @@ pub mod share;
 pub mod wollut16;
 pub mod wollut16_malsec;
 pub mod gf4_circuit_malsec;
+pub(crate) mod util;

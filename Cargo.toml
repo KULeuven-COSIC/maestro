@@ -52,3 +52,7 @@ required-features = ["clmul"]
 name = "clmul_bench"
 harness = false
 required-features = ["clmul"]
+
+[[bench]]
+name = "unpack_bitslice"
+harness = false

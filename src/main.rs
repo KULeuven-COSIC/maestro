@@ -12,6 +12,7 @@ mod share;
 mod wollut16;
 mod wollut16_malsec;
 mod gf4_circuit_malsec;
+mod util;
 
 use std::{path::PathBuf, time::Duration};
 

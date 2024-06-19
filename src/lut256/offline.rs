@@ -1,13 +1,10 @@
-use std::iter;
+use std::{iter, time::Instant};
 
 use itertools::{izip, repeat_n, Itertools};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    chida,
-    lut256::RndOhv,
-    party::{error::MpcResult, BitStringMulTripleRecorder, MainParty, MulTripleRecorder, Party},
-    share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}, wollut16,
+    chida, lut256::RndOhv, party::{error::MpcResult, BitStringMulTripleRecorder, MainParty, MulTripleRecorder, Party}, share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}, util, wollut16
 };
 
 use super::{RndOhv256Output, RndOhv256OutputSS};
@@ -111,10 +108,15 @@ fn generate_ohv256_ss_output<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: 
     debug_assert!(random_bits.iter().all(|v| v.len() == n16));
 
     let [r0, r1, r2, r3, r4, r5, r6, r7] = random_bits;
+
+    let ohv16_time = Instant::now();
     
     // these two can also be realized in one call to generate_ohv_16_bitslice with double the size
     let lower = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r0, &r1, &r2, &r3)?;
     let upper = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r4, &r5, &r6, &r7)?;
+
+    let ohv16_time = ohv16_time.elapsed();
+    let tensor_time = Instant::now();
 
     // tensor prod
     let mut bits = Vec::with_capacity(256);
@@ -127,8 +129,15 @@ fn generate_ohv256_ss_output<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: 
         }));
     }
 
-    let ohvs = un_bitslice_ss(&bits);
+    let tensor_time = tensor_time.elapsed();
+    let unpack_time1 = Instant::now();
+
+    let ohvs = util::un_bitslice::un_bitslice_ss(&bits);
+    let unpack_time1 = unpack_time1.elapsed();
+    let unpack_time2 = Instant::now();
     let rand = un_bitslice8(&[r0, r1, r2, r3, r4, r5, r6, r7]);
+    let unpack_time2 = unpack_time2.elapsed();
+    println!("Ohv16 time: {}s, tensor time: {}s, unpack time1: {}s, unpack time2: {}s", ohv16_time.as_secs_f32(), tensor_time.as_secs_f32(), unpack_time1.as_secs_f32(), unpack_time2.as_secs_f32());
     Ok(ohvs.into_iter().zip(rand).map(|(ohv, rand)| RndOhv256OutputSS {
         ohv,
         random_si: rand.si,
@@ -147,7 +156,7 @@ fn generate_ohv256_output<P: Party, Rec: BitStringMulTripleRecorder>(
     debug_assert_eq!(bits.len(), 8);
     let rand = un_bitslice8(&bits);
     let ohv256 = generate_ohv(party, mul_triple_recorder, bits, 256)?;
-    let output = un_bitslice(&ohv256);
+    let output = util::un_bitslice::un_bitslice(&ohv256);
     Ok(rand
         .into_iter()
         .zip(output)
@@ -245,82 +254,6 @@ fn simple_mul<P: Party, Rec: BitStringMulTripleRecorder>(
     })
     .collect_vec();
     Ok(res)
-}
-
-fn un_bitslice(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<(RndOhv, RndOhv)> {
-    debug_assert_eq!(bs.len(), 256);
-    let mut rnd_ohv_res = vec![([0u64; 4], [0u64; 4]); 16 * bs[0].len()];
-    for k in 0..16 {
-        let mut res = vec![(0u16, 0u16); 16 * bs[0].len()];
-        for i in 0..16 {
-            let bit = &bs[16 * k + i];
-            for j in 0..bit.len() {
-                let si = bit[j].si.as_u16();
-                let sii = bit[j].sii.as_u16();
-                for k in 0..16 {
-                    res[16 * j + k].0 |= ((si >> k) & 0x1) << i;
-                    res[16 * j + k].1 |= ((sii >> k) & 0x1) << i;
-                }
-            }
-        }
-        rnd_ohv_res
-            .iter_mut()
-            .zip(res.into_iter())
-            .for_each(|(dst, (ohv_i, ohv_ii))| {
-                if k < 4 {
-                    dst.0[0] |= (ohv_i as u64) << (16 * k);
-                    dst.1[0] |= (ohv_ii as u64) << (16 * k);
-                } else if k < 8 {
-                    dst.0[1] |= (ohv_i as u64) << (16 * (k - 4));
-                    dst.1[1] |= (ohv_ii as u64) << (16 * (k - 4));
-                } else if k < 12 {
-                    dst.0[2] |= (ohv_i as u64) << (16 * (k - 8));
-                    dst.1[2] |= (ohv_ii as u64) << (16 * (k - 8));
-                } else {
-                    dst.0[3] |= (ohv_i as u64) << (16 * (k - 12));
-                    dst.1[3] |= (ohv_ii as u64) << (16 * (k - 12));
-                }
-            });
-    }
-    rnd_ohv_res
-        .into_iter()
-        .map(|(ohv_si, ohv_sii)| (RndOhv::new(ohv_si), RndOhv::new(ohv_sii)))
-        .collect()
-}
-
-fn un_bitslice_ss(bs: &[Vec<BsBool16>]) -> Vec<RndOhv> {
-    debug_assert_eq!(bs.len(), 256);
-    let mut rnd_ohv_res = vec![[0u64; 4]; 16 * bs[0].len()];
-    for k in 0..16 {
-        let mut res = vec![0u16; 16 * bs[0].len()];
-        for i in 0..16 {
-            let bit = &bs[16 * k + i];
-            for j in 0..bit.len() {
-                let si = bit[j].as_u16();
-                for k in 0..16 {
-                    res[16 * j + k] |= ((si >> k) & 0x1) << i;
-                }
-            }
-        }
-        rnd_ohv_res
-            .iter_mut()
-            .zip(res.into_iter())
-            .for_each(|(dst, ohv)| {
-                if k < 4 {
-                    dst[0] |= (ohv as u64) << (16 * k);
-                } else if k < 8 {
-                    dst[1] |= (ohv as u64) << (16 * (k - 4));
-                } else if k < 12 {
-                    dst[2] |= (ohv as u64) << (16 * (k - 8));
-                } else {
-                    dst[3] |= (ohv as u64) << (16 * (k - 12));
-                }
-            });
-    }
-    rnd_ohv_res
-        .into_iter()
-        .map(|ohv| RndOhv::new(ohv))
-        .collect()
 }
 
 fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {

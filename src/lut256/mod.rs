@@ -24,7 +24,7 @@ mod online;
 pub mod lut256_ss;
 
 /// A random one-hot vector of size `256`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RndOhv([u64; 4]);
 
 /// The party wrapper for the LUT 256 protocol.
