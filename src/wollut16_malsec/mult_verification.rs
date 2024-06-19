@@ -568,7 +568,7 @@ where
     ChaCha20Rng: FieldRngExt<F>,
 {
     // Convert zs to RSS sharing
-    let s_i = [sum_share + party.generate_alpha(1)[0]];
+    let s_i = [sum_share + party.generate_alpha(1).next().unwrap()];
     let mut s_ii = [F::ZERO; 1];
     party.send_field::<F>(Direction::Previous, s_i, 1);
     party.receive_field_slice(Direction::Next, &mut s_ii)

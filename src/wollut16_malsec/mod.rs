@@ -187,7 +187,7 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
         unimplemented!()
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<GF8> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=GF8> {
         self.inner.generate_alpha(n)
     }
 

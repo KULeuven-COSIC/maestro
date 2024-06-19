@@ -38,7 +38,7 @@ where
         self.0.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F> {
         self.0.generate_alpha(n)
     }
 
@@ -124,7 +124,7 @@ where
         self.inner.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F> {
         self.inner.generate_alpha(n)
     }
 
@@ -251,7 +251,7 @@ fn gf8_inv_layer_opt_party<P: Party>(
     // MULT(x^12, x^2) and MULT(x^12, x^3)
     // receive from P-1
     let rcv_x14x15i = party.receive_field(Direction::Previous, 2 * n);
-    let mut x14x15ii: Vec<GF8> = party.generate_alpha(2 * n);
+    let mut x14x15ii: Vec<GF8> = party.generate_alpha(2 * n).collect();
     let x3i = rcv_x3i.rcv()?;
     for i in 0..n {
         x14x15ii[i] += GF8::x4y2(x3i[i] + x3ii[i], si[i] + sii[i]) + GF8::x4y2(x3i[i], si[i]);

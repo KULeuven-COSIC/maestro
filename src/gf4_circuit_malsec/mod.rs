@@ -135,7 +135,7 @@ where
         self.inner.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<GF8> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=GF8> {
         self.inner.generate_alpha(n)
     }
 

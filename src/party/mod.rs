@@ -115,7 +115,7 @@ pub trait ArithmeticBlackBox<F: Field> {
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
     fn generate_random(&mut self, n: usize) -> RssShareVec<F>;
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    fn generate_alpha(&mut self, n: usize) -> Vec<F>;
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F>;
     fn io(&self) -> &IoLayerOwned;
 
     fn input_round(
@@ -141,7 +141,7 @@ pub trait Party {
     where
         ChaCha20Rng: FieldRngExt<F>;
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
+    fn generate_alpha<F: Field>(&mut self, n: usize) -> impl Iterator<Item=F>
     where
         ChaCha20Rng: FieldRngExt<F>;
     fn constant<F: Field>(&self, value: F) -> RssShare<F>;
@@ -477,7 +477,7 @@ impl MainParty {
 }
 
 #[inline]
-fn generate_alpha<F: Field, R: Rng + CryptoRng>(next: &mut R, prev: &mut R, n: usize) -> Vec<F>
+fn generate_alpha<F: Field, R: Rng + CryptoRng>(next: &mut R, prev: &mut R, n: usize) -> impl Iterator<Item=F>
 where
     R: FieldRngExt<F>,
 {
@@ -485,7 +485,6 @@ where
         .into_iter()
         .zip(prev.generate(n))
         .map(|(next, prev)| next - prev)
-        .collect()
 }
 
 #[inline]
@@ -518,7 +517,7 @@ fn constant<F: Field>(i: usize, value: F) -> RssShare<F> {
 
 impl Party for MainParty {
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
+    fn generate_alpha<F: Field>(&mut self, n: usize) -> impl Iterator<Item=F>
     where
         ChaCha20Rng: FieldRngExt<F>,
     {

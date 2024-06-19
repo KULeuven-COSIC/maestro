@@ -63,7 +63,7 @@ impl<T> ThreadParty<T> {
 }
 
 impl<T> Party for ThreadParty<T> {
-    fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
+    fn generate_alpha<F: Field>(&mut self, n: usize) -> impl Iterator<Item=F>
     where
         ChaCha20Rng: FieldRngExt<F>,
     {
@@ -215,7 +215,7 @@ mod test {
                 .into_iter()
                 .map(|mut thread| {
                     let output = RngOutput {
-                        alpha: thread.generate_alpha(N_OUTPUT),
+                        alpha: thread.generate_alpha(N_OUTPUT).collect(),
                         random: thread.generate_random(N_OUTPUT),
                     };
                     ((thread.range_start, thread.range_end), output)

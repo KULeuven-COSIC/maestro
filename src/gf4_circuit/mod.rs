@@ -159,7 +159,7 @@ where
         self.0.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F> {
         self.0.generate_alpha(n)
     }
 

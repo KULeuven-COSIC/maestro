@@ -81,12 +81,10 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
     #[cfg(feature = "verbose-timing")]
     let lut_open_time = Instant::now();
 
-    let alphas = party.generate_alpha(v.len());
-
     let rnd_ohv = &party.prep_ohv[party.prep_ohv.len() - v.len()..];
     let rcv_cii = party.io().receive_field(Direction::Next, v.len());
     let rcv_ciii = party.io().receive_field(Direction::Previous, v.len());
-    let ci: Vec<_> = izip!(v.iter(), rnd_ohv, alphas)
+    let ci: Vec<_> = izip!(v.iter(), rnd_ohv, party.inner.generate_alpha(v.len()))
         .map(|(v, r, alpha)| *v + r.random + alpha)
         .collect();
     party.io().send_field::<GF4>(Direction::Next, &ci, ci.len());
@@ -152,11 +150,10 @@ fn ss_to_rss_layer(
     debug_assert_eq!(xss_i.len(), x_i.len());
     debug_assert_eq!(xss_i.len(), x_ii.len());
     // Shares of zero
-    let alphas: Vec<GF4> = party.inner.generate_alpha(xss_i.len());
+    let alphas = party.inner.generate_alpha(xss_i.len());
     //
-    x_i.iter_mut()
-        .enumerate()
-        .for_each(|(j, y_i)| *y_i = xss_i[j] + alphas[j]);
+    izip!(x_i.iter_mut(), xss_i, alphas)
+        .for_each(|(y_i, &xss, alpha)| *y_i = xss + alpha);
     party
         .io()
         .send_field::<GF4>(Direction::Previous, x_i.iter(), x_i.len());
@@ -699,7 +696,7 @@ where
         self.inner.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F> {
         self.inner.generate_alpha(n)
     }
 
