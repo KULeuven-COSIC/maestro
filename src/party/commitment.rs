@@ -1,6 +1,6 @@
-use rand::{CryptoRng, Rng};
-use sha2::{Sha256, Digest};
 use crate::party::error::{MpcError, MpcResult};
+use rand::{CryptoRng, Rng};
+use sha2::{Digest, Sha256};
 
 const COMMITMENT_SEC_PARAM: usize = 128 / 8;
 const SHA256_OUTPUT_SIZE: usize = 256 / 8;
@@ -16,7 +16,7 @@ pub fn commit<Random: Rng + CryptoRng>(rand: &mut Random, msg: &[u8]) -> Vec<u8>
 
     let hash = hasher.finalize();
     commitment[COMMITMENT_SEC_PARAM..].copy_from_slice(&hash);
-    return Vec::from(commitment);
+    Vec::from(commitment)
 }
 
 pub fn open(commitment: &[u8], msg: &[u8]) -> MpcResult<()> {
@@ -27,7 +27,7 @@ pub fn open(commitment: &[u8], msg: &[u8]) -> MpcResult<()> {
 
     for i in 0..SHA256_OUTPUT_SIZE {
         if commitment[COMMITMENT_SEC_PARAM + i] != hash[i] {
-            return Err(MpcError::CommitmentError);
+            return Err(MpcError::Commitment);
         }
     }
     Ok(())
@@ -35,9 +35,9 @@ pub fn open(commitment: &[u8], msg: &[u8]) -> MpcResult<()> {
 
 #[cfg(test)]
 mod test {
-    use rand::thread_rng;
     use crate::party::commitment::{commit, open};
     use crate::party::error::MpcError;
+    use rand::thread_rng;
 
     #[test]
     fn correctness() {
@@ -58,18 +58,18 @@ mod test {
 
         // try open different message
         message[5] ^= 0x4;
-        if let Err(MpcError::CommitmentError) = open(&commitment, &message) {
+        if let Err(MpcError::Commitment) = open(&commitment, &message) {
             // ok
-        }else{
+        } else {
             panic!()
         }
 
         message[5] ^= 0x4;
         // try different commitment
         commitment[3] ^= 0x80;
-        if let Err(MpcError::CommitmentError) = open(&commitment, &message) {
+        if let Err(MpcError::Commitment) = open(&commitment, &message) {
             // ok
-        }else{
+        } else {
             panic!()
         }
     }
