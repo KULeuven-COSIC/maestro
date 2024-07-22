@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Protocol `8` to verify the multiplication triples at the end of the protocol.
-pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut BroadcastContext, gf4_triples: &mut MulTripleVector<BsGF4>, gf2_triples: &mut MulTripleVector<BsBool16>, gf64_triples: &mut MulTripleVector<GF2p64>) -> MpcResult<bool> {
+pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut BroadcastContext, gf4_triples: &mut MulTripleVector<BsGF4>, gf2_triples: &mut MulTripleVector<BsBool16>, gf64_triples: &mut MulTripleVector<GF2p64>, dont_clear: bool) -> MpcResult<bool> {
     let r: GF2p64 = coin_flip(party, context)?;
     let k1 = gf4_triples.len() * 2; //each BsGF4 contains two values
     let k2 = gf2_triples.len() * 16; //each BsBool16 contains 16 values
@@ -29,7 +29,9 @@ pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut Broadc
     if k1 > 0 {
         let (ai, aii, bi, bii, ci, cii) = (gf4_triples.ai(), gf4_triples.aii(), gf4_triples.bi(), gf4_triples.bii(), gf4_triples.ci(), gf4_triples.cii());
         (z, weight) = add_gf4_triples(&mut x_vec[..k1], &mut y_vec[..k1], ai, aii, bi, bii, ci, cii, z, r);
-        gf4_triples.clear();
+        if !dont_clear {
+            gf4_triples.clear();
+        }
     }
 
     if k2 > 0 {
@@ -37,28 +39,32 @@ pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut Broadc
         // The embedding of GF2 is trivial, i.e. 0 -> 0 and 1 -> 1.
         let (ai, aii, bi, bii, ci, cii) = (gf2_triples.ai(), gf2_triples.aii(), gf2_triples.bi(), gf2_triples.bii(), gf2_triples.ci(), gf2_triples.cii());
         (z, weight) = add_gf2_triples(&mut x_vec[k1..(k1+k2)], &mut y_vec[k1..(k1+k2)], ai, aii, bi, bii, ci, cii, z, weight, r);
-        gf2_triples.clear();
+        if !dont_clear {
+            gf2_triples.clear();
+        }
     }
 
     if k3 > 0 {
         // Add GF64 triples
         let (ai, aii, bi, bii, ci, cii) = (gf64_triples.ai(), gf64_triples.aii(), gf64_triples.bi(), gf64_triples.bii(), gf64_triples.ci(), gf64_triples.cii());
         z = add_gf64_triples(&mut x_vec[(k1+k2)..(k1+k2+k3)], &mut y_vec[(k1+k2)..(k1+k2+k3)], ai, aii, bi, bii, ci, cii, z, weight, r);
-        gf64_triples.clear();
+        if !dont_clear {
+            gf64_triples.clear();
+        }
     }
     // println!("add_triples_time={}s", add_triples_time.elapsed().as_secs_f64());
     verify_dot_product_opt(party, context, x_vec, y_vec, z)
 }
 
 #[rustfmt::skip]
-pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut BroadcastContext, gf4_triples: &mut MulTripleVector<BsGF4>, gf2_triples: &mut MulTripleVector<BsBool16>, gf64_triples: &mut MulTripleVector<GF2p64>) -> MpcResult<bool> {
+pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut BroadcastContext, gf4_triples: &mut MulTripleVector<BsGF4>, gf2_triples: &mut MulTripleVector<BsBool16>, gf64_triples: &mut MulTripleVector<GF2p64>, dont_clear: bool) -> MpcResult<bool> {
     let k1 = gf4_triples.len() * 2; //each BsGF4 contains two values
     let k2 = gf2_triples.len() * 16; //each BsBool16 contains 16 values
     let k3 = gf64_triples.len();
     let n = (k1+k2+k3).checked_next_power_of_two().expect("n too large");
     if n < (1 << 14) {
         // don't use multi-threading for such small task
-        return verify_multiplication_triples(party, context, gf4_triples, gf2_triples, gf64_triples);
+        return verify_multiplication_triples(party, context, gf4_triples, gf2_triples, gf64_triples, dont_clear);
     }
 
     let n_threads = party.num_worker_threads();
@@ -90,7 +96,9 @@ pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut Bro
                 .reduce(|| RssShare::from(GF2p64::ZERO, GF2p64::ZERO), |sum, rss| sum + rss);
             Ok(z_gf4)
         })?;
-        gf4_triples.clear();
+        if !dont_clear {
+            gf4_triples.clear();
+        }
     }
     
 
@@ -115,7 +123,9 @@ pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut Bro
                 .reduce(|| RssShare::from(GF2p64::ZERO, GF2p64::ZERO), |sum, rss| sum + rss);
             Ok(z_gf2)
         })?;
-        gf2_triples.clear();
+        if !dont_clear {
+            gf2_triples.clear();
+        }
     }
 
     if k3 > 0 {
@@ -136,7 +146,9 @@ pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut Bro
                 .reduce(|| RssShare::from(GF2p64::ZERO, GF2p64::ZERO), |sum, rss| sum + rss);
             Ok(z_gf64)
         })?;
-        gf64_triples.clear();
+        if !dont_clear {
+            gf64_triples.clear();
+        }
     }
     // println!("Add triples: {}", add_triples_time.elapsed().as_secs_f64());
     verify_dot_product_opt(party, context, x_vec, y_vec, z)
@@ -244,6 +256,91 @@ fn add_gf64_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64
     z.si += z_i.sum();
     z.sii += z_ii.sum();
     z
+}
+
+/// Protocol `8` to verify GF(2^k) multiplication triples at the end of the protocol.
+pub fn verify_multiplication_gf_triples<F: Field + GF2p64Subfield>(party: &mut MainParty, context: &mut BroadcastContext, gf_triples: &mut MulTripleVector<F>, dont_clear: bool) -> MpcResult<bool> {
+    let r: GF2p64 = coin_flip(party, context)?;
+    let k = gf_triples.len();
+    let n = k.checked_next_power_of_two().expect("n too large");
+
+    let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+    let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+    let mut z = RssShare::from(GF2p64::ZERO, GF2p64::ZERO);
+    if k > 0 {
+        let (ai, aii, bi, bii, ci, cii) = (gf_triples.ai(), gf_triples.aii(), gf_triples.bi(), gf_triples.bii(), gf_triples.ci(), gf_triples.cii());
+        (z, _) = add_gf_triples(&mut x_vec[..k], &mut y_vec[..k], ai, aii, bi, bii, ci, cii, z, r);
+        if !dont_clear {
+            gf_triples.clear();
+        }
+    }
+
+    verify_dot_product_opt(party, context, x_vec, y_vec, z)
+}
+
+#[rustfmt::skip]
+pub fn verify_multiplication_gf_triples_mt<F: Field + GF2p64Subfield + Sync>(party: &mut MainParty, context: &mut BroadcastContext, gf_triples: &mut MulTripleVector<F>, dont_clear: bool) -> MpcResult<bool> {
+    let k = gf_triples.len();
+    let n = (k).checked_next_power_of_two().expect("n too large");
+    if n < (1 << 14) {
+        // don't use multi-threading for such small task
+        return verify_multiplication_gf_triples(party, context, gf_triples, dont_clear);
+    }
+
+    let n_threads = party.num_worker_threads();
+    let chunk_size_gf8 = party.chunk_size_for_task(gf_triples.len());
+    let r: Vec<GF2p64> = coin_flip_n(party, context, 3*n_threads)?;
+
+    let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+    let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
+
+    let mut z = RssShare::from(GF2p64::ZERO, GF2p64::ZERO);
+    if k > 0 {
+        let (ai, aii, bi, bii, ci, cii) = (gf_triples.ai(), gf_triples.aii(), gf_triples.bi(), gf_triples.bii(), gf_triples.ci(), gf_triples.cii());
+        z = party.run_in_threadpool(|| {
+            let z_gf4 = r[..n_threads].par_iter()
+                .zip_eq(x_vec[..k].par_chunks_mut(chunk_size_gf8))
+                .zip_eq(y_vec[..k].par_chunks_mut(chunk_size_gf8))
+                .zip_eq(ai.par_chunks(chunk_size_gf8))
+                .zip_eq(aii.par_chunks(chunk_size_gf8))
+                .zip_eq(bi.par_chunks(chunk_size_gf8))
+                .zip_eq(bii.par_chunks(chunk_size_gf8))
+                .zip_eq(ci.par_chunks(chunk_size_gf8))
+                .zip_eq(cii.par_chunks(chunk_size_gf8))
+                .map(|((((((((r, x_vec), y_vec), ai), aii), bi), bii), ci), cii)| {
+                    let (z, _) = add_gf_triples(x_vec, y_vec, ai, aii, bi, bii, ci, cii, RssShare::from(GF2p64::ZERO, GF2p64::ZERO), *r);
+                    z
+                })
+                .reduce(|| RssShare::from(GF2p64::ZERO, GF2p64::ZERO), |sum, rss| sum + rss);
+            Ok(z_gf4)
+        })?;
+        if !dont_clear {
+            gf_triples.clear();
+        }
+    }
+    
+    verify_dot_product_opt(party, context, x_vec, y_vec, z)
+}
+
+fn add_gf_triples<F: Field + GF2p64Subfield>(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>], ai: &[F], aii: &[F], bi: &[F], bii: &[F], ci: &[F], cii: &[F], z_init: RssShare<GF2p64>, rand: GF2p64) -> (RssShare<GF2p64>, GF2p64) {
+    debug_assert_eq!(x_vec.len(), y_vec.len());
+    debug_assert_eq!(x_vec.len(), ai.len());
+    let mut z = z_init;
+    let mut z_i = GF2p64InnerProd::new();
+    let mut z_ii = GF2p64InnerProd::new();
+    let mut weight = rand;
+    izip!(x_vec.iter_mut(), ai, aii, ci, cii).for_each(|(x_vec, &ai, &aii, ci, cii)| {
+        *x_vec = embed_sharing(ai, aii).mul_by_sc(weight);
+        z_i.add_prod(&ci.embed(), &weight);
+        z_ii.add_prod(&cii.embed(), &weight);
+        weight *= rand;
+    });
+    izip!(y_vec.iter_mut(), bi, bii).for_each(|(y_vec, &bi, &bii)| {
+        *y_vec = embed_sharing(bi, bii);
+    });
+    z.si += z_i.sum();
+    z.sii += z_ii.sum();
+    (z, weight)
 }
 
 /// Protocol to verify the component-wise multiplication triples
@@ -585,9 +682,9 @@ mod test {
 
     use crate::{
         party::{broadcast::{Broadcast, BroadcastContext}, test::{PartySetup, TestSetup}, MainParty, MulTripleRecorder, MulTripleVector}, share::{
-            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, InnerProduct, RssShare
+            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, InnerProduct, RssShare
         }, wollut16_malsec::{
-            mult_verification::{verify_dot_product_opt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::localhost_setup_wl16as,
+            mult_verification::{verify_dot_product_opt, verify_multiplication_gf_triples, verify_multiplication_gf_triples_mt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::localhost_setup_wl16as,
             WL16ASParty,
         }
     };
@@ -803,7 +900,7 @@ mod test {
                         triples
                             .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
-                    let res = verify_multiplication_triples(p, &mut context, &mut triples, &mut MulTripleVector::new(), &mut MulTripleVector::new()).unwrap();
+                    let res = verify_multiplication_triples(p, &mut context, &mut triples, &mut MulTripleVector::new(), &mut MulTripleVector::new(), false).unwrap();
                     p.compare_view(context).unwrap();
                     // triple vector is cleared
                     assert_eq!(triples.len(), 0);
@@ -842,7 +939,7 @@ mod test {
                         triples
                             .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
-                    let res = verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut triples, &mut MulTripleVector::new()).unwrap();
+                    let res = verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut triples, &mut MulTripleVector::new(), false).unwrap();
                     p.compare_view(context).unwrap();
                     // triple vector is cleared
                     assert_eq!(triples.len(), 0);
@@ -881,7 +978,7 @@ mod test {
                         triples
                             .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
-                    let res = verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut MulTripleVector::new(), &mut triples).unwrap();
+                    let res = verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut MulTripleVector::new(), &mut triples, false).unwrap();
                     p.compare_view(context).unwrap();
                     // triple vector is cleared
                     assert_eq!(triples.len(), 0);
@@ -924,7 +1021,7 @@ mod test {
                         triples
                             .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
-                    verify_multiplication_triples(p, &mut BroadcastContext::new(), &mut triples, &mut MulTripleVector::new(), &mut MulTripleVector::new()).unwrap()
+                    verify_multiplication_triples(p, &mut BroadcastContext::new(), &mut triples, &mut MulTripleVector::new(), &mut MulTripleVector::new(), false).unwrap()
                 }
             };
         let (h1, h2, h3) = PartySetup::localhost_setup(
@@ -964,7 +1061,7 @@ mod test {
                         triples
                             .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
-                    verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut triples, &mut MulTripleVector::new()).unwrap()
+                    verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut triples, &mut MulTripleVector::new(), false).unwrap()
                 }
             };
         let (h1, h2, h3) = PartySetup::localhost_setup(
@@ -1004,7 +1101,7 @@ mod test {
                         triples
                             .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
                     });
-                    verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut MulTripleVector::new(), &mut triples).unwrap()
+                    verify_multiplication_triples(p, &mut context, &mut MulTripleVector::new(), &mut MulTripleVector::new(), &mut triples, false).unwrap()
                 }
             };
         let (h1, h2, h3) = PartySetup::localhost_setup(
@@ -1064,7 +1161,7 @@ mod test {
                     izip!(u, v, w).for_each(|(u,v,w)| {
                         gf64_triples.record_mul_triple(&[u.si], &[u.sii], &[v.si], &[v.sii], &[w.si], &[w.sii])
                     });
-                    let res = verify_multiplication_triples(p, &mut context, &mut gf4_triples, &mut gf2_triples, &mut gf64_triples).unwrap();
+                    let res = verify_multiplication_triples(p, &mut context, &mut gf4_triples, &mut gf2_triples, &mut gf64_triples, false).unwrap();
                     p.compare_view(context).unwrap();
                     // triple vectors are cleared
                     assert_eq!(gf4_triples.len(), 0);
@@ -1132,7 +1229,7 @@ mod test {
                     izip!(u, v, w).for_each(|(u,v,w)| {
                         gf64_triples.record_mul_triple(&[u.si], &[u.sii], &[v.si], &[v.sii], &[w.si], &[w.sii])
                     });
-                    let res = verify_multiplication_triples_mt(p, &mut context, &mut gf4_triples, &mut gf2_triples, &mut gf64_triples).unwrap();
+                    let res = verify_multiplication_triples_mt(p, &mut context, &mut gf4_triples, &mut gf2_triples, &mut gf64_triples, false).unwrap();
                     p.compare_view(context).unwrap();
                     // triple vectors are cleared
                     assert_eq!(gf4_triples.len(), 0);
@@ -1151,6 +1248,168 @@ mod test {
         let (r2, _) = h2.join().unwrap();
         let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf8_mul_verify_correctness() {
+        let n = 32;
+        let mut rng = thread_rng();
+        let a_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let b_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let c_vec: Vec<GF8> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+        let program =
+            |a: Vec<RssShare<GF8>>, b: Vec<RssShare<GF8>>, c: Vec<RssShare<GF8>>| {
+                move |p: &mut MainParty| {
+                    let mut context = BroadcastContext::new();
+                    let mut triples = MulTripleVector::new();
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        triples
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
+                    });
+                    let res = verify_multiplication_gf_triples(p, &mut context, &mut triples, false).unwrap();
+                    p.compare_view(context).unwrap();
+                    // triple vector is cleared
+                    assert_eq!(triples.len(), 0);
+                    res
+                }
+            };
+        let (h1, h2, h3) = PartySetup::localhost_setup(
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, true);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf8_mul_verify_soundness() {
+        let n = 32;
+        let mut rng = thread_rng();
+        let a_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let b_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let mut c_vec: Vec<GF8> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let mut r = gen_rand_vec::<_, GF8>(&mut rng, 1)[0];
+        if r.is_zero() {
+            r = GF8::ONE
+        }
+        c_vec[rng.gen_range(0..n)] += r;
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+        let program =
+            |a: Vec<RssShare<GF8>>, b: Vec<RssShare<GF8>>, c: Vec<RssShare<GF8>>| {
+                move |p: &mut MainParty| {
+                    let mut context = BroadcastContext::new();
+                    let mut triples = MulTripleVector::new();
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        triples
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
+                    });
+                    verify_multiplication_gf_triples(p, &mut context, &mut triples, false).unwrap()
+                }
+            };
+        let (h1, h2, h3) = PartySetup::localhost_setup(
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, false);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf8_mul_verify_correctness_mt() {
+        let n = 1 << 12;
+        const N_THREADS: usize = 3;
+        let mut rng = thread_rng();
+        let a_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let b_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let c_vec: Vec<GF8> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+        let program =
+            |a: Vec<RssShare<GF8>>, b: Vec<RssShare<GF8>>, c: Vec<RssShare<GF8>>| {
+                move |p: &mut MainParty| {
+                    let mut context = BroadcastContext::new();
+                    let mut triples = MulTripleVector::new();
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        triples
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
+                    });
+                    let res = verify_multiplication_gf_triples_mt(p, &mut context, &mut triples, false).unwrap();
+                    p.compare_view(context).unwrap();
+                    // triple vector is cleared
+                    assert_eq!(triples.len(), 0);
+                    res
+                }
+            };
+        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(
+            N_THREADS,
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, true);
+        assert_eq!(r1, r2);
+        assert_eq!(r1, r3);
+    }
+
+    #[test]
+    fn test_gf8_mul_verify_soundness_mt() {
+        let n = 1 << 12;
+        const N_THREADS: usize = 3;
+        let mut rng = thread_rng();
+        let a_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let b_vec: Vec<GF8> = gen_rand_vec::<_, GF8>(&mut rng, n);
+        let mut c_vec: Vec<GF8> = a_vec.iter().zip(&b_vec).map(|(&a, &b)| a * b).collect();
+        let mut r = gen_rand_vec::<_, GF8>(&mut rng, 1)[0];
+        if r.is_zero() {
+            r = GF8::ONE
+        }
+        c_vec[rng.gen_range(0..n)] += r;
+        let (a1, a2, a3) = secret_share_vector(&mut rng, a_vec);
+        let (b1, b2, b3) = secret_share_vector(&mut rng, b_vec);
+        let (c1, c2, c3) = secret_share_vector(&mut rng, c_vec);
+        let program =
+            |a: Vec<RssShare<GF8>>, b: Vec<RssShare<GF8>>, c: Vec<RssShare<GF8>>| {
+                move |p: &mut MainParty| {
+                    let mut context = BroadcastContext::new();
+                    let mut triples = MulTripleVector::new();
+                    izip!(a.iter(), b.iter(), c.iter()).for_each(|(a, b, c)| {
+                        triples
+                            .record_mul_triple(&[a.si], &[a.sii], &[b.si], &[b.sii], &[c.si], &[c.sii]);
+                    });
+                    verify_multiplication_gf_triples_mt(p, &mut context, &mut triples, false).unwrap()
+                }
+            };
+        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(
+            N_THREADS,
+            program(a1, b1, c1),
+            program(a2, b2, c2),
+            program(a3, b3, c3),
+        );
+        let (r1, _) = h1.join().unwrap();
+        let (r2, _) = h2.join().unwrap();
+        let (r3, _) = h3.join().unwrap();
+        assert_eq!(r1, false);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
     }

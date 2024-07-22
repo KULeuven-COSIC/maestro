@@ -10,7 +10,7 @@
 //!   - [furukawa_benchmark] that implements the AES benchmark
 //!   - [FurukawaParty] the party wrapper for the protocol. [FurukawaParty] also implements [ArithmeticBlackBox]
 
-use std::{ops::AddAssign, time::Instant};
+use std::{ops::AddAssign, time::{Duration, Instant}};
 
 use itertools::izip;
 use rand_chacha::ChaCha20Rng;
@@ -29,12 +29,12 @@ use crate::{
         ConnectedParty,
     },
     party::{
-        broadcast::{Broadcast, BroadcastContext}, error::MpcResult, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty
+        broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, CombinedCommStats, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty
     },
-    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
+    share::{gf2p64::GF2p64Subfield, gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec}, wollut16_malsec,
 };
 
-mod offline;
+pub mod offline;
 
 /// This function implements the AES benchmark.
 ///
@@ -43,7 +43,7 @@ mod offline;
 /// - `simd` - number of parallel AES calls
 /// - `n_worker_threads` - number of worker threads
 pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
-    let mut party = FurukawaParty::setup(connected, n_worker_threads).unwrap();
+    let mut party = FurukawaParty::setup(connected, n_worker_threads, false).unwrap();
     let setup_comm_stats = party.io().reset_comm_stats();
     let inputs = aes::random_state(&mut party.inner, simd);
     // create random key states for benchmarking purposes
@@ -76,6 +76,48 @@ pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threa
 }
 
 pub struct MalChidaBenchmark;
+pub struct MalChidaRecursiveCheckBenchmark;
+
+fn run(conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, use_recursive_check: bool) -> BenchmarkResult {
+    let mut party = FurukawaParty::setup(conn, n_worker_threads, use_recursive_check).unwrap();
+    let _setup_comm_stats = party.io().reset_comm_stats();
+    let inputs = aes::random_state(&mut party.inner, simd);
+    // create random key states for benchmarking purposes
+    let ks = aes::random_keyschedule(&mut party.inner);
+
+    println!("After setup");
+
+    let start = Instant::now();
+    party.do_preprocessing(0, simd).unwrap();
+    let prep_duration = start.elapsed();
+    let prep_comm_stats = party.io().reset_comm_stats();
+
+    println!("After pre-processing");
+
+    let start = Instant::now();
+    let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
+    party.finalize().unwrap();
+    let online_duration = start.elapsed();
+    println!("After online");
+    let online_comm_stats = party.io().reset_comm_stats();
+    // let post_sacrifice_duration = start.elapsed();
+    let _ = aes::output(&mut party, output).unwrap();
+    println!("After output");
+    party.inner.teardown().unwrap();
+    println!("After teardown");
+
+    // if we use the recursive check, there is no preprocessing
+    let prep_duration = if use_recursive_check { Duration::from_secs(0) } else { prep_duration };
+    let prep_comm_stats = if use_recursive_check { CombinedCommStats::empty() } else { prep_comm_stats };
+
+    BenchmarkResult::new(
+        prep_duration,
+        online_duration,
+        prep_comm_stats,
+        online_comm_stats,
+        party.inner.get_additional_timers(),
+    )
+}
 
 impl BenchmarkProtocol for MalChidaBenchmark {
     fn protocol_name(&self) -> String {
@@ -87,59 +129,42 @@ impl BenchmarkProtocol for MalChidaBenchmark {
         simd: usize,
         n_worker_threads: Option<usize>,
     ) -> BenchmarkResult {
-        let mut party = FurukawaParty::setup(conn, n_worker_threads).unwrap();
-        let _setup_comm_stats = party.io().reset_comm_stats();
-        let inputs = aes::random_state(&mut party.inner, simd);
-        // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(&mut party.inner);
-
-        println!("After setup");
-
-        let start = Instant::now();
-        party.do_preprocessing(0, simd).unwrap();
-        let prep_duration = start.elapsed();
-        let prep_comm_stats = party.io().reset_comm_stats();
-
-        println!("After pre-processing");
-
-        let start = Instant::now();
-        let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
-        party.finalize().unwrap();
-        let online_duration = start.elapsed();
-        println!("After online");
-        let online_comm_stats = party.io().reset_comm_stats();
-        // let post_sacrifice_duration = start.elapsed();
-        let _ = aes::output(&mut party, output).unwrap();
-        println!("After output");
-        party.inner.teardown().unwrap();
-        println!("After teardown");
-
-        BenchmarkResult::new(
-            prep_duration,
-            online_duration,
-            prep_comm_stats,
-            online_comm_stats,
-            party.inner.get_additional_timers(),
-        )
+        run(conn, simd, n_worker_threads, false)
     }
 }
 
-pub struct FurukawaParty<F: Field + Sync + Send> {
+impl BenchmarkProtocol for MalChidaRecursiveCheckBenchmark {
+    fn protocol_name(&self) -> String {
+        "mal-chida-rec-check".to_string()
+    }
+    fn run(
+        &self,
+        conn: ConnectedParty,
+        simd: usize,
+        n_worker_threads: Option<usize>,
+    ) -> BenchmarkResult {
+        run(conn, simd, n_worker_threads, true)
+    }
+}
+
+pub struct FurukawaParty<F: Field + Sync + Send + GF2p64Subfield> {
     inner: MainParty,
     triples_to_check: MulTripleVector<F>,
     pre_processing: Option<MulTripleVector<F>>,
+    use_recursive_check: bool,
 }
 
-impl<F: Field + Sync + Send> FurukawaParty<F>
+impl<F: Field + Sync + Send + GF2p64Subfield> FurukawaParty<F>
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
 {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, use_recursive_check: bool) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             triples_to_check: MulTripleVector::new(),
             pre_processing: None,
+            use_recursive_check,
         })
     }
 
@@ -147,12 +172,16 @@ where
     where
         F: Send + Sync,
     {
-        // run the bucket cut-and-choose
-        if let Some(ref pre_processing) = self.pre_processing {
-            println!("Discarding {} left-over triples", pre_processing.len());
-            self.pre_processing = None;
+        // if we use the recursive check, no need for pre-processing
+        if !self.use_recursive_check {
+            // run the bucket cut-and-choose
+            if let Some(ref pre_processing) = self.pre_processing {
+                println!("Discarding {} left-over triples", pre_processing.len());
+                self.pre_processing = None;
+            }
+            self.pre_processing = Some(offline::bucket_cut_and_choose(&mut self.inner, n_mults)?);
         }
-        self.pre_processing = Some(offline::bucket_cut_and_choose(&mut self.inner, n_mults)?);
+        
         Ok(())
     }
 
@@ -205,62 +234,87 @@ where
             self.triples_to_check.len()
         );
         if self.triples_to_check.len() > 0 {
-            let prep = self.pre_processing.as_mut().expect("No pre-processed multiplication triples found. Use prepare_multiplications to generate them before the output phase");
-            if prep.len() < self.triples_to_check.len() {
-                panic!("Not enough pre-processed multiplication triples left: Required {} but found only {}", self.triples_to_check.len(), prep.len());
+            if self.use_recursive_check {
+                self.verify_multiplications_with_recursive_check()
+            }else{
+                self.verify_multiplications_with_sacrifice()
             }
-
-            let leftover = prep.len() - self.triples_to_check.len();
-            let (prep_ai, prep_aii, prep_bi, prep_bii, prep_ci, prep_cii) = prep.as_mut_slices();
-            let err = if self.inner.has_multi_threading()
-                && self.triples_to_check.len() > self.inner.num_worker_threads()
-            {
-                offline::sacrifice_mt(
-                    &mut self.inner,
-                    self.triples_to_check.len(),
-                    1,
-                    self.triples_to_check.ai(),
-                    self.triples_to_check.aii(),
-                    self.triples_to_check.bi(),
-                    self.triples_to_check.bii(),
-                    self.triples_to_check.ci(),
-                    self.triples_to_check.cii(),
-                    &mut prep_ai[leftover..],
-                    &mut prep_aii[leftover..],
-                    &mut prep_bi[leftover..],
-                    &mut prep_bii[leftover..],
-                    &mut prep_ci[leftover..],
-                    &mut prep_cii[leftover..],
-                )
-            } else {
-                offline::sacrifice(
-                    &mut self.inner,
-                    self.triples_to_check.len(),
-                    1,
-                    self.triples_to_check.ai(),
-                    self.triples_to_check.aii(),
-                    self.triples_to_check.bi(),
-                    self.triples_to_check.bii(),
-                    self.triples_to_check.ci(),
-                    self.triples_to_check.cii(),
-                    &mut prep_ai[leftover..],
-                    &mut prep_aii[leftover..],
-                    &mut prep_bi[leftover..],
-                    &mut prep_bii[leftover..],
-                    &mut prep_ci[leftover..],
-                    &mut prep_cii[leftover..],
-                )
-            };
-            // purge the sacrificed triples
-            if leftover > 0 {
-                prep.shrink(leftover);
-            } else {
-                self.pre_processing = None;
-            }
-            self.triples_to_check.clear();
-            err // return the sacrifice error
         } else {
             Ok(())
+        }
+    }
+
+    fn verify_multiplications_with_sacrifice(&mut self) -> MpcResult<()> {
+        let prep = self.pre_processing.as_mut().expect("No pre-processed multiplication triples found. Use prepare_multiplications to generate them before the output phase");
+        if prep.len() < self.triples_to_check.len() {
+            panic!("Not enough pre-processed multiplication triples left: Required {} but found only {}", self.triples_to_check.len(), prep.len());
+        }
+
+        let leftover = prep.len() - self.triples_to_check.len();
+        let (prep_ai, prep_aii, prep_bi, prep_bii, prep_ci, prep_cii) = prep.as_mut_slices();
+        let err = if self.inner.has_multi_threading()
+            && self.triples_to_check.len() > self.inner.num_worker_threads()
+        {
+            offline::sacrifice_mt(
+                &mut self.inner,
+                self.triples_to_check.len(),
+                1,
+                self.triples_to_check.ai(),
+                self.triples_to_check.aii(),
+                self.triples_to_check.bi(),
+                self.triples_to_check.bii(),
+                self.triples_to_check.ci(),
+                self.triples_to_check.cii(),
+                &mut prep_ai[leftover..],
+                &mut prep_aii[leftover..],
+                &mut prep_bi[leftover..],
+                &mut prep_bii[leftover..],
+                &mut prep_ci[leftover..],
+                &mut prep_cii[leftover..],
+            )
+        } else {
+            offline::sacrifice(
+                &mut self.inner,
+                self.triples_to_check.len(),
+                1,
+                self.triples_to_check.ai(),
+                self.triples_to_check.aii(),
+                self.triples_to_check.bi(),
+                self.triples_to_check.bii(),
+                self.triples_to_check.ci(),
+                self.triples_to_check.cii(),
+                &mut prep_ai[leftover..],
+                &mut prep_aii[leftover..],
+                &mut prep_bi[leftover..],
+                &mut prep_bii[leftover..],
+                &mut prep_ci[leftover..],
+                &mut prep_cii[leftover..],
+            )
+        };
+        // purge the sacrificed triples
+        if leftover > 0 {
+            prep.shrink(leftover);
+        } else {
+            self.pre_processing = None;
+        }
+        self.triples_to_check.clear();
+        err // return the sacrifice error
+    }
+
+    fn verify_multiplications_with_recursive_check(&mut self) -> MpcResult<()> {
+        println!("Verifying multiplications");
+        let mut context = BroadcastContext::new();
+        let err = if self.inner.has_multi_threading() && self.triples_to_check.len() > self.inner.num_worker_threads() {
+            wollut16_malsec::mult_verification::verify_multiplication_gf_triples_mt(&mut self.inner, &mut context, &mut self.triples_to_check, false)
+        }else {
+            wollut16_malsec::mult_verification::verify_multiplication_gf_triples(&mut self.inner, &mut context, &mut self.triples_to_check, false)
+        };
+        match err {
+            Ok(true) => {
+                self.inner.compare_view(context)
+            },
+            Ok(false) => Err(MpcError::MultCheck),
+            Err(err) => Err(err)
         }
     }
 
@@ -281,12 +335,12 @@ where
     }
 }
 
-pub struct InputPhase<'a, F: Field + Sync + Send> {
+pub struct InputPhase<'a, F: Field + Sync + Send + GF2p64Subfield> {
     party: &'a mut FurukawaParty<F>,
     context: BroadcastContext,
 }
 
-impl<'a, F: Field + Sync + Send> InputPhase<'a, F>
+impl<'a, F: Field + Sync + Send + GF2p64Subfield> InputPhase<'a, F>
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
@@ -354,12 +408,12 @@ where
     }
 }
 
-pub struct OutputPhase<'a, F: Field + Sync + Send> {
+pub struct OutputPhase<'a, F: Field + Sync + Send + GF2p64Subfield> {
     party: &'a mut FurukawaParty<F>,
     context: BroadcastContext,
 }
 
-impl<'a, F: Field + Sync + Send> OutputPhase<'a, F>
+impl<'a, F: Field + Sync + Send + GF2p64Subfield> OutputPhase<'a, F>
 where
     Sha256: FieldDigestExt<F>,
     ChaCha20Rng: FieldRngExt<F>,
@@ -392,7 +446,7 @@ where
     }
 }
 
-impl<F: Field + Send + Sync> ArithmeticBlackBox<F> for FurukawaParty<F>
+impl<F: Field + Send + Sync + GF2p64Subfield> ArithmeticBlackBox<F> for FurukawaParty<F>
 where
     ChaCha20Rng: FieldRngExt<F>,
     Sha256: FieldDigestExt<F>,
@@ -571,6 +625,7 @@ pub mod test {
     };
     use crate::party::test::TestSetup;
     use crate::party::ArithmeticBlackBox;
+    use crate::share::gf2p64::GF2p64Subfield;
     use crate::share::test::{assert_eq, consistent};
     use rand::thread_rng;
     use rand_chacha::ChaCha20Rng;
@@ -585,7 +640,7 @@ pub mod test {
     use super::FurukawaParty;
 
     pub fn localhost_setup_furukawa<
-        F: Field + Send + 'static + Sync,
+        F: Field + Send + 'static + Sync + GF2p64Subfield,
         T1: Send + 'static,
         F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
         T2: Send + 'static,
@@ -597,6 +652,7 @@ pub mod test {
         f2: F2,
         f3: F3,
         n_worker_threads: Option<usize>,
+        use_recursive_check: bool,
     ) -> (
         JoinHandle<(T1, FurukawaParty<F>)>,
         JoinHandle<(T2, FurukawaParty<F>)>,
@@ -606,30 +662,31 @@ pub mod test {
         Sha256: FieldDigestExt<F>,
         ChaCha20Rng: FieldRngExt<F>,
     {
-        fn adapter<F: Field + Send + Sync, T, Fx: FnOnce(&mut FurukawaParty<F>) -> T>(
+        fn adapter<F: Field + Send + Sync + GF2p64Subfield, T, Fx: FnOnce(&mut FurukawaParty<F>) -> T>(
             conn: ConnectedParty,
             f: Fx,
             n_worker_threads: Option<usize>,
+            use_recursive_check: bool,
         ) -> (T, FurukawaParty<F>)
         where
             Sha256: FieldDigestExt<F>,
             ChaCha20Rng: FieldRngExt<F>,
         {
-            let mut party = FurukawaParty::setup(conn, n_worker_threads).unwrap();
+            let mut party = FurukawaParty::setup(conn, n_worker_threads, use_recursive_check).unwrap();
             let t = f(&mut party);
             party.finalize().unwrap();
             party.inner.teardown().unwrap();
             (t, party)
         }
         localhost_connect(
-            move |conn_party| adapter(conn_party, f1, n_worker_threads),
-            move |conn_party| adapter(conn_party, f2, n_worker_threads),
-            move |conn_party| adapter(conn_party, f3, n_worker_threads),
+            move |conn_party| adapter(conn_party, f1, n_worker_threads, use_recursive_check),
+            move |conn_party| adapter(conn_party, f2, n_worker_threads, use_recursive_check),
+            move |conn_party| adapter(conn_party, f3, n_worker_threads, use_recursive_check),
         )
     }
 
     pub struct FurukawaSetup;
-    impl<F: Field + Send + Sync + 'static> TestSetup<FurukawaParty<F>> for FurukawaSetup
+    impl<F: Field + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaSetup
     where
         Sha256: FieldDigestExt<F>,
         ChaCha20Rng: FieldRngExt<F>,
@@ -650,7 +707,7 @@ pub mod test {
             JoinHandle<(T2, FurukawaParty<F>)>,
             JoinHandle<(T3, FurukawaParty<F>)>,
         ) {
-            localhost_setup_furukawa(f1, f2, f3, None)
+            localhost_setup_furukawa(f1, f2, f3, None, false)
         }
         fn localhost_setup_multithreads<
             T1: Send + 'static,
@@ -669,7 +726,52 @@ pub mod test {
             JoinHandle<(T2, FurukawaParty<F>)>,
             JoinHandle<(T3, FurukawaParty<F>)>,
         ) {
-            localhost_setup_furukawa(f1, f2, f3, Some(n_threads))
+            localhost_setup_furukawa(f1, f2, f3, Some(n_threads), false)
+        }
+    }
+
+    struct FurukawaRecursiveCheckSetup;
+    impl<F: Field + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaRecursiveCheckSetup
+    where
+        Sha256: FieldDigestExt<F>,
+        ChaCha20Rng: FieldRngExt<F>,
+    {
+        fn localhost_setup<
+                    T1: Send + 'static,
+                    F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
+                    T2: Send + 'static,
+                    F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
+                    T3: Send + 'static,
+                    F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+                >(
+                    f1: F1,
+                    f2: F2,
+                    f3: F3,
+                ) -> (
+                    JoinHandle<(T1, FurukawaParty<F>)>,
+                    JoinHandle<(T2, FurukawaParty<F>)>,
+                    JoinHandle<(T3, FurukawaParty<F>)>,
+                ) {
+            localhost_setup_furukawa(f1, f2, f3, None, true)
+        }
+        fn localhost_setup_multithreads<
+                    T1: Send + 'static,
+                    F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
+                    T2: Send + 'static,
+                    F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
+                    T3: Send + 'static,
+                    F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+                >(
+                    n_threads: usize,
+                    f1: F1,
+                    f2: F2,
+                    f3: F3,
+                ) -> (
+                    JoinHandle<(T1, FurukawaParty<F>)>,
+                    JoinHandle<(T2, FurukawaParty<F>)>,
+                    JoinHandle<(T3, FurukawaParty<F>)>,
+                ) {
+            localhost_setup_furukawa(f1, f2, f3, Some(n_threads), true)
         }
     }
 
@@ -740,5 +842,32 @@ pub mod test {
     fn inv_aes128_no_keyschedule_gf8_mt() {
         const N_THREADS: usize = 3;
         test_inv_aes128_no_keyschedule_gf8::<FurukawaSetup, _>(100, Some(N_THREADS));
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8_recursive_check() {
+        test_aes128_no_keyschedule_gf8::<FurukawaRecursiveCheckSetup, _>(1, None);
+    }
+
+    #[test]
+    fn aes128_no_keyschedule_gf8_recursive_check_mt() {
+        const N_THREADS: usize = 3;
+        test_aes128_no_keyschedule_gf8::<FurukawaRecursiveCheckSetup, _>(100, Some(N_THREADS));
+    }
+
+    #[test]
+    fn aes128_keyschedule_gf8_recursive_check() {
+        test_aes128_keyschedule_gf8::<FurukawaRecursiveCheckSetup, _>(None);
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8_recursive_check() {
+        test_inv_aes128_no_keyschedule_gf8::<FurukawaRecursiveCheckSetup, _>(1, None);
+    }
+
+    #[test]
+    fn inv_aes128_no_keyschedule_gf8_recursive_check_mt() {
+        const N_THREADS: usize = 3;
+        test_inv_aes128_no_keyschedule_gf8::<FurukawaRecursiveCheckSetup, _>(100, Some(N_THREADS));
     }
 }

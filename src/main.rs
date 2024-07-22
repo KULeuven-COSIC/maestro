@@ -23,7 +23,8 @@ use crate::{
 use benchmark::BenchmarkProtocol;
 use chida::ChidaBenchmark;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
-use gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitAllCheckASBenchmark};
+use furukawa::MalChidaRecursiveCheckBenchmark;
+use gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark};
 use itertools::Itertools;
 use lut256::lut256_ss::Lut256SSBenchmark;
 use network::ConnectedParty;
@@ -49,6 +50,7 @@ struct Cli {
 pub enum ProtocolVariant {
     Chida,
     MalChida,
+    MalChidaRecCheck,
     Lut16,
     GF4Circuit,
     Lut256,
@@ -59,6 +61,8 @@ pub enum ProtocolVariant {
     MalLut16Bitstring,
     MalGF4Circuit,
     MalGF4CircuitAllCheck,
+    MalGF4CircuitBucketBeaverCheck,
+    MalGF4CircuitRecBeaverCheck,
 }
 
 #[derive(Subcommand)]
@@ -215,6 +219,7 @@ impl ProtocolVariant {
         match self {
             ProtocolVariant::Chida => &ChidaBenchmark,
             ProtocolVariant::MalChida => &MalChidaBenchmark,
+            ProtocolVariant::MalChidaRecCheck => &MalChidaRecursiveCheckBenchmark,
             ProtocolVariant::GF4Circuit => &GF4CircuitBenchmark,
             ProtocolVariant::Lut16 => &LUT16Benchmark,
             ProtocolVariant::Lut256 => &LUT256Benchmark,
@@ -225,6 +230,8 @@ impl ProtocolVariant {
             ProtocolVariant::MalLut16PrepCheck => &MalLUT16PrepCheckBenchmark,
             ProtocolVariant::MalLut16AllCheck => &MalLUT16AllCheckBenchmark,
             ProtocolVariant::MalGF4CircuitAllCheck => &GF4CircuitAllCheckASBenchmark,
+            ProtocolVariant::MalGF4CircuitBucketBeaverCheck => &GF4CircuitASBucketBeaverBenchmark,
+            ProtocolVariant::MalGF4CircuitRecBeaverCheck => &GF4CircuitASRecBeaverBenchmark,
         }
     }
 }

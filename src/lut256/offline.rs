@@ -4,7 +4,7 @@ use itertools::{izip, repeat_n, Itertools};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    chida, lut256::RndOhv, party::{error::MpcResult, BitStringMulTripleRecorder, MainParty, MulTripleRecorder, Party}, share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}, util, wollut16
+    chida, party::{error::MpcResult, BitStringMulTripleRecorder, MainParty, MulTripleRecorder, Party}, share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}, util, wollut16
 };
 
 use super::{RndOhv256Output, RndOhv256OutputSS};

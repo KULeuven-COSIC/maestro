@@ -154,7 +154,7 @@ where
 type OptimisticMulResult<F> = (RssShareVec<F>, RssShareVec<F>, Vec<F>, Vec<F>);
 
 #[allow(non_snake_case)]
-fn optimistic_mul_mt<F: Field + Send>(
+pub fn optimistic_mul_mt<F: Field + Send>(
     party: &mut MainParty,
     M: usize,
 ) -> MpcResult<OptimisticMulResult<F>>
@@ -188,7 +188,7 @@ where
 }
 
 #[allow(non_snake_case)]
-fn optimistic_mul<F: Field, P: Party>(party: &mut P, M: usize) -> MpcResult<OptimisticMulResult<F>>
+pub fn optimistic_mul<F: Field, P: Party>(party: &mut P, M: usize) -> MpcResult<OptimisticMulResult<F>>
 where
     ChaCha20Rng: FieldRngExt<F>,
 {

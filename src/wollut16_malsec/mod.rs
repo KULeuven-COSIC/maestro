@@ -76,9 +76,9 @@ impl WL16ASParty {
     fn verify_multiplications(&mut self) -> MpcResult<()> {
         let t = Instant::now();
         let res = if self.inner.has_multi_threading() {
-            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check)
+            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check, false)
         }else{
-            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check)
+            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check, false)
         };
         match res {
             Ok(true) => {

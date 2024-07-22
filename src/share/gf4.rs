@@ -244,7 +244,7 @@ impl<D: Digest> FieldDigestExt<GF4> for D {
 /// Two elements of `GF(2^4) := GF(2)[X] / X^4+X+1` packed into a single byte.
 ///
 /// The top 4 bits are the first element.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Default, Debug)]
 pub struct BsGF4(u8);
 
 impl BsGF4 {
