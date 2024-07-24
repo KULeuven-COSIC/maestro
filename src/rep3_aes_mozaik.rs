@@ -11,7 +11,7 @@ mod benchmark;
 
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
 
-use aes::GF8InvBlackBox;
+use aes::{AesKeyState, GF8InvBlackBox};
 use chida::{ChidaBenchmarkParty, ImplVariant};
 use clap::{Parser, Subcommand};
 use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
@@ -82,8 +82,17 @@ enum Commands {
 }
 
 #[derive(Deserialize)]
+enum Key {
+    #[serde(rename = "key_share")]
+    KeyShare(String),
+    #[serde(rename = "key_schedule_share")]
+    SharedKeySchedule(String),
+}
+
+#[derive(Deserialize)]
 struct EncryptArgs {
-    key_share: String,
+    #[serde(flatten)]
+    key_share: Key,
     nonce: String,
     associated_data: String,
     message_share: Vec<(u64,u64)>,
@@ -91,7 +100,8 @@ struct EncryptArgs {
 
 #[derive(Deserialize)]
 struct DecryptArgs {
-    key_share: String,
+    #[serde(flatten)]
+    key_share: Key,
     nonce: String,
     associated_data: String,
     ciphertext: String,
@@ -105,15 +115,20 @@ struct EncryptResult {
     error: Option<String>,
 }
 
+enum KeyParams<T> {
+    KeyShare(Vec<T>),
+    SharedKeySchedule(Vec<T>)
+}
+
 struct EncryptParams {
-    key_share: Vec<GF8>,
+    key_share: KeyParams<GF8>,
     nonce: Vec<u8>,
     associated_data: Vec<u8>,
     message_share: Vec<(u64,u64)>,
 }
 
 struct DecryptParams {
-    key_share: Vec<GF8>,
+    key_share: KeyParams<GF8>,
     nonce: Vec<u8>,
     associated_data: Vec<u8>,
     ciphertext: Vec<u8>,
@@ -133,15 +148,28 @@ fn try_decode_hex(field: &str, arg: String) -> Result<Vec<u8>> {
     hex::decode(arg).map_err(|hex_err| Rep3AesError::ParseError(format!("when reading parameter field '{}': {}", field, hex_err)))
 }
 
+fn try_decode_key(key_share: Key) -> Result<KeyParams<GF8>> {
+    Ok(match key_share {
+        Key::KeyShare(key_share) => {
+            let bytes = try_decode_hex("key_share", key_share)?;
+            KeyParams::KeyShare(bytes.into_iter().map(|b| GF8(b)).collect())
+        },
+        Key::SharedKeySchedule(key_schedule) => {
+            let bytes = try_decode_hex("key_schedule_share", key_schedule)?;
+            KeyParams::SharedKeySchedule(bytes.into_iter().map(|b| GF8(b)).collect())
+        },
+    })
+}
+
 impl TryFrom<EncryptArgs> for EncryptParams {
     type Error = Rep3AesError;
     fn try_from(args: EncryptArgs) -> Result<Self> {
-        let key_share = try_decode_hex("key_share", args.key_share)?;
+        let key_share = try_decode_key(args.key_share)?;
         let nonce = try_decode_hex("nonce", args.nonce)?;
         let ad = try_decode_hex("associated_data", args.associated_data)?;
     
         Ok(Self {
-            key_share: key_share.into_iter().map(|b| GF8(b)).collect(),
+            key_share,
             nonce,
             associated_data: ad,
             message_share: args.message_share,
@@ -152,13 +180,13 @@ impl TryFrom<EncryptArgs> for EncryptParams {
 impl TryFrom<DecryptArgs> for DecryptParams {
     type Error = Rep3AesError;
     fn try_from(args: DecryptArgs) -> Result<Self> {
-        let key_share = try_decode_hex("key_share", args.key_share)?;
+        let key_share = try_decode_key(args.key_share)?;
         let nonce = try_decode_hex("nonce", args.nonce)?;
         let ad = try_decode_hex("associated_data", args.associated_data)?;
         let ct = try_decode_hex("ciphertext", args.ciphertext)?;
 
         Ok(Self {
-            key_share: key_share.into_iter().map(|b| GF8(b)).collect(),
+            key_share,
             nonce,
             associated_data: ad,
             ciphertext: ct,
@@ -224,12 +252,18 @@ fn return_to_writer<T: Serialize + From<Rep3AesError>, W: io::Write, F: FnOnce()
     }
 }
 
-fn additive_shares_to_rss<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, shares: Vec<GF8>) -> MpcResult<Vec<RssShare<GF8>>> {
-    let (k1, k2, k3) = party.input_round(&shares)?;
+fn additive_shares_to_rss<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, shares: KeyParams<GF8>) -> MpcResult<KeyParams<RssShare<GF8>>> {
+    let add_shares = match &shares {
+        KeyParams::KeyShare(vec) | KeyParams::SharedKeySchedule(vec) => vec,
+    };
+    let (k1, k2, k3) = party.input_round(&add_shares)?;
     let key_share_rss: Vec<_> = izip!(k1, k2, k3)
         .map(|(k1, k2, k3)| k1 + k2 + k3)
         .collect();
-    Ok(key_share_rss)
+    Ok(match shares {
+        KeyParams::KeyShare(_) => KeyParams::KeyShare(key_share_rss),
+        KeyParams::SharedKeySchedule(_) => KeyParams::SharedKeySchedule(key_share_rss),
+    })
 }
 
 impl From<MpcError> for Rep3AesError {
@@ -244,6 +278,24 @@ impl From<io::Error> for Rep3AesError {
     }
 }
 
+fn aes128_gcm_encrypt_key_params<Protocol>(party: &mut Protocol, iv: &[u8], key: &KeyParams<RssShare<GF8>>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)>
+where Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox
+{
+    match key {
+        KeyParams::KeyShare(key_share) => gcm::aes128_gcm_encrypt(party, iv, &key_share, message, associated_data),
+        KeyParams::SharedKeySchedule(key_schedule) => {
+            if key_schedule.len() != 176 {
+                return Err(MpcError::InvalidParameters("Expected a AES-128 keyschedule (176 byte)".to_string()));
+            }
+            // un-flatten the key_schedule
+            let key_schedule = key_schedule.chunks_exact(16)
+                .map(|round_key| AesKeyState::from_bytes(round_key.iter().copied().collect_vec()))
+                .collect_vec();
+            gcm::aes128_gcm_encrypt_with_ks(party, iv, &key_schedule, message, associated_data)
+        }
+    }
+}
+
 fn aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, party_index: usize, encrypt_args: EncryptParams) -> Result<EncryptResult> {
     let key_share = additive_shares_to_rss(party, encrypt_args.key_share)?;
     let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.message_share.into_iter().unzip();
@@ -252,7 +304,7 @@ fn aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF
     GF8InvBlackBox::do_preprocessing(party, 1, prep_info.blocks)?;
     ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
     let message_share = convert_ring_to_boolean(party, party_index, &message_share_si, &message_share_sii)?;
-    let (mut tag, mut ct) = gcm::aes128_gcm_encrypt(party, &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
+    let (mut tag, mut ct) = aes128_gcm_encrypt_key_params(party, &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
     ct.append(&mut tag);
     // open ct||tag
     let ct_and_tag = party.output_to(&ct, &ct, &ct)?;
@@ -266,7 +318,19 @@ fn mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> 
     // split ciphertext and tag; tag is the last 16 bytes
     let ctlen = decrypt_args.ciphertext.len();
     let (ct, tag) = (&decrypt_args.ciphertext[..ctlen-16], &decrypt_args.ciphertext[ctlen-16..]);
-    let res = gcm::aes128_gcm_decrypt(party, &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check);
+    let res = match key_share {
+        KeyParams::KeyShare(key_share) => gcm::aes128_gcm_decrypt(party, &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check),
+        KeyParams::SharedKeySchedule(key_schedule) => {
+            if key_schedule.len() != 176 {
+                return Err(MpcError::InvalidParameters("Expected a AES-128 keyschedule (176 byte)".to_string()).into());
+            }
+            // un-flatten the key_schedule
+            let key_schedule = key_schedule.chunks_exact(16)
+                .map(|round_key| AesKeyState::from_bytes(round_key.iter().copied().collect_vec()))
+                .collect_vec();
+            gcm::aes128_gcm_decrypt_with_ks(party, &decrypt_args.nonce, &key_schedule, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check)
+        }
+    };
     match res {
         Ok(message_share) => {
             // now run b2a conversion
@@ -347,6 +411,10 @@ mod rep3_aes_main_test {
     const CT: &str = "df9776ec3ce5fbace5b8d3602d0177aabd10527c5e5157a4f68ae4a12bdaf9387ffa60b78fd805b0";
     const TAG: &str = "26f800262da61ee3320ba0834ada6b9d";
 
+    const KEY_SCHEDULE_SHARE_1: &str = "a1af1c27bdb5e523a4315fd2ff2af347d46b06e1565cd41039405a5a736e4544caa92b2f843cfa9d572dee94ac96085709473e314ebf5d139016159644f59e536c533ffb8585081c0610e3b3cd5f10a1b75c70fccaa67fa0104d746c2151423716b1929d7ff33896c39bd552ed9e2455eb884d77782033edc50bfcc5caa2ecdf9e5878e233c11ee2068caab62e54c51cf34c84db8f98c19d529792da4e3a9fd3dd0856fc86297d3e87a9726c23836ca1";
+    const KEY_SCHEDULE_SHARE_2: &str = "4cd755f877594026205d836c25300fd301223cb6f3208542b378a9026b0c59e29fc1b879b1505fd8ebd47b46c9f71828f00f38860bdd471a4f479f5f65bddb9727f8453c0d2f073d0960d1d174e2fbf7d90fae66a2850302e31edd1b5cad3a481654916bb4039f8de426606cb4f10b27f05bb5a05e429a8a0306794f659aadee68ee7b58e1f9f002f21014909e1e0ae11d82710d96d7e6c83e34de0fe502b7e78453c2528319f4af18fb3db98db7a720";
+    const KEY_SCHEDULE_SHARE_3: &str = "98dcf5b52456da3c8679bb54f1964a13c5a391cc5b2c85f0767d4010cfab19699ae9b2c304bd5072716dd3ad7f3c53cf7ed3c080f3282909a48fffb640cb730b2835361f5d7e70f9a17a38c57634d73eba26d7c869820a285cf8d55a1dde383a67996474ad2db613eecbd81bf03b02121c774f86471b0f3e6e024ef6ae63a72d489c28970d6b639483c0f82ec64d6fe98e0424c3a6d67b34a46656bc15fa92492a65ba15c997fb4b9b3027661494194f";
+
     static PORT_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -397,6 +465,62 @@ mod rep3_aes_main_test {
         let h1 = thread::spawn(party_f(0, KEY_SHARE_1, (r1.clone(), r2.clone())));
         let h2 = thread::spawn(party_f(1, KEY_SHARE_2, (r2, r3.clone())));
         let h3 = thread::spawn(party_f(2, KEY_SHARE_3, (r3, r1)));
+
+        h1.join().unwrap();
+        h2.join().unwrap();
+        h3.join().unwrap();
+
+        drop(guard);        
+    }
+
+    #[test]
+    fn encrypt_aes_gcm_128_ks() {
+        // before running this test, make sure that the ports in p1/p2/p3.toml are free
+        let guard = PORT_LOCK.lock().unwrap();
+
+        let mut rng = thread_rng();
+        let (r1, r2, r3) = secret_share_vector_ring(&mut rng, &MESSAGE_RING);
+
+        let party_f = |i: usize, key_schedule_share: &'static str, message_share: (Vec<u64>, Vec<u64>)| {
+            move || {
+                let path = match i {
+                    0 => "p1.toml",
+                    1 => "p2.toml",
+                    2 => "p3.toml",
+                    _ => panic!()
+                };
+                let cli = Cli {
+                    config: PathBuf::from(path),
+                    active: false,
+                    timeout: None,
+                    threads: None,
+                    command: Commands::Encrypt { mode: Mode::AesGcm128 }
+                };
+
+                let list_of_numbers = message_share.0.into_iter().zip(message_share.1).map(|(vi, vii)| format!("[{}, {}]", vi, vii)).join(", ");
+
+                // prepare input arg
+                let input_arg = format!("{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}", key_schedule_share, NONCE, AD, list_of_numbers);
+                let mut output = BufWriter::new(Vec::new());
+                execute_command(cli, input_arg.as_bytes(), &mut output);
+
+                // check what is written to the output
+                let buf = output.into_inner().unwrap();
+                let res: EncryptResult = serde_json::from_slice(&buf).unwrap();
+
+                assert!(res.ciphertext.is_some());
+                assert!(res.error.is_none());
+                let ciphertext = res.ciphertext.unwrap();
+                
+                assert_eq!(ciphertext.len(), CT.len() + TAG.len());
+                assert_eq!(&ciphertext[..CT.len()], CT);
+                assert_eq!(&ciphertext[CT.len()..], TAG);
+            }
+        };
+
+        let h1 = thread::spawn(party_f(0, KEY_SCHEDULE_SHARE_1, (r1.clone(), r2.clone())));
+        let h2 = thread::spawn(party_f(1, KEY_SCHEDULE_SHARE_2, (r2, r3.clone())));
+        let h3 = thread::spawn(party_f(2, KEY_SCHEDULE_SHARE_3, (r3, r1)));
 
         h1.join().unwrap();
         h2.join().unwrap();
@@ -497,6 +621,61 @@ mod rep3_aes_main_test {
         let h1 = thread::spawn(party_f(0, KEY_SHARE_1));
         let h2 = thread::spawn(party_f(1, KEY_SHARE_2));
         let h3 = thread::spawn(party_f(2, KEY_SHARE_3));
+
+        let share_1 = h1.join().unwrap();
+        let share_2 = h2.join().unwrap();
+        let share_3 = h3.join().unwrap();
+
+        drop(guard);
+
+        assert_eq!(MESSAGE_RING.len(), share_1.len());
+        assert_eq!(MESSAGE_RING.len(), share_2.len());
+        assert_eq!(MESSAGE_RING.len(), share_3.len());
+        for (m, s1, s2, s3) in izip!(MESSAGE_RING, share_1, share_2, share_3) {
+            // check consistent
+            assert_eq!(s1.0, s3.1);
+            assert_eq!(s1.1, s2.0);
+            assert_eq!(s2.1, s3.0);
+            assert_eq!(m, s1.0.overflowing_add(s2.0).0.overflowing_add(s3.0).0);
+        }
+    }
+
+    #[test]
+    fn decrypt_aes_gcm_128_ks() {
+        // before running this test, make sure that the ports in p1/p2/p3.toml are free
+        let guard = PORT_LOCK.lock().unwrap();
+
+        let party_f = |i: usize, key_schedule_share: &'static str| {
+            move || {
+                let path = match i {
+                    0 => "p1.toml",
+                    1 => "p2.toml",
+                    2 => "p3.toml",
+                    _ => panic!()
+                };
+                let cli = Cli {
+                    config: PathBuf::from(path),
+                    active: false,
+                    timeout: None,
+                    threads: None,
+                    command: Commands::Decrypt { mode: Mode::AesGcm128 }
+                };
+                // prepare input arg
+                let input_arg = format!("{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"ciphertext\": \"{}{}\"}}", key_schedule_share, NONCE, AD, CT, TAG);
+                let mut output = BufWriter::new(Vec::new());
+                execute_command(cli, input_arg.as_bytes(), &mut output);
+                // check what is written to the output
+                let buf = output.into_inner().unwrap();
+                let res: DecryptResult = serde_json::from_slice(&buf).unwrap();
+                assert_eq!(None, res.tag_error);
+                assert_eq!(None, res.error);
+                assert!(res.message_share.is_some());
+                res.message_share.unwrap()
+            }
+        };
+        let h1 = thread::spawn(party_f(0, &KEY_SCHEDULE_SHARE_1));
+        let h2 = thread::spawn(party_f(1, KEY_SCHEDULE_SHARE_2));
+        let h3 = thread::spawn(party_f(2, KEY_SCHEDULE_SHARE_3));
 
         let share_1 = h1.join().unwrap();
         let share_2 = h2.join().unwrap();

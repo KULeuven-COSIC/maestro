@@ -1,4 +1,4 @@
-use std::{slice, time::Instant};
+use std::slice;
 
 use itertools::izip;
 use rand_chacha::ChaCha20Rng;
@@ -20,7 +20,7 @@ pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut Broadc
     let k2 = gf2_triples.len() * 16; //each BsBool16 contains 16 values
     let n = (k1+k2).checked_next_power_of_two().expect("n too large");
 
-    let add_triples_time = Instant::now();
+    // let add_triples_time = Instant::now();
 
     let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
     let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
@@ -53,7 +53,7 @@ pub fn verify_multiplication_triples_mt(party: &mut MainParty, context: &mut Bro
         // don't use multi-threading for such small task
         return verify_multiplication_triples(party, context, gf4_triples, gf2_triples);
     }
-    let add_triples_time = Instant::now();
+    // let add_triples_time = Instant::now();
 
     let n_threads = party.num_worker_threads();
     let chunk_size_gf4 = party.chunk_size_for_task(gf4_triples.len());

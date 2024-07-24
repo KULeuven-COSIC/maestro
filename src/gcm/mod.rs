@@ -119,21 +119,27 @@ pub fn get_required_prep_for_aes_128_gcm(ad_len: usize, m_len: usize) -> Require
 }
 
 pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
-    // check IV length, key length and message lengths
+    // check key length
     if key.len() != 16 { return Err(MpcError::InvalidParameters("Invalid key length, expected 128 bit (16 byte) for AES-GCM-128".to_string())); }
+    // compute key schedule
+    let ks = aes::aes128_keyschedule(party, key.to_vec())?;
+    aes128_gcm_encrypt_with_ks(party, iv, &ks, message, associated_data)
+}
+
+pub fn aes128_gcm_encrypt_with_ks<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key_schedule: &Vec<AesKeyState>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+    // check IV length, key_schedule and message lengths
     if iv.len() != 12 { return Err(MpcError::InvalidParameters("Invalid IV length. Supported IV length is 96 bit (12 byte)".to_string())); }
+    if key_schedule.len() != 11 { return Err(MpcError::InvalidParameters("Invalid Key Schedule length. Expected 11 round keys".to_string())); }
     if (message.len() as u64) >= ((1u64 << 36)-32) { return Err(MpcError::InvalidParameters("Message too large. Maximum message length is < 2^36-32 bytes".to_string())); }
     if (associated_data.len() as u64) >= (1u64 << 61 -1) { return Err(MpcError::InvalidParameters("Associated data too large. Maximum length is < 2^61 - 1 bytes".to_string())); }
 
-    // compute key schedule
-    let ks = aes::aes128_keyschedule(party, key.to_vec())?;
     let n_message_blocks = 
         if message.len() % 16 != 0 {
             message.len() / 16 + 1
         }else {
             message.len() / 16
         };
-    let counter_output = ghash_key_and_aes_gcm_cnt(party, iv, n_message_blocks, &ks)?;
+    let counter_output = ghash_key_and_aes_gcm_cnt(party, iv, n_message_blocks, key_schedule)?;
     let mut ghash_key = Vec::with_capacity(16);
     ghash_key.extend_from_slice(&counter_output[..16]);
     let mut ghash_mask = Vec::with_capacity(16);
@@ -159,11 +165,12 @@ where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
     aes128_gcm_decrypt_with_ks(party, nonce, &ks, ciphertext, tag, associated_data, tag_check) 
 }
 
-fn aes128_gcm_decrypt_with_ks<F, Protocol: ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, nonce: &[u8], key_schedule: &Vec<AesKeyState>, ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>>
+pub fn aes128_gcm_decrypt_with_ks<F, Protocol: ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, nonce: &[u8], key_schedule: &Vec<AesKeyState>, ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>>
 where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
 {
-    // check nonce length and message lengths
+    // check nonce length, key schedule and message lengths
     if nonce.len() != 12 { return Err(MpcError::InvalidParameters("Invalid IV length. Supported IV length is 96 bit (12 byte)".to_string())); }
+    if key_schedule.len() != 11 { return Err(MpcError::InvalidParameters("Invalid Key Schedule length. Expected 11 round keys".to_string())); }
     if (ciphertext.len() as u64) >= ((1u64 << 36)-32) { return Err(MpcError::InvalidParameters("Ciphertext too large. Maximum ciphertext length is < 2^36-32 bytes".to_string())); }
     if (associated_data.len() as u64) >= (1u64 << 61 -1) { return Err(MpcError::InvalidParameters("Associated data too large. Maximum length is < 2^61 - 1 bytes".to_string())); }
     
