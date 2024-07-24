@@ -187,6 +187,7 @@ pub mod test {
     use rand::{rngs::ThreadRng, thread_rng, CryptoRng, Rng};
     use std::borrow::Borrow;
     use std::fmt::Debug;
+    use itertools::Itertools;
 
     use super::RssShareVec;
 
@@ -220,6 +221,20 @@ pub mod test {
     ) {
         let actual = share1.si + share2.si + share3.si;
         assert_eq!(actual, value, "Expected {:?}, got {:?}", value, actual);
+    }
+
+    pub fn consistent_vector<F: Field + PartialEq + Debug>(share1: &[RssShare<F>], share2: &[RssShare<F>], share3: &[RssShare<F>]) {
+        assert_eq!(share1.len(), share2.len());
+        assert_eq!(share1.len(), share3.len());
+        for (s1, (s2,s3)) in share1.iter().zip(share2.iter().zip(share3)) {
+            consistent(s1, s2, s3);
+        }
+    }
+
+    pub fn assert_eq_vector<F: Field + PartialEq + Debug>(share1: impl IntoIterator<Item=RssShare<F>>, share2: impl IntoIterator<Item=RssShare<F>>, share3: impl IntoIterator<Item=RssShare<F>>, values: impl IntoIterator<Item=F>) {
+        for (s1, (s2, (s3, v))) in share1.into_iter().zip_eq(share2.into_iter().zip_eq(share3.into_iter().zip_eq(values))) {
+            assert_eq(s1, s2, s3, v);
+        }
     }
 
     pub fn secret_share<F: Field, R: Rng + CryptoRng + FieldRngExt<F>>(

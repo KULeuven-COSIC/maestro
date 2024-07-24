@@ -132,7 +132,12 @@ pub trait ArithmeticBlackBox<F: Field> {
         bi: &[F],
         bii: &[F],
     ) -> MpcResult<()>;
+
+    /// Outputs the share (si,sii) to all parties
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
+    
+    /// Outputs the shares to the respective parties
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>>;
     fn finalize(&mut self) -> MpcResult<()>;
 }
 

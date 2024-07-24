@@ -1,11 +1,11 @@
-use std::ops::{Add, AddAssign, Sub, Neg, Mul};
+use std::{borrow::Borrow, ops::{Add, AddAssign, Mul, Neg, Sub}};
 use itertools::Itertools;
 // use bytemuck::TransparentWrapper;
 use ghash::{GHash, universal_hash::{KeyInit, UniversalHash}};
 use rand::{Rng, CryptoRng};
 use sha2::Digest;
 
-use crate::share::{field::GF8, Field, FieldDigestExt, FieldRngExt};
+use crate::share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt};
 
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)] //, TransparentWrapper)]
@@ -19,21 +19,27 @@ impl GF128 {
 }
 
 impl Field for GF128 {
+    const NBYTES: usize = 16;
+
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements * Self::NBYTES
+    }
+
+    const ZERO: Self = GF128([0u8; 16]);
+
+    const ONE: Self = GF128([0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
     fn is_zero(&self) -> bool {
         return self.0.iter().all(|x| *x == 0);
     }
-    fn size() -> usize {
-        16
-    }
-    fn zero() -> Self {
-        GF128([0u8; 16])
-    }
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl std::borrow::Borrow<Self>>) -> Vec<u8> {
-        it.into_iter().flat_map(|gf| {
-            let arr = gf.borrow().0.clone();
-            arr.into_iter()
-        }).collect()
+    fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, len: usize) -> Vec<u8> {
+        let mut vec = Vec::with_capacity(Self::serialized_size(len));
+        it.into_iter().for_each(|gf| {
+            let arr = gf.borrow().0;
+            vec.extend_from_slice(&arr);
+        });
+        vec
     }
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
@@ -45,7 +51,7 @@ impl Field for GF128 {
         });
     }
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+    fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         debug_assert!(v.len()%16 == 0);
         v.into_iter().chunks(16).into_iter().map(|chunk| {
             let mut bytes = [0u8; 16];
@@ -57,7 +63,7 @@ impl Field for GF128 {
 
 impl Default for GF128 {
     fn default() -> Self {
-        Self::zero()
+        Self::ZERO
     }
 }
 
@@ -186,7 +192,29 @@ impl<D: Digest> FieldDigestExt<GF128> for D {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
+    use crate::share::Field;
+
     use super::GF128;
+
+    #[test]
+    fn gf128_one() {
+        let xs: [GF128; 10] = [
+            GF128([0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97]),
+            GF128([0x87, 0xd0, 0x92, 0x6c, 0x5d, 0x31, 0x28, 0xa6, 0xd9, 0x9e, 0x43, 0xfd, 0x3a, 0xab, 0x93, 0xda]),
+            GF128([0x39, 0x3a, 0x50, 0x5a, 0x96, 0xdc, 0x27, 0x89, 0x76, 0xe3, 0x55, 0x17, 0xa2, 0x01, 0x2e, 0x2b]),
+            GF128([0xd2, 0xc0, 0x17, 0x30, 0x71, 0xbe, 0x56, 0xca, 0x5d, 0x99, 0xc8, 0x98, 0x46, 0xdc, 0xf2, 0x7f]),
+            GF128([0x17, 0x44, 0x59, 0xad, 0xa0, 0x00, 0xb6, 0x96, 0xe3, 0x0c, 0x2d, 0x07, 0x0e, 0x5c, 0x32, 0x60]),
+            GF128([0x9c, 0x49, 0x90, 0x8e, 0x87, 0x66, 0x59, 0xe4, 0x01, 0xa2, 0xfc, 0x47, 0x7f, 0x70, 0x46, 0x16]),
+            GF128([0xb4, 0x1f, 0x43, 0xd4, 0x20, 0xf9, 0x6c, 0x83, 0x06, 0x99, 0x8a, 0x93, 0x75, 0x3c, 0xf3, 0x13]),
+            GF128([0x05, 0x04, 0xa1, 0x8c, 0x6b, 0xfa, 0x72, 0x6c, 0x9d, 0xee, 0x33, 0x9c, 0x5f, 0xf8, 0xb2, 0x93]),
+            GF128([0x18, 0xf5, 0x69, 0xb7, 0x6f, 0x55, 0x3c, 0x76, 0xee, 0x46, 0x89, 0xe4, 0x83, 0x7e, 0xf7, 0x88]),
+            GF128([0x82, 0x19, 0x16, 0x6d, 0x93, 0x08, 0xd9, 0xb1, 0xf6, 0x8c, 0x4e, 0xd6, 0x85, 0x81, 0x6a, 0x1e]),
+        ];
+        // mul by GF128::ONE is the mult. identity
+        for el in xs {
+            assert_eq!(el, el * GF128::ONE);
+        }
+    }
 
     #[test]
     fn gf128_mul() {

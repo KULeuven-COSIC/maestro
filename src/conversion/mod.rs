@@ -1,10 +1,10 @@
-use std::ops::{Add, AddAssign, Mul, Neg, Sub};
+use std::{borrow::Borrow, ops::{Add, AddAssign, Mul, Neg, Sub}};
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
 
-use crate::{aes::{ComputePhase, MPCProtocol, OutputPhase}, party::error::MpcResult, share::{field::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
 
 // a bit-wise xor shared ring element mod 2^64
 // encoded as little endian
@@ -12,17 +12,21 @@ use crate::{aes::{ComputePhase, MPCProtocol, OutputPhase}, party::error::MpcResu
 pub struct Z64Bool(u64);
 
 impl Field for Z64Bool {
+    const NBYTES: usize = 8;
+
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements * Self::NBYTES
+    }
+
+    const ZERO: Self = Self(0);
+
+    const ONE: Self = Self(1);
+
     fn is_zero(&self) -> bool {
         self.0 == 0
     }
-    fn size() -> usize {
-        8
-    }
-    fn zero() -> Self {
-        Self(0)
-    }
 
-    fn as_byte_vec(it: impl IntoIterator<Item= impl std::borrow::Borrow<Self>>) -> Vec<u8> {
+    fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         it.into_iter().flat_map(|z64| z64.borrow().to_owned().0.to_le_bytes().into_iter()).collect()
     }
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
@@ -34,7 +38,7 @@ impl Field for Z64Bool {
         });
     }
 
-    fn from_byte_vec(v: Vec<u8>) -> Vec<Self> {
+    fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         v.into_iter().chunks(8).into_iter().map(|mut chunk| {
             let (b0,b1,b2,b3,b4,b5,b6,b7) = chunk.next_tuple().unwrap();
             Self(u64::from_le_bytes([b0,b1,b2,b3,b4,b5,b6,b7]))
@@ -79,7 +83,7 @@ impl<R: Rng + CryptoRng> FieldRngExt<Z64Bool> for R {
         }
     }
     fn generate(&mut self, n: usize) -> Vec<Z64Bool> {
-        let mut v = vec![Z64Bool::zero(); n];
+        let mut v = vec![Z64Bool::ZERO; n];
         <Self as FieldRngExt<Z64Bool>>::fill(self, &mut v);
         v
     }
@@ -175,7 +179,7 @@ fn conv<'a>(it: impl Iterator<Item=&'a Z64Bool>) -> Vec<u64> {
 /// for each element, this function outputs a respective share z_1, z_2 and z_3, respectively
 /// s.t. z_1 + z_2 + z_3 = (b0_1 b1_1 ... b7_1) XOR (b0_2 b1_2 ... b7_2) XOR (b0_3 b1_3 ... b7_3)
 /// where '+' is addition in the ring
-pub fn convert_boolean_to_ring<Protocol: MPCProtocol + ComputePhase<Z64Bool> + OutputPhase<Z64Bool>>(party: &mut Protocol, party_index: usize, bytes: impl Iterator<Item = RssShare<GF8>>) -> MpcResult<(Vec<u64>,Vec<u64>)> {
+pub fn convert_boolean_to_ring<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protocol, party_index: usize, bytes: impl Iterator<Item = RssShare<GF8>>) -> MpcResult<(Vec<u64>,Vec<u64>)> {
     // convert bytes into Z64 using little endian
     let (el_si, el_sii): (Vec<_>, Vec<_>) = bytes.chunks(8).into_iter().map(|chunk| {
         let chunk: Vec<_> = chunk.collect();
@@ -189,8 +193,8 @@ pub fn convert_boolean_to_ring<Protocol: MPCProtocol + ComputePhase<Z64Bool> + O
     }).unzip();
     // draw two random values r1, r2
     let n = el_si.len();
-    let r1: (Vec<_>, Vec<_>) = party.generate_random::<Z64Bool>(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
-    let r2: (Vec<_>, Vec<_>) = party.generate_random::<Z64Bool>(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
+    let r1: (Vec<_>, Vec<_>) = party.generate_random(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
+    let r2: (Vec<_>, Vec<_>) = party.generate_random(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
     // compute el + r1 + r2
     let (tmp_i, tmp_ii) = ripple_carry_adder(party, &el_si, &el_sii, &r1.0, &r1.1)?;
     let (r3_i, r3_ii) = ripple_carry_adder(party, &tmp_i, &tmp_ii, &r2.0, &r2.1)?;
@@ -224,20 +228,20 @@ pub fn convert_boolean_to_ring<Protocol: MPCProtocol + ComputePhase<Z64Bool> + O
 }
 
 fn rss_zero(n: usize) -> (Vec<Z64Bool>, Vec<Z64Bool>) {
-    (vec![Z64Bool::zero(); n], vec![Z64Bool::zero(); n])
+    (vec![Z64Bool::ZERO; n], vec![Z64Bool::ZERO; n])
 }
 
 fn rss_pos<'a>(it: impl Iterator<Item=u64>, first: bool) -> (Vec<Z64Bool>, Vec<Z64Bool>) {
     it.map(move |el| {
         if first {
-            (Z64Bool(el.to_le()), Z64Bool::zero())
+            (Z64Bool(el.to_le()), Z64Bool::ZERO)
         }else{
-            (Z64Bool::zero(), Z64Bool(el.to_le()))
+            (Z64Bool::ZERO, Z64Bool(el.to_le()))
         }
     }).unzip()
 }
 
-pub fn convert_ring_to_boolean<Protocol: ComputePhase<Z64Bool>>(party: &mut Protocol, party_index: usize, elements_si: &[u64], elements_sii: &[u64]) -> MpcResult<Vec<RssShare<GF8>>> {
+pub fn convert_ring_to_boolean<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protocol, party_index: usize, elements_si: &[u64], elements_sii: &[u64]) -> MpcResult<Vec<RssShare<GF8>>> {
     // convert shares locally
     let si: (Vec<_>, Vec<_>) = rss_pos(elements_si.iter().copied(), true);
     let sii: (Vec<_>, Vec<_>) = rss_pos(elements_sii.iter().copied(), false);
@@ -260,22 +264,22 @@ pub fn convert_ring_to_boolean<Protocol: ComputePhase<Z64Bool>>(party: &mut Prot
 }
 
 
-fn ripple_carry_adder<Protocol: ComputePhase<Z64Bool>>(party: &mut Protocol, a_i: &[Z64Bool], a_ii: &[Z64Bool], b_i: &[Z64Bool], b_ii: &[Z64Bool]) -> MpcResult<(Vec<Z64Bool>,Vec<Z64Bool>)> {
+fn ripple_carry_adder<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protocol, a_i: &[Z64Bool], a_ii: &[Z64Bool], b_i: &[Z64Bool], b_ii: &[Z64Bool]) -> MpcResult<(Vec<Z64Bool>,Vec<Z64Bool>)> {
     debug_assert_eq!(a_i.len(), a_ii.len());
     debug_assert_eq!(a_i.len(), b_i.len());
     debug_assert_eq!(a_i.len(), b_ii.len());
     
-    let mut carry_si = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
-    let mut carry_sii = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
-    let mut slice_a_i = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
-    let mut slice_a_ii = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
-    let mut slice_b_i = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
-    let mut slice_b_ii = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
-    let mut slice_c_i = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
-    let mut slice_c_ii = vec![Z64Bool::zero(); a_i.len() / 64 + 1];
+    let mut carry_si = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut carry_sii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut slice_a_i = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut slice_a_ii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut slice_b_i = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut slice_b_ii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut slice_c_i = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut slice_c_ii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
 
-    let mut result_i = vec![Z64Bool::zero(); a_i.len()];
-    let mut result_ii = vec![Z64Bool::zero(); a_i.len()];
+    let mut result_i = vec![Z64Bool::ZERO; a_i.len()];
+    let mut result_ii = vec![Z64Bool::ZERO; a_i.len()];
     for i in 0..64 {
         bit_slice(&mut slice_a_i, a_i, i);
         bit_slice(&mut slice_a_ii, a_ii, i);
@@ -311,8 +315,8 @@ fn ripple_carry_adder<Protocol: ComputePhase<Z64Bool>>(party: &mut Protocol, a_i
 pub mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
-
-    use crate::{aes::{ComputePhase, MPCProtocol, OutputPhase, PreProcessing}, chida::online::test::ChidaSetup, conversion::{convert_boolean_to_ring, convert_ring_to_boolean, ripple_carry_adder}, furukawa::test::FurukawaSetup, party::test::TestSetup, share::{field::GF8, test::{consistent_vector, secret_share_vector}, Field, FieldRngExt, RssShare}};
+    use crate::share::Field;
+    use crate::{chida::online::test::ChidaSetup, conversion::{convert_boolean_to_ring, convert_ring_to_boolean, ripple_carry_adder}, party::{test::TestSetup, ArithmeticBlackBox}, share::{gf8::GF8, test::{consistent_vector, secret_share_vector}, FieldRngExt, RssShare}};
 
     use super::{bit_slice, unbit_slice, Z64Bool};
 
@@ -328,7 +332,7 @@ pub mod test {
                 bit_slice(slice, &el, i);
             }
             // undo
-            let mut actual = vec![Z64Bool::zero(); n];
+            let mut actual = vec![Z64Bool::ZERO; n];
             for (i, slice) in slices.iter().enumerate() {
                 unbit_slice(&mut actual, slice, i)
             }
@@ -340,7 +344,7 @@ pub mod test {
         (0..n).map(|_| rng.next_u64()).collect()
     }
 
-    fn ripple_carry_adder_u64<P: PreProcessing<Z64Bool> + ComputePhase<Z64Bool>, S: TestSetup<P>>(setup: S) {
+    fn ripple_carry_adder_u64<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>(setup: S) {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);
@@ -397,7 +401,7 @@ pub mod test {
         assert_eq!(s2ii, s3i);
     }
 
-    fn conv_bool_to_ring<P: MPCProtocol + ComputePhase<Z64Bool> + OutputPhase<Z64Bool>, S: TestSetup<P>>(setup: S) {
+    fn conv_bool_to_ring<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>(setup: S) {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);
@@ -433,7 +437,7 @@ pub mod test {
         (s1, s2, s3)
     }
 
-    fn conv_ring_to_bool<P: ComputePhase<Z64Bool>, S: TestSetup<P>>(setup: S) {
+    fn conv_ring_to_bool<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>(setup: S) {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);

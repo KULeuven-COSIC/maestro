@@ -51,6 +51,9 @@ pub trait Broadcast {
     ) -> MpcResult<Option<Vec<F>>>
     where
         Sha256: FieldDigestExt<F>;
+    
+    fn open_rss_to_multiple<F: Field>(&mut self, context: &mut BroadcastContext, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>>
+    where Sha256: FieldDigestExt<F>;
 }
 
 impl Default for BroadcastContext {
@@ -229,6 +232,32 @@ impl Broadcast for MainParty {
             }
             _ => unreachable!(),
         }
+    }
+
+    fn open_rss_to_multiple<F: Field>(&mut self, context: &mut BroadcastContext, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>>
+    where Sha256: FieldDigestExt<F>
+    {
+        let res1 = self.open_rss_to(context, to_p1, 0)?;
+        let res2 = self.open_rss_to(context, to_p2, 1)?;
+        let res3 = self.open_rss_to(context, to_p3, 2)?;
+        match self.i {
+            0 => {
+                debug_assert!(res2.is_none());
+                debug_assert!(res3.is_none());
+                res1.ok_or(MpcError::Receive)
+            },
+            1 => {
+                debug_assert!(res1.is_none());
+                debug_assert!(res3.is_none());
+                res2.ok_or(MpcError::Receive)
+            },
+            2 => {
+                debug_assert!(res1.is_none());
+                debug_assert!(res2.is_none());
+                res3.ok_or(MpcError::Receive)
+            },
+            _ => unreachable!()
+        }    
     }
 
     fn compare_view(&mut self, context: BroadcastContext) -> MpcResult<()> {

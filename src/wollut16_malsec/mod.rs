@@ -195,6 +195,13 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
         Ok(output)
     }
 
+    fn output_to(&mut self, to_p1: &[RssShare<GF8>], to_p2: &[RssShare<GF8>], to_p3: &[RssShare<GF8>]) -> MpcResult<Vec<GF8>> {
+        let output = self.inner.open_rss_to_multiple(&mut self.broadcast_context, to_p1, to_p2, to_p3)?;
+        let context = std::mem::replace(&mut self.broadcast_context, BroadcastContext::new());
+        self.inner.compare_view(context)?;
+        Ok(output)
+    }
+
     fn finalize(&mut self) -> MpcResult<()> {
         self.verify_multiplications()?;
         let context = std::mem::replace(&mut self.broadcast_context, BroadcastContext::new());

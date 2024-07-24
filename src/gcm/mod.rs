@@ -2,14 +2,14 @@ use std::{io, slice};
 
 use itertools::{repeat_n, Itertools};
 
-use crate::{aes::{self, AesKeyState, ComputeInverse, ComputePhase, ImplVariant, MPCProtocol, OutputPhase, VectorAesState}, chida::ChidaParty, party::error::{MpcError, MpcResult}, share::{field::GF8, Field, RssShare}};
+use crate::{aes::{self, AesKeyState, GF8InvBlackBox, VectorAesState}, party::{error::{MpcError, MpcResult}, ArithmeticBlackBox}, share::{gf8::GF8, Field, RssShare}};
 
 use self::gf128::{GF128, TryFromGF128SliceError};
 pub mod gf128;
+mod party;
 
 
-
-fn ghash_key_and_aes_gcm_cnt<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8>>(party: &mut Protocol, iv: &[u8], n_blocks: usize, aes_keyschedule: &Vec<AesKeyState>) -> MpcResult<Vec<RssShare<GF8>>> {
+fn ghash_key_and_aes_gcm_cnt<Protocol: GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], n_blocks: usize, aes_keyschedule: &Vec<AesKeyState>) -> MpcResult<Vec<RssShare<GF8>>> {
     assert_eq!(iv.len(), 12, "The only supported IV length is 96 bits");
     let mut counter_input = Vec::with_capacity(32 + 16*n_blocks); // the first block computes the GHASH key H, the second block computes the GHASH output mask
 
@@ -29,7 +29,7 @@ fn ghash_key_and_aes_gcm_cnt<Protocol: MPCProtocol + ComputePhase<GF8> + Compute
     }
     debug_assert_eq!(counter_input.len(), 32 + 16 * n_blocks);
     let counter_input = VectorAesState::from_bytes(counter_input);
-    let output_state = aes::aes128_no_keyschedule(party, counter_input, aes_keyschedule, ImplVariant::Simple)?;
+    let output_state = aes::aes128_no_keyschedule(party, counter_input, aes_keyschedule)?;
     Ok(output_state.to_bytes())
 }
 
@@ -47,29 +47,36 @@ fn from_gf128(e: RssShare<GF128>) -> Vec<RssShare<GF8>> {
         .collect()
 }
 
-fn ghash<'a, Protocol: MPCProtocol + ComputePhase<GF128>>(party: &mut Protocol, ghash_key: Vec<RssShare<GF8>>, associated_data: &[u8], ciphertext: impl ExactSizeIterator<Item=&'a RssShare<GF8>>) -> MpcResult<Vec<RssShare<GF8>>> {
-    let mut ghash_state = party.constant(GF128::zero());
+fn ghash<'a, Protocol: ArithmeticBlackBox<GF128>>(party: &mut Protocol, ghash_key: Vec<RssShare<GF8>>, associated_data: &[u8], ciphertext: impl ExactSizeIterator<Item=&'a RssShare<GF8>> + 'a) -> MpcResult<Vec<RssShare<GF8>>> {
+    let mut ghash_state = party.constant(GF128::ZERO);
     let ghash_key = into_gf128(ghash_key).unwrap();
-    fn ghash_part<T,F, Protocol: MPCProtocol + ComputePhase<GF128>>(party: &mut Protocol, ghash_key: &RssShare<GF128>, ghash_state: &mut RssShare<GF128>, part: impl Iterator<Item = T>, mut map: F) -> MpcResult<()>
-    where F: FnMut(&mut Protocol,T)->RssShare<GF8>
-     {
-        for block in part.chunks(16).into_iter() {
-            let mut block_bytes = block.map(|t| map(party, t)).collect_vec();
-            if block_bytes.len() != 16 {
-                block_bytes.resize(16, party.constant(GF8(0)))
-            };
-            *ghash_state += into_gf128(block_bytes).unwrap();
-            let ghash_state_clone = ghash_state.clone();
-            party.mul(slice::from_mut(&mut ghash_state.si), slice::from_mut(&mut ghash_state.sii), slice::from_ref(&ghash_key.si), slice::from_ref(&ghash_key.sii), slice::from_ref(&ghash_state_clone.si), slice::from_ref(&ghash_state_clone.sii))?;
-        }
-        Ok(())
+
+    // AD
+    let ad_len = 8 * associated_data.len() as u64;
+    for block in associated_data.chunks(16) {
+        let mut full_block = [0u8; 16];
+        full_block[..block.len()].copy_from_slice(&block);
+        let block_gf128 = party.constant(GF128::try_from(full_block.as_slice()).unwrap()); // unwrap is safe since block_bytes has length 16
+        ghash_state += block_gf128;
+        let ghash_state_clone = ghash_state.clone();
+        party.mul(slice::from_mut(&mut ghash_state.si), slice::from_mut(&mut ghash_state.sii), slice::from_ref(&ghash_key.si), slice::from_ref(&ghash_key.sii), slice::from_ref(&ghash_state_clone.si), slice::from_ref(&ghash_state_clone.sii))?;
     }
 
-    let ad_len = 8 * associated_data.len() as u64;
-    ghash_part(party, &ghash_key, &mut ghash_state, associated_data.iter(), |p,ad| p.constant(GF8(*ad)))?;
+    // CT
     let ct_len = 8 * ciphertext.len() as u64;
+    for block in ciphertext.chunks(16).into_iter() {
+        let mut block_bytes_si = [GF8::ZERO; 16];
+        let mut block_bytes_sii = [GF8::ZERO; 16];
+        block.into_iter().zip(block_bytes_si.iter_mut()).zip(block_bytes_sii.iter_mut()).for_each(|((src, dst_si), dst_sii)| {
+            *dst_si = src.si;
+            *dst_sii = src.sii;
+        });
+        let block_gf128 = RssShare::from(GF128::try_from(block_bytes_si.as_slice()).unwrap(), GF128::try_from(block_bytes_sii.as_slice()).unwrap()); // unwrap is safe since block_bytes has length 16
+        ghash_state += block_gf128; //into_gf128(block_bytes).unwrap();
+        let ghash_state_clone = ghash_state.clone();
+        party.mul(slice::from_mut(&mut ghash_state.si), slice::from_mut(&mut ghash_state.sii), slice::from_ref(&ghash_key.si), slice::from_ref(&ghash_key.sii), slice::from_ref(&ghash_state_clone.si), slice::from_ref(&ghash_state_clone.sii))?;
+    }
 
-    ghash_part(party, &ghash_key, &mut ghash_state, ciphertext, |_,ct| *ct)?;
     let mut last_block = [0u8; 16];
     for (i,b) in ad_len.to_be_bytes().into_iter().enumerate() {
         last_block[i] = b;
@@ -83,7 +90,7 @@ fn ghash<'a, Protocol: MPCProtocol + ComputePhase<GF128>>(party: &mut Protocol, 
     Ok(from_gf128(ghash_state))
 }
 
-pub fn semi_honest_tag_check(party: &mut ChidaParty, expected_tag: &[u8], computed_tag: &[RssShare<GF8>]) -> MpcResult<bool> {
+pub fn semi_honest_tag_check<Protocol: ArithmeticBlackBox<GF128>>(party: &mut Protocol, expected_tag: &[u8], computed_tag: &[RssShare<GF8>]) -> MpcResult<bool> {
     if expected_tag.len() != 16 || computed_tag.len() != 16 { 
         return Err(MpcError::InvalidParameters("Invalid tag length".to_string())); 
     }
@@ -96,20 +103,22 @@ pub fn semi_honest_tag_check(party: &mut ChidaParty, expected_tag: &[u8], comput
     if output.len() == 1 {
         Ok(output[0].is_zero())
     }else{
-        Err(MpcError::IoError(io::Error::new(io::ErrorKind::InvalidData, "Only expected one value to open")))
+        Err(MpcError::Io(io::Error::new(io::ErrorKind::InvalidData, "Only expected one value to open")))
     }
 }
 
-pub fn get_required_mult_for_aes128_gcm(ad_len: usize, m_len: usize) -> (usize, usize) {
-    let mul_gf8_ks = aes::get_required_mult_for_keyschedule(ImplVariant::Simple, 1);
-    let m_blocks = if m_len % 16 == 0 { m_len/16} else {m_len/16+1};
-    let ghash_cnt_gf8 = aes::get_required_mult_for_aes128_no_keyschedule(ImplVariant::Simple, m_blocks+2);
-    let ad_blocks = if ad_len % 16 == 0 { ad_len/16 + 1 } else { ad_len/16 + 2 };
-    let ghash_gf128 = m_blocks+ad_blocks;
-    (mul_gf8_ks+ghash_cnt_gf8, ghash_gf128)
+pub struct RequiredPrepAesGcm128 {
+    pub blocks: usize,
+    pub mul_gf128: usize
 }
 
-pub fn aes128_gcm_encrypt<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8> + ComputePhase<GF128>>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+pub fn get_required_prep_for_aes_128_gcm(ad_len: usize, m_len: usize) -> RequiredPrepAesGcm128 {
+    let m_blocks = m_len.div_ceil(16);
+    let ad_blocks = ad_len.div_ceil(16) + 1;
+    RequiredPrepAesGcm128 { blocks: m_blocks, mul_gf128: m_blocks + ad_blocks }
+}
+
+pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
     // check IV length, key length and message lengths
     if key.len() != 16 { return Err(MpcError::InvalidParameters("Invalid key length, expected 128 bit (16 byte) for AES-GCM-128".to_string())); }
     if iv.len() != 12 { return Err(MpcError::InvalidParameters("Invalid IV length. Supported IV length is 96 bit (12 byte)".to_string())); }
@@ -117,7 +126,7 @@ pub fn aes128_gcm_encrypt<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInv
     if (associated_data.len() as u64) >= (1u64 << 61 -1) { return Err(MpcError::InvalidParameters("Associated data too large. Maximum length is < 2^61 - 1 bytes".to_string())); }
 
     // compute key schedule
-    let ks = aes::aes128_keyschedule(party, key.to_vec(), ImplVariant::Simple)?; // Simple works for both Chida and Furukawa
+    let ks = aes::aes128_keyschedule(party, key.to_vec())?;
     let n_message_blocks = 
         if message.len() % 16 != 0 {
             message.len() / 16 + 1
@@ -140,17 +149,17 @@ pub fn aes128_gcm_encrypt<Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInv
     Ok((tag, ciphertext))
 }
 
-pub fn aes128_gcm_decrypt<F, Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8> + ComputePhase<GF128>>(party: &mut Protocol, nonce: &[u8], key: &[RssShare<GF8>], ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>> 
+pub fn aes128_gcm_decrypt<F, Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, nonce: &[u8], key: &[RssShare<GF8>], ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>> 
 where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
 {
     // check key length
     if key.len() != 16 { return Err(MpcError::InvalidParameters("Invalid key length, expected 128 bit (16 byte) for AES-GCM-128".to_string())); }
     // compute key schedule
-    let ks = aes::aes128_keyschedule(party, key.to_vec(), ImplVariant::Simple)?; // Simple works for both Chida and Furukawa
+    let ks = aes::aes128_keyschedule(party, key.to_vec())?;
     aes128_gcm_decrypt_with_ks(party, nonce, &ks, ciphertext, tag, associated_data, tag_check) 
 }
 
-fn aes128_gcm_decrypt_with_ks<F, Protocol: MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8> + ComputePhase<GF128>>(party: &mut Protocol, nonce: &[u8], key_schedule: &Vec<AesKeyState>, ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>>
+fn aes128_gcm_decrypt_with_ks<F, Protocol: ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, nonce: &[u8], key_schedule: &Vec<AesKeyState>, ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>>
 where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
 {
     // check nonce length and message lengths
@@ -169,7 +178,7 @@ where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
     ghash_key.extend_from_slice(&counter_output[..16]);
     let mut ghash_mask = Vec::with_capacity(16);
     ghash_mask.extend_from_slice(&counter_output[16..32]);
-    let ciphertext = ciphertext.iter().map(|b| party.constant(GF8(*b))).collect_vec();
+    let ciphertext = ciphertext.iter().map(|b| GF8InvBlackBox::constant(party, GF8(*b))).collect_vec();
     let message: Vec<_> = counter_output.into_iter().skip(32).zip(ciphertext.iter()) // zip will stop when the (incomplete) last block ends
         .map(|(s,ct)| s + *ct)
         .collect();
@@ -191,9 +200,7 @@ where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
 mod test {
     use itertools::Itertools;
     use rand::thread_rng;
-
-    use crate::{aes::MPCProtocol, chida::{self, online::test::ChidaSetup, ChidaParty}, gcm::gf128::GF128, party::{test::{localhost_setup, TestSetup}, Party}, share::{field::GF8, test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}, RssShare}};
-
+    use crate::{chida::{self, online::test::{ChidaSetup, ChidaSetupSimple}, ChidaBenchmarkParty, ChidaParty}, gcm::gf128::GF128, party::{test::{localhost_setup, TestSetup}, ArithmeticBlackBox, MainParty}, share::{gf8::GF8, test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}, RssShare}};
     use super::{aes128_gcm_decrypt, aes128_gcm_encrypt, semi_honest_tag_check};
 
     struct AesGcm128Testvector {
@@ -239,13 +246,13 @@ mod test {
         let program = |key: Vec<RssShare<GF8>>, pt: Vec<RssShare<GF8>>, iv: &[u8], ad: &[u8]| {
             let iv = iv.iter().cloned().collect_vec();
             let ad = ad.iter().cloned().collect_vec();
-            move |p: &mut ChidaParty| {
+            move |p: &mut ChidaBenchmarkParty| {
                 let (tag, ct) = aes128_gcm_encrypt(p, &iv, &key, &pt, &ad).unwrap();
                 (tag, ct)
             }
         };
 
-        let (r1, r2, r3) = ChidaSetup::localhost_setup(program(k1, pt1, iv, ad), program(k2, pt2, iv, ad), program(k3, pt3, iv, ad));
+        let (r1, r2, r3) = ChidaSetupSimple::localhost_setup(program(k1, pt1, iv, ad), program(k2, pt2, iv, ad), program(k3, pt3, iv, ad));
         let ((tag1, ct1), _) = r1.join().unwrap();
         let ((tag2, ct2), _) = r2.join().unwrap();
         let ((tag3, ct3), _) = r3.join().unwrap();
@@ -268,12 +275,12 @@ mod test {
             let ad = ad.iter().cloned().collect_vec();
             let ct = ct.iter().cloned().collect_vec();
             let tag = tag.iter().cloned().collect_vec();
-            move |p: &mut ChidaParty| {
+            move |p: &mut ChidaBenchmarkParty| {
                 aes128_gcm_decrypt(p, &iv, &key, &ct, &tag, &ad, semi_honest_tag_check).unwrap()
             }
         };
 
-        let (r1, r2, r3) = ChidaSetup::localhost_setup(program(k1, ciphertext, tag, iv, ad), program(k2, ciphertext, tag, iv, ad), program(k3, ciphertext, tag, iv, ad));
+        let (r1, r2, r3) = ChidaSetupSimple::localhost_setup(program(k1, ciphertext, tag, iv, ad), program(k2, ciphertext, tag, iv, ad), program(k3, ciphertext, tag, iv, ad));
         let (m1, _) = r1.join().unwrap();
         let (m2, _) = r2.join().unwrap();
         let (m3, _) = r3.join().unwrap();
@@ -314,10 +321,11 @@ mod test {
     #[test]
     fn consistent_random_gf128() {
         const N: usize = 100;
-        let program = |p: &mut ChidaParty| {
-            p.generate_random::<GF128>(N)
+        let program = |p: &mut ChidaBenchmarkParty| {
+            let rnd: Vec<RssShare<GF128>> = p.generate_random(N);
+            rnd
         };
-        let (h1,h2,h3) = ChidaSetup::localhost_setup(program, program, program);
+        let (h1,h2,h3) = ChidaSetupSimple::localhost_setup(program, program, program);
         let (r1, _) = h1.join().unwrap();
         let (r2, _) = h2.join().unwrap();
         let (r3, _) = h3.join().unwrap();
@@ -361,12 +369,12 @@ mod test {
         let o_share = secret_share_vector(&mut rng, o.iter().cloned());
 
         let program = |a: Vec<RssShare<GF128>>| {
-            move |p: &mut Party| {
+            move |p: &mut MainParty| {
                 chida::online::output_round(p, &a, &a, &a).unwrap()
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(o_share.0), program(o_share.1), program(o_share.2));
+        let (h1, h2, h3) = localhost_setup(program(o_share.0), program(o_share.1), program(o_share.2), None);
         let (s1, _) = h1.join().unwrap();
         let (s2, _) = h2.join().unwrap();
         let (s3, _) = h3.join().unwrap();

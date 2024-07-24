@@ -7,20 +7,21 @@ mod chida;
 mod conversion;
 mod aes;
 mod furukawa;
+mod benchmark;
 
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
 
-use aes::{ComputeInverse, ComputePhase, InputPhase, MPCProtocol, OutputPhase, PreProcessing};
-use chida::ChidaParty;
+use aes::GF8InvBlackBox;
+use chida::{ChidaBenchmarkParty, ImplVariant};
 use clap::{Parser, Subcommand};
 use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
 use furukawa::FurukawaGCMParty;
 use gcm::gf128::GF128;
 use itertools::{izip, Itertools};
 use network::{Config, ConnectedParty};
-use party::{error::{MpcError, MpcResult}, Party};
+use party::{error::{MpcError, MpcResult}, ArithmeticBlackBox};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use share::{field::GF8, RssShare};
+use share::{gf8::GF8, RssShare};
 
 #[derive(Debug)]
 enum Rep3AesError {
@@ -38,6 +39,8 @@ struct Cli {
     timeout: Option<usize>,
     #[arg(long, action, help="If set, uses actively secure MPC protocols. Default: not set, i.e., uses passively-secure MPC protocol.")]
     active: bool,
+    #[arg(long, value_name = "THREADS", help="If set, the number of threads to use.")]
+    threads: Option<usize>,
     #[command(subcommand)]
     command: Commands
 }
@@ -221,7 +224,7 @@ fn return_to_writer<T: Serialize + From<Rep3AesError>, W: io::Write, F: FnOnce()
     }
 }
 
-fn additive_shares_to_rss<Protocol: InputPhase<GF8>>(party: &mut Protocol, shares: Vec<GF8>) -> MpcResult<Vec<RssShare<GF8>>> {
+fn additive_shares_to_rss<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, shares: Vec<GF8>) -> MpcResult<Vec<RssShare<GF8>>> {
     let (k1, k2, k3) = party.input_round(&shares)?;
     let key_share_rss: Vec<_> = izip!(k1, k2, k3)
         .map(|(k1, k2, k3)| k1 + k2 + k3)
@@ -241,20 +244,39 @@ impl From<io::Error> for Rep3AesError {
     }
 }
 
-fn aes_gcm_128_enc<Protocol: PreProcessing<Z64Bool> + PreProcessing<GF8> + PreProcessing<GF128> + InputPhase<GF8> + ComputePhase<Z64Bool> + MPCProtocol + ComputePhase<GF8> + ComputeInverse<GF8> + ComputePhase<GF128> + OutputPhase<GF8>>(party: &mut Protocol, party_index: usize, encrypt_args: EncryptParams) -> Result<EncryptResult> {
+fn aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, party_index: usize, encrypt_args: EncryptParams) -> Result<EncryptResult> {
     let key_share = additive_shares_to_rss(party, encrypt_args.key_share)?;
     let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.message_share.into_iter().unzip();
-    PreProcessing::<Z64Bool>::pre_processing(party, 2*64*message_share_si.len())?;
-    let (mul_gf8, mul_gf128) = gcm::get_required_mult_for_aes128_gcm(encrypt_args.associated_data.len(), message_share_si.len()*8);
-    PreProcessing::<GF8>::pre_processing(party, mul_gf8)?;
-    PreProcessing::<GF128>::pre_processing(party, mul_gf128)?;
+    ArithmeticBlackBox::<Z64Bool>::pre_processing(party, 2*64*message_share_si.len())?;
+    let prep_info = gcm::get_required_prep_for_aes_128_gcm(encrypt_args.associated_data.len(), message_share_si.len()*8);
+    GF8InvBlackBox::do_preprocessing(party, 1, prep_info.blocks)?;
+    ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
     let message_share = convert_ring_to_boolean(party, party_index, &message_share_si, &message_share_sii)?;
     let (mut tag, mut ct) = gcm::aes128_gcm_encrypt(party, &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
     ct.append(&mut tag);
     // open ct||tag
     let ct_and_tag = party.output_to(&ct, &ct, &ct)?;
-    party.finalize()?;
+    ArithmeticBlackBox::<Z64Bool>::finalize(party)?;
+    ArithmeticBlackBox::<GF128>::finalize(party)?;
     Ok(EncryptResult::new(ct_and_tag))
+}
+
+fn mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox + ArithmeticBlackBox<Z64Bool>>(party: &mut Protocol, party_index: usize, decrypt_args: DecryptParams) -> Result<DecryptResult> {
+    let key_share = additive_shares_to_rss(party, decrypt_args.key_share)?;
+    // split ciphertext and tag; tag is the last 16 bytes
+    let ctlen = decrypt_args.ciphertext.len();
+    let (ct, tag) = (&decrypt_args.ciphertext[..ctlen-16], &decrypt_args.ciphertext[ctlen-16..]);
+    let res = gcm::aes128_gcm_decrypt(party, &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check);
+    match res {
+        Ok(message_share) => {
+            // now run b2a conversion
+            let (ring_shares_si, ring_shares_sii) = convert_boolean_to_ring(party, party_index, message_share.into_iter())?;
+            let ring_shares = ring_shares_si.into_iter().zip(ring_shares_sii).collect();
+            Ok(DecryptResult::new_success(ring_shares))
+        },
+        Err(MpcError::OperationFailed(_)) => Ok(DecryptResult::new_tag_error()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, output_writer: W) {
@@ -267,13 +289,12 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
                         let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
+                        let party_index = connected.i;
                         if cli.active {
-                            let mut party = FurukawaGCMParty::setup(connected)?;
-                            let party_index = party.inner_mut().i;
+                            let mut party = FurukawaGCMParty::setup(connected, cli.threads)?;
                             aes_gcm_128_enc(&mut party, party_index, encrypt_args)
                         }else{
-                            let mut party = ChidaParty::setup(connected)?;
-                            let party_index = party.inner_mut().i;
+                            let mut party = ChidaBenchmarkParty::setup(connected, chida::ImplVariant::Simple, cli.threads)?;
                             aes_gcm_128_enc(&mut party, party_index, encrypt_args)
                         }
                     }, output_writer);
@@ -286,24 +307,15 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
                         let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
-                        let mut party = ChidaParty::setup(connected)?;
-                        let key_share = additive_shares_to_rss(&mut party, decrypt_args.key_share)?;
-                        // split ciphertext and tag; tag is the last 16 bytes
-                        let ctlen = decrypt_args.ciphertext.len();
-                        let (ct, tag) = (&decrypt_args.ciphertext[..ctlen-16], &decrypt_args.ciphertext[ctlen-16..]);
-                        let res = gcm::aes128_gcm_decrypt(&mut party, &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check);
-                        match res {
-                            Ok(message_share) => {
-                                // now run b2a conversion
-                                let (ring_shares_si, ring_shares_sii) = convert_boolean_to_ring(&mut party, party_index, message_share.into_iter())?;
-                                let ring_shares = ring_shares_si.into_iter().zip(ring_shares_sii).collect();
-                                Ok(DecryptResult::new_success(ring_shares))
-                            },
-                            Err(MpcError::OperationFailed(_)) => Ok(DecryptResult::new_tag_error()),
-                            Err(err) => Err(err.into()),
+                        let party_index = connected.i;
+                        if cli.active {
+                            let mut party = FurukawaGCMParty::setup(connected, cli.threads)?;
+                            mozaik_decrypt(&mut party, party_index, decrypt_args)
+                        }else{
+                            let mut party = ChidaBenchmarkParty::setup(connected, ImplVariant::Optimized, cli.threads)?;
+                            mozaik_decrypt(&mut party, party_index, decrypt_args)
                         }
                     }, output_writer);
-                    
                 }
             }
         }
@@ -357,6 +369,7 @@ mod rep3_aes_main_test {
                     config: PathBuf::from(path),
                     active: false,
                     timeout: None,
+                    threads: None,
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
                 };
 
@@ -412,6 +425,7 @@ mod rep3_aes_main_test {
                     config: PathBuf::from(path),
                     active: true,
                     timeout: None,
+                    threads: None,
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
                 };
 
@@ -464,6 +478,7 @@ mod rep3_aes_main_test {
                     config: PathBuf::from(path),
                     active: false,
                     timeout: None,
+                    threads: None,
                     command: Commands::Decrypt { mode: Mode::AesGcm128 }
                 };
                 // prepare input arg

@@ -35,8 +35,8 @@ hex = "0.4.3"
 criterion = "0.5.1"
 
 [[bin]]
-name = "rep3-aes"
-path = "src/rep3_aes_main.rs"
+name = "rep3-aes-mozaik"
+path = "src/rep3_aes_mozaik.rs"
 
 [[bin]]
 name = "lut_benchmark"
