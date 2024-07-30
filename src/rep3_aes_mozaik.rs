@@ -9,6 +9,7 @@ mod aes;
 mod furukawa;
 mod benchmark;
 
+use core::slice;
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
 
 use aes::{AesKeyState, GF8InvBlackBox};
@@ -16,7 +17,7 @@ use chida::{ChidaBenchmarkParty, ImplVariant};
 use clap::{Parser, Subcommand};
 use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
 use furukawa::FurukawaGCMParty;
-use gcm::{gf128::GF128, Aes128GcmCiphertext};
+use gcm::{batch::{batch_aes128_gcm_encrypt_with_ks, EncParam}, gf128::GF128, Aes128GcmCiphertext, RequiredPrepAesGcm128};
 use itertools::{izip, Itertools};
 use network::{Config, ConnectedParty};
 use party::{error::{MpcError, MpcResult}, ArithmeticBlackBox};
@@ -134,6 +135,11 @@ struct DecryptParams {
     ciphertext: Vec<u8>,
 }
 
+trait HasKeyParams {
+    fn key_share(&self) -> &KeyParams<GF8>;
+    fn message_len(&self) -> usize;
+}
+
 #[derive(Serialize, Deserialize)]
 struct DecryptResult {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -142,6 +148,14 @@ struct DecryptResult {
     tag_error: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+impl<T> KeyParams<T> {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::KeyShare(v) | Self::SharedKeySchedule(v) => v.len()
+        }
+    }
 }
 
 fn try_decode_hex(field: &str, arg: String) -> Result<Vec<u8>> {
@@ -194,6 +208,25 @@ impl TryFrom<DecryptArgs> for DecryptParams {
     }
 }
 
+impl HasKeyParams for EncryptParams {
+    fn key_share(&self) -> &KeyParams<GF8> {
+        &self.key_share
+    }
+    fn message_len(&self) -> usize {
+        self.message_share.len()
+    }
+}
+
+impl HasKeyParams for DecryptParams {
+    fn key_share(&self) -> &KeyParams<GF8> {
+        &self.key_share
+    }
+
+    fn message_len(&self) -> usize {
+        self.ciphertext.len()
+    }
+}
+
 impl EncryptResult {
     pub fn new(ct: Vec<GF8>) -> Self {
         Self {
@@ -203,12 +236,12 @@ impl EncryptResult {
     }
 }
 
-impl From<Rep3AesError> for EncryptResult {
+impl From<Rep3AesError> for Vec<EncryptResult> {
     fn from(value: Rep3AesError) -> Self {
-        Self {
+        vec![EncryptResult {
             ciphertext: None,
             error: Some(value.to_string())
-        }
+        }]
     }
 }
 
@@ -240,9 +273,9 @@ impl From<Rep3AesError> for DecryptResult {
     }
 }
 
-fn parse_args_from_reader<Args: DeserializeOwned, Params: TryFrom<Args, Error = Rep3AesError>, R: io::Read>(reader: R) -> Result<Params> {
-    let args: Args = serde_json::from_reader(reader).map_err(|serde_err| Rep3AesError::ParseError(format!("When parsing EncryptArgs: {}", serde_err)))?;
-    Params::try_from(args)
+fn parse_args_from_reader<Args: DeserializeOwned, Params: TryFrom<Args, Error = Rep3AesError>, R: io::Read>(reader: R) -> Result<Vec<Params>> {
+    let args: Vec<Args> = serde_json::from_reader(reader).map_err(|serde_err| Rep3AesError::ParseError(format!("When parsing EncryptArgs: {}", serde_err)))?;
+    args.into_iter().map(|arg| Params::try_from(arg)).collect()
 }
 
 fn return_to_writer<T: Serialize + From<Rep3AesError>, W: io::Write, F: FnOnce()->Result<T>>(compute: F, writer: W) {
@@ -252,18 +285,35 @@ fn return_to_writer<T: Serialize + From<Rep3AesError>, W: io::Write, F: FnOnce()
     }
 }
 
-fn additive_shares_to_rss<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, shares: KeyParams<GF8>) -> MpcResult<KeyParams<RssShare<GF8>>> {
-    let add_shares = match &shares {
-        KeyParams::KeyShare(vec) | KeyParams::SharedKeySchedule(vec) => vec,
-    };
+fn additive_shares_to_rss<Protocol: ArithmeticBlackBox<GF8>>(party: &mut Protocol, shares: &[impl HasKeyParams]) -> MpcResult<Vec<KeyParams<RssShare<GF8>>>> {
+    debug_assert!(shares.len() > 0);
+
+    let key_param_len = shares[0].key_share().len();
+    if shares.iter().any(|ks| ks.key_share().len() != key_param_len) {
+        return Err(MpcError::InvalidParameters("Key shares and key schedule shares cannot be mixed in batched encryption/decryption".to_string()));
+    }
+    let total_length = shares.len() * key_param_len;
+    let mut add_shares = Vec::with_capacity(total_length);
+    shares.iter().for_each(|s| {
+        match s.key_share() {
+            KeyParams::KeyShare(v) | KeyParams::SharedKeySchedule(v) => add_shares.extend_from_slice(&v),
+        }
+    });
+    
     let (k1, k2, k3) = party.input_round(&add_shares)?;
     let key_share_rss: Vec<_> = izip!(k1, k2, k3)
         .map(|(k1, k2, k3)| k1 + k2 + k3)
         .collect();
-    Ok(match shares {
-        KeyParams::KeyShare(_) => KeyParams::KeyShare(key_share_rss),
-        KeyParams::SharedKeySchedule(_) => KeyParams::SharedKeySchedule(key_share_rss),
-    })
+    Ok(shares.iter().zip(key_share_rss.chunks_exact(key_param_len))
+        .map(|(share, chunk)| {
+            let rss = chunk.iter().copied().collect_vec();
+            match share.key_share() {
+                KeyParams::KeyShare(_) => KeyParams::KeyShare(rss),
+                KeyParams::SharedKeySchedule(_) => KeyParams::SharedKeySchedule(rss),
+            }
+        })
+        .collect()
+    )
 }
 
 impl From<MpcError> for Rep3AesError {
@@ -278,33 +328,40 @@ impl From<io::Error> for Rep3AesError {
     }
 }
 
+fn try_unflatten_aes128_gcm_key_schedule(key_schedule: &Vec<RssShare<GF8>>) -> MpcResult<Vec<AesKeyState>> {
+    if key_schedule.len() != 176 {
+        return Err(MpcError::InvalidParameters("Expected a AES-128 keyschedule (176 byte)".to_string()));
+    }
+    // un-flatten the key_schedule
+    let key_schedule = key_schedule.chunks_exact(16)
+        .map(|round_key| AesKeyState::from_bytes(round_key.iter().copied().collect_vec()))
+        .collect_vec();
+    Ok(key_schedule)
+}
+
 fn aes128_gcm_encrypt_key_params<Protocol>(party: &mut Protocol, iv: &[u8], key: &KeyParams<RssShare<GF8>>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext>
 where Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox
 {
     match key {
         KeyParams::KeyShare(key_share) => gcm::aes128_gcm_encrypt(party, iv, &key_share, message, associated_data),
         KeyParams::SharedKeySchedule(key_schedule) => {
-            if key_schedule.len() != 176 {
-                return Err(MpcError::InvalidParameters("Expected a AES-128 keyschedule (176 byte)".to_string()));
-            }
-            // un-flatten the key_schedule
-            let key_schedule = key_schedule.chunks_exact(16)
-                .map(|round_key| AesKeyState::from_bytes(round_key.iter().copied().collect_vec()))
-                .collect_vec();
+            let key_schedule = try_unflatten_aes128_gcm_key_schedule(key_schedule)?;
             gcm::aes128_gcm_encrypt_with_ks(party, iv, &key_schedule, message, associated_data)
         }
     }
 }
 
 fn aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, party_index: usize, encrypt_args: EncryptParams) -> Result<EncryptResult> {
-    let key_share = additive_shares_to_rss(party, encrypt_args.key_share)?;
+    let key_share = additive_shares_to_rss(party, slice::from_ref(&encrypt_args))?;
+    debug_assert_eq!(key_share.len(), 1);
+    let key_share = &key_share[0];
     let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.message_share.into_iter().unzip();
     ArithmeticBlackBox::<Z64Bool>::pre_processing(party, 2*64*message_share_si.len())?;
     let prep_info = gcm::get_required_prep_for_aes_128_gcm(encrypt_args.associated_data.len(), message_share_si.len()*8);
     GF8InvBlackBox::do_preprocessing(party, 1, prep_info.blocks)?;
     ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
     let message_share = convert_ring_to_boolean(party, party_index, &message_share_si, &message_share_sii)?;
-    let mut ct = aes128_gcm_encrypt_key_params(party, &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
+    let mut ct = aes128_gcm_encrypt_key_params(party, &encrypt_args.nonce, key_share, &message_share, &encrypt_args.associated_data)?;
     ct.ciphertext.append(&mut ct.tag);
     // open ct||tag
     let ct_and_tag = party.output_to(&ct.ciphertext, &ct.ciphertext, &ct.ciphertext)?;
@@ -313,13 +370,84 @@ fn aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF
     Ok(EncryptResult::new(ct_and_tag))
 }
 
+fn batch_aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, party_index: usize, encrypt_args: Vec<EncryptParams>) -> Result<Vec<EncryptResult>> {
+    let key_share = additive_shares_to_rss(party, &encrypt_args)?;
+    let key_share = key_share.into_iter().map(|ks| {
+        match ks {
+            KeyParams::SharedKeySchedule(ks) => try_unflatten_aes128_gcm_key_schedule(&ks),
+            KeyParams::KeyShare(_) => Err(MpcError::InvalidParameters("key schedule computation not supported in batching mode".to_string())),
+        }
+    }).collect::<MpcResult<Vec<_>>>()?;
+
+    let total_message_len: usize = encrypt_args.iter().map(|arg| arg.message_share.len()).sum();
+    ArithmeticBlackBox::<Z64Bool>::pre_processing(party, 2*64 * total_message_len)?;
+    let prep_info = encrypt_args.iter().fold(RequiredPrepAesGcm128 { blocks: 0, mul_gf128: 0 }, |mut acc, arg| {
+        let tmp = gcm::get_required_prep_for_aes_128_gcm(arg.associated_data.len(), arg.message_share.len()*8);
+        acc.blocks += tmp.blocks;
+        acc.mul_gf128 += tmp.mul_gf128;
+        acc
+    });
+    let n_keys = encrypt_args.iter().map(|arg| match arg.key_share {
+        KeyParams::KeyShare(_) => 1,
+        KeyParams::SharedKeySchedule(_) => 0,
+    }).sum();
+    GF8InvBlackBox::do_preprocessing(party, n_keys, prep_info.blocks)?;
+    ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
+
+    let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.iter().flat_map(|arg| arg.message_share.iter().copied()).unzip();
+    let message_share = convert_ring_to_boolean(party, party_index, &message_share_si, &message_share_sii)?;
+
+    let mut message_index = 0;
+    let data = encrypt_args.iter().zip(&key_share).map(|(arg, key_schedule)| {
+        let param = EncParam {
+            iv: &arg.nonce,
+            associated_data: &arg.associated_data,
+            key_schedule,
+            message: &message_share[message_index..message_index+8*arg.message_share.len()]
+        };
+        message_index += 8*arg.message_share.len();
+        param
+    });
+    let ct = batch_aes128_gcm_encrypt_with_ks(party, party_index, data)?;
+    drop(key_share);
+    drop(message_share);
+    drop(encrypt_args);
+
+    // flatten
+    let mut ct_lens = Vec::with_capacity(ct.len());
+    let flat_ct = ct.into_iter().flat_map(|ct| {
+        ct_lens.push(ct.ciphertext.len());
+        // append ct||tag
+        ct.ciphertext.into_iter().chain(ct.tag.into_iter())
+    }).collect_vec();
+    // open ct||tag
+    let ct_and_tag = party.output_to(&flat_ct, &flat_ct, &flat_ct)?;
+    drop(flat_ct);
+    ArithmeticBlackBox::<Z64Bool>::finalize(party)?;
+    ArithmeticBlackBox::<GF128>::finalize(party)?;
+
+    // undo the flatten on the opened values
+    let mut ct_index = 0;
+    Ok(
+        ct_lens.into_iter().map(|ct_len| {
+            let mut res = Vec::with_capacity(ct_len+16); //tag has fixed length 16 byte
+            res.extend_from_slice(&ct_and_tag[ct_index..ct_index+ct_len+16]);
+            ct_index += ct_len+16;
+            EncryptResult::new(res)
+        })
+        .collect()
+    )
+}
+
 fn mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox + ArithmeticBlackBox<Z64Bool>>(party: &mut Protocol, party_index: usize, decrypt_args: DecryptParams) -> Result<DecryptResult> {
-    let key_share = additive_shares_to_rss(party, decrypt_args.key_share)?;
+    let key_share = additive_shares_to_rss(party, slice::from_ref(&decrypt_args))?;
+    debug_assert_eq!(key_share.len(), 1);
+    let key_share = &key_share[0];
     // split ciphertext and tag; tag is the last 16 bytes
     let ctlen = decrypt_args.ciphertext.len();
     let (ct, tag) = (&decrypt_args.ciphertext[..ctlen-16], &decrypt_args.ciphertext[ctlen-16..]);
     let res = match key_share {
-        KeyParams::KeyShare(key_share) => gcm::aes128_gcm_decrypt(party, &decrypt_args.nonce, &key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check),
+        KeyParams::KeyShare(key_share) => gcm::aes128_gcm_decrypt(party, &decrypt_args.nonce, key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check),
         KeyParams::SharedKeySchedule(key_schedule) => {
             if key_schedule.len() != 176 {
                 return Err(MpcError::InvalidParameters("Expected a AES-128 keyschedule (176 byte)".to_string()).into());
@@ -356,10 +484,24 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let party_index = connected.i;
                         if cli.active {
                             let mut party = FurukawaGCMParty::setup(connected, cli.threads)?;
-                            aes_gcm_128_enc(&mut party, party_index, encrypt_args)
+                            if encrypt_args.len() == 1 {
+                                let encrypt_args = encrypt_args.into_iter().next().unwrap();
+                                let res = aes_gcm_128_enc(&mut party, party_index, encrypt_args);
+                                // pack res into a list of size 1
+                                res.map(|encrypt_res| vec![encrypt_res])
+                            }else{
+                                batch_aes_gcm_128_enc(&mut party, party_index, encrypt_args)
+                            }
                         }else{
                             let mut party = ChidaBenchmarkParty::setup(connected, chida::ImplVariant::Simple, cli.threads)?;
-                            aes_gcm_128_enc(&mut party, party_index, encrypt_args)
+                            if encrypt_args.len() == 1 {
+                                let encrypt_args = encrypt_args.into_iter().next().unwrap();
+                                let res = aes_gcm_128_enc(&mut party, party_index, encrypt_args);
+                                // pack res into a list of size 1
+                                res.map(|encrypt_res| vec![encrypt_res])
+                            }else{
+                                batch_aes_gcm_128_enc(&mut party, party_index, encrypt_args)
+                            }
                         }
                     }, output_writer);
                 }
@@ -367,6 +509,10 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
         },
         Commands::Decrypt { mode } => {
             let decrypt_args = parse_args_from_reader::<DecryptArgs, DecryptParams, _>(input_arg_reader).unwrap();
+            if decrypt_args.len() != 1 {
+                panic!()
+            }
+            let decrypt_args = decrypt_args.into_iter().next().unwrap();
             match mode {
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
@@ -395,11 +541,13 @@ fn main() {
 #[cfg(test)]
 mod rep3_aes_main_test {
     use std::{io::BufWriter, path::PathBuf, sync::Mutex, thread};
+    use aes_gcm::{aead::{Aead, Payload}, Aes128Gcm, Key, KeyInit, Nonce};
+    use rand::{Rng, RngCore};
 
     use itertools::{izip, Itertools};
     use rand::thread_rng;
 
-    use crate::{conversion::test::secret_share_vector_ring, execute_command, Cli, Commands, DecryptResult, EncryptResult, Mode};
+    use crate::{aes, conversion::test::secret_share_vector_ring, execute_command, share::{gf8::GF8, test::secret_share_vector, RssShare}, Cli, Commands, DecryptResult, EncryptResult, Mode};
 
 
     const KEY_SHARE_1: &str = "76c2488bd101fd2999a922d351707fcf";
@@ -444,17 +592,18 @@ mod rep3_aes_main_test {
                 let list_of_numbers = message_share.0.into_iter().zip(message_share.1).map(|(vi, vii)| format!("[{}, {}]", vi, vii)).join(", ");
 
                 // prepare input arg
-                let input_arg = format!("{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}", key_share, NONCE, AD, list_of_numbers);
+                let input_arg = format!("[{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}]", key_share, NONCE, AD, list_of_numbers);
                 let mut output = BufWriter::new(Vec::new());
                 execute_command(cli, input_arg.as_bytes(), &mut output);
 
                 // check what is written to the output
                 let buf = output.into_inner().unwrap();
-                let res: EncryptResult = serde_json::from_slice(&buf).unwrap();
+                let res: Vec<EncryptResult> = serde_json::from_slice(&buf).unwrap();
+                assert_eq!(res.len(), 1);
 
-                assert!(res.ciphertext.is_some());
-                assert!(res.error.is_none());
-                let ciphertext = res.ciphertext.unwrap();
+                assert!(res[0].ciphertext.is_some());
+                assert!(res[0].error.is_none());
+                let ciphertext = res.into_iter().next().unwrap().ciphertext.unwrap();
                 
                 assert_eq!(ciphertext.len(), CT.len() + TAG.len());
                 assert_eq!(&ciphertext[..CT.len()], CT);
@@ -500,17 +649,18 @@ mod rep3_aes_main_test {
                 let list_of_numbers = message_share.0.into_iter().zip(message_share.1).map(|(vi, vii)| format!("[{}, {}]", vi, vii)).join(", ");
 
                 // prepare input arg
-                let input_arg = format!("{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}", key_schedule_share, NONCE, AD, list_of_numbers);
+                let input_arg = format!("[{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}]", key_schedule_share, NONCE, AD, list_of_numbers);
                 let mut output = BufWriter::new(Vec::new());
                 execute_command(cli, input_arg.as_bytes(), &mut output);
 
                 // check what is written to the output
                 let buf = output.into_inner().unwrap();
-                let res: EncryptResult = serde_json::from_slice(&buf).unwrap();
+                let res: Vec<EncryptResult> = serde_json::from_slice(&buf).unwrap();
+                assert_eq!(res.len(), 1);
 
-                assert!(res.ciphertext.is_some());
-                assert!(res.error.is_none());
-                let ciphertext = res.ciphertext.unwrap();
+                assert!(res[0].ciphertext.is_some());
+                assert!(res[0].error.is_none());
+                let ciphertext = res.into_iter().next().unwrap().ciphertext.unwrap();
                 
                 assert_eq!(ciphertext.len(), CT.len() + TAG.len());
                 assert_eq!(&ciphertext[..CT.len()], CT);
@@ -527,6 +677,139 @@ mod rep3_aes_main_test {
         h3.join().unwrap();
 
         drop(guard);        
+    }
+
+    fn additive_share_to_string(v: Vec<RssShare<GF8>>) -> String {
+        let x = v.into_iter().map(|rss| rss.si.0).collect_vec();
+        hex::encode(x)
+    }
+
+    #[test]
+    fn encrypt_aes_gcm_128_ks_batched() {
+        const BATCH_SIZE: usize = 64;
+
+        // before running this test, make sure that the ports in p1/p2/p3.toml are free
+        let guard = PORT_LOCK.lock().unwrap();
+
+        let mut rng = thread_rng();
+        let plaintexts = (0..BATCH_SIZE).map(|_| rng.gen::<[u64; 5]>() ).collect_vec();
+        let mut r1 = Vec::new();
+        let mut r2 = Vec::new();
+        let mut r3 = Vec::new();
+        for i in 0..BATCH_SIZE {
+            let (ri1, ri2, ri3) = secret_share_vector_ring(&mut rng, &plaintexts[i]);
+            r1.push((ri1.clone(), ri2.clone()));
+            r2.push((ri2, ri3.clone()));
+            r3.push((ri3, ri1));
+        }
+
+        let nonces = (0..BATCH_SIZE).map(|_| rng.gen::<[u8; 12]>() ).collect_vec();
+        let keys = (0..BATCH_SIZE).map(|_| rng.gen::<[u8; 16]>() ).collect_vec();
+        let mut ks1 = Vec::new();
+        let mut ks2 = Vec::new();
+        let mut ks3 = Vec::new();
+        keys.iter().for_each(|key| {
+            let ks = aes::test::aes128_keyschedule_plain(key.clone()).into_iter()
+                // transpose the round key because `aes128_keyschedule_plain` returns column-first
+                // but we expect row-first
+                .map(|k| transpose(k))
+                .collect_vec();
+            let flat_ks = ks.into_iter().flatten().map(|x| GF8(x)).collect_vec();
+            let (ksi1, ksi2, ksi3) = secret_share_vector(&mut rng, flat_ks);
+            ks1.push(additive_share_to_string(ksi1));
+            ks2.push(additive_share_to_string(ksi2));
+            ks3.push(additive_share_to_string(ksi3));
+        });
+        
+
+        let party_f = |i: usize, key_schedule_shares: Vec<String>, message_shares: Vec<(Vec<u64>, Vec<u64>)>, nonces: Vec<[u8; 12]>| {
+            move || {
+                let path = match i {
+                    0 => "p1.toml",
+                    1 => "p2.toml",
+                    2 => "p3.toml",
+                    _ => panic!()
+                };
+                let cli = Cli {
+                    config: PathBuf::from(path),
+                    active: false,
+                    timeout: None,
+                    threads: None,
+                    command: Commands::Encrypt { mode: Mode::AesGcm128 }
+                };
+                assert_eq!(key_schedule_shares.len(), message_shares.len());
+                assert_eq!(key_schedule_shares.len(), nonces.len());
+
+                let args = izip!(key_schedule_shares, message_shares, nonces).map(|(ks, msg, nonce)| {
+                    let list_of_numbers = msg.0.into_iter().zip(msg.1).map(|(vi, vii)| format!("[{}, {}]", vi, vii)).join(", ");
+                    let nonce = hex::encode(nonce);
+                    format!("{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}", ks, nonce, AD, list_of_numbers)
+                }).join(", ");
+
+                // prepare input arg
+                let input_arg = format!("[{}]", args);
+                let mut output = BufWriter::new(Vec::new());
+                execute_command(cli, input_arg.as_bytes(), &mut output);
+
+                // check what is written to the output
+                let buf = output.into_inner().unwrap();
+                let res: Vec<EncryptResult> = serde_json::from_slice(&buf).unwrap();
+                assert_eq!(res.len(), BATCH_SIZE);
+
+                for i in 0..BATCH_SIZE {
+                    assert!(res[i].ciphertext.is_some());
+                    assert!(res[i].error.is_none());
+                }
+                res.into_iter().map(|r| r.ciphertext.unwrap()).collect_vec()
+                
+            }
+        };
+
+        let h1 = thread::spawn(party_f(0, ks1, r1, nonces.clone()));
+        let h2 = thread::spawn(party_f(1, ks2, r2, nonces.clone()));
+        let h3 = thread::spawn(party_f(2, ks3, r3, nonces.clone()));
+
+        let res1 = h1.join().unwrap();
+        let res2 = h2.join().unwrap();
+        let res3 = h3.join().unwrap();
+
+        drop(guard);        
+
+        // check if the returned ciphertexts are the same and decrypt correctly to the desired plaintext
+        assert_eq!(&res1, &res2);
+        assert_eq!(&res2, &res3);
+
+        for (key, nonce, ct, expected_pt) in izip!(keys, nonces, res1, plaintexts) {
+            let ct = hex::decode(ct).unwrap();
+            let ad = hex::decode(AD).unwrap();
+            let decrypted = aes128_gcm_dec_plain(&key, &nonce, &ad, &ct);
+            assert!(decrypted.is_some());
+            let plaintext = decrypted.unwrap();
+            assert_eq!(plaintext.len(), 8*5);
+            let plaintext = plaintext.chunks_exact(8).map(|chunk| {
+                let arr: [u8; 8] = chunk.try_into().unwrap();
+                u64::from_le_bytes(arr)
+            }).collect_vec();
+            assert_eq!(plaintext, expected_pt);
+        }
+    }
+
+    fn aes128_gcm_dec_plain(key: &[u8], iv: &[u8], ad: &[u8], ct: &[u8]) -> Option<Vec<u8>> {
+        let key = Key::<Aes128Gcm>::from_slice(key);
+        let cipher = Aes128Gcm::new(&key);
+        let nonce = Nonce::clone_from_slice(iv);
+        let res = cipher.decrypt(&nonce, Payload {msg: ct, aad: &ad});
+        res.ok()
+    }
+
+    fn transpose(k: [u8; 16]) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        for i in 0..4 {
+            for j in 0..4 {
+                out[4*j+i] = k[4*i + j];
+            }
+        }
+        out
     }
 
     //#[test] todo: implement malicius cut-and-choose for bool, then retry
@@ -606,7 +889,7 @@ mod rep3_aes_main_test {
                     command: Commands::Decrypt { mode: Mode::AesGcm128 }
                 };
                 // prepare input arg
-                let input_arg = format!("{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"ciphertext\": \"{}{}\"}}", key_share, NONCE, AD, CT, TAG);
+                let input_arg = format!("[{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"ciphertext\": \"{}{}\"}}]", key_share, NONCE, AD, CT, TAG);
                 let mut output = BufWriter::new(Vec::new());
                 execute_command(cli, input_arg.as_bytes(), &mut output);
                 // check what is written to the output
@@ -661,7 +944,7 @@ mod rep3_aes_main_test {
                     command: Commands::Decrypt { mode: Mode::AesGcm128 }
                 };
                 // prepare input arg
-                let input_arg = format!("{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"ciphertext\": \"{}{}\"}}", key_schedule_share, NONCE, AD, CT, TAG);
+                let input_arg = format!("[{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"ciphertext\": \"{}{}\"}}]", key_schedule_share, NONCE, AD, CT, TAG);
                 let mut output = BufWriter::new(Vec::new());
                 execute_command(cli, input_arg.as_bytes(), &mut output);
                 // check what is written to the output

@@ -580,6 +580,7 @@ pub mod test {
         0x16,
     ];
     
+    /// Returns the keyschedule in column-first encoding per roundkey
     pub fn aes128_keyschedule_plain(key: [u8; 16]) -> Vec<[u8; 16]> {
         const ROUND_CONSTANTS: [u8; 10] = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
         let mut ks = Vec::with_capacity(11);

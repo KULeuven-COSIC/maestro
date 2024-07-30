@@ -7,7 +7,7 @@ use crate::{aes::{self, AesKeyState, GF8InvBlackBox, VectorAesState}, party::{er
 use self::gf128::{GF128, TryFromGF128SliceError};
 pub mod gf128;
 mod party;
-mod batch;
+pub mod batch;
 
 type AesKeySchedule = Vec<AesKeyState>;
 
