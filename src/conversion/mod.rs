@@ -193,6 +193,11 @@ pub fn convert_boolean_to_ring<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mu
     }).unzip();
     // draw two random values r1, r2
     let n = el_si.len();
+
+    if n == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
     let r1: (Vec<_>, Vec<_>) = party.generate_random(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
     let r2: (Vec<_>, Vec<_>) = party.generate_random(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
     // compute el + r1 + r2

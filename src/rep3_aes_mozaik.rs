@@ -17,12 +17,12 @@ use chida::{ChidaBenchmarkParty, ImplVariant};
 use clap::{Parser, Subcommand};
 use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
 use furukawa::FurukawaGCMParty;
-use gcm::{batch::{batch_aes128_gcm_encrypt_with_ks, EncParam}, gf128::GF128, Aes128GcmCiphertext, RequiredPrepAesGcm128};
-use itertools::{izip, Itertools};
+use gcm::{batch::{batch_aes128_gcm_decrypt_with_ks, batch_aes128_gcm_encrypt_with_ks, DecParam, EncParam}, gf128::GF128, Aes128GcmCiphertext, RequiredPrepAesGcm128};
+use itertools::{izip, repeat_n, Itertools};
 use network::{Config, ConnectedParty};
 use party::{error::{MpcError, MpcResult}, ArithmeticBlackBox};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use share::{gf8::GF8, RssShare};
+use share::{gf8::GF8, Field, RssShare};
 
 #[derive(Debug)]
 enum Rep3AesError {
@@ -263,13 +263,13 @@ impl DecryptResult {
     }
 }
 
-impl From<Rep3AesError> for DecryptResult {
+impl From<Rep3AesError> for Vec<DecryptResult> {
     fn from(value: Rep3AesError) -> Self {
-        Self {
+        vec![DecryptResult {
             message_share: None,
             tag_error: None,
             error: Some(value.to_string()),
-        }
+        }]
     }
 }
 
@@ -387,11 +387,8 @@ fn batch_aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlack
         acc.mul_gf128 += tmp.mul_gf128;
         acc
     });
-    let n_keys = encrypt_args.iter().map(|arg| match arg.key_share {
-        KeyParams::KeyShare(_) => 1,
-        KeyParams::SharedKeySchedule(_) => 0,
-    }).sum();
-    GF8InvBlackBox::do_preprocessing(party, n_keys, prep_info.blocks)?;
+    
+    GF8InvBlackBox::do_preprocessing(party, 0, prep_info.blocks)?;
     ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
 
     let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.iter().flat_map(|arg| arg.message_share.iter().copied()).unzip();
@@ -445,6 +442,9 @@ fn mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> 
     let key_share = &key_share[0];
     // split ciphertext and tag; tag is the last 16 bytes
     let ctlen = decrypt_args.ciphertext.len();
+    if ctlen < 16 {
+        return Err(Rep3AesError::MpcError("Invalid ciphertext length".to_string()));
+    }
     let (ct, tag) = (&decrypt_args.ciphertext[..ctlen-16], &decrypt_args.ciphertext[ctlen-16..]);
     let res = match key_share {
         KeyParams::KeyShare(key_share) => gcm::aes128_gcm_decrypt(party, &decrypt_args.nonce, key_share, ct, tag, &decrypt_args.associated_data, gcm::semi_honest_tag_check),
@@ -469,6 +469,84 @@ fn mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> 
         Err(MpcError::OperationFailed(_)) => Ok(DecryptResult::new_tag_error()),
         Err(err) => Err(err.into()),
     }
+}
+
+fn batch_mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox + ArithmeticBlackBox<Z64Bool>>(party: &mut Protocol, party_index: usize, decrypt_args: Vec<DecryptParams>) -> Result<Vec<DecryptResult>> {
+    let key_share = additive_shares_to_rss(party, &decrypt_args)?;
+    let key_share = key_share.into_iter().map(|ks| {
+        match ks {
+            KeyParams::SharedKeySchedule(ks) => try_unflatten_aes128_gcm_key_schedule(&ks),
+            KeyParams::KeyShare(_) => Err(MpcError::InvalidParameters("key schedule computation not supported in batching mode".to_string())),
+        }
+    }).collect::<MpcResult<Vec<_>>>()?;
+
+    let total_message_len: usize = decrypt_args.iter().map(|arg| arg.ciphertext.len()).sum::<usize>() / 8;
+    ArithmeticBlackBox::<Z64Bool>::pre_processing(party, 2*64 * total_message_len)?;
+    let prep_info = decrypt_args.iter().fold(RequiredPrepAesGcm128 { blocks: 0, mul_gf128: 0 }, |mut acc, arg| {
+        let tmp = gcm::get_required_prep_for_aes_128_gcm(arg.associated_data.len(), arg.ciphertext.len());
+        acc.blocks += tmp.blocks;
+        acc.mul_gf128 += tmp.mul_gf128;
+        acc
+    });
+    GF8InvBlackBox::do_preprocessing(party, 0, prep_info.blocks)?;
+    ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
+
+    // check that all ciphertexts have valid length
+    if decrypt_args.iter().any(|arg| arg.ciphertext.len() < 16) {
+        return Err(Rep3AesError::MpcError("invalid ciphertext length".to_string()));
+    }
+
+    let data = decrypt_args.iter().zip(&key_share).map(|(arg, key_schedule)| {
+        // split ciphertext and tag; tag is the last 16 bytes
+        DecParam {
+            iv: &arg.nonce,
+            associated_data: &arg.associated_data,
+            key_schedule,
+            ciphertext: &arg.ciphertext[..arg.ciphertext.len()-16],
+            tag: &arg.ciphertext[arg.ciphertext.len()-16..],
+        }
+    });
+
+    let plaintexts = batch_aes128_gcm_decrypt_with_ks(party, party_index, data)?;
+
+    drop(decrypt_args);
+    drop(key_share);
+
+    let mut pt_lens = Vec::with_capacity(plaintexts.len());
+    let zero = RssShare::constant(party_index, GF8::ZERO);
+    let pt_flat = plaintexts.into_iter().flat_map(|decrypt_res| {
+        match decrypt_res {
+            Some(pt) => {
+                pt_lens.push(pt.len().div_ceil(8));
+                let pad = if pt.len() % 8 == 0 { 0 } else { 8 - (pt.len() % 8) };
+                pt.into_iter().chain(repeat_n(zero, pad))
+            },
+            None => {
+                pt_lens.push(0);
+                // we have to return the same type in the two match arms
+                Vec::new().into_iter().chain(repeat_n(zero, 0))
+            }
+        }
+    });
+
+    // now run b2a conversion
+    let (ring_shares_si, ring_shares_sii) = convert_boolean_to_ring(party, party_index, pt_flat)?;
+    
+    ArithmeticBlackBox::<Z64Bool>::finalize(party)?;
+    ArithmeticBlackBox::<GF128>::finalize(party)?;
+    let mut pt_index = 0;
+    Ok(
+        pt_lens.into_iter().map(|len| {
+            if len > 0 {
+                let ring_shares = ring_shares_si.iter().copied().zip(ring_shares_sii.iter().copied())
+                    .skip(pt_index).take(len).collect();
+                pt_index += len;
+                DecryptResult::new_success(ring_shares)
+            }else{
+                DecryptResult::new_tag_error()
+            }
+        }).collect()
+    )
 }
 
 fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, output_writer: W) {
@@ -509,10 +587,6 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
         },
         Commands::Decrypt { mode } => {
             let decrypt_args = parse_args_from_reader::<DecryptArgs, DecryptParams, _>(input_arg_reader).unwrap();
-            if decrypt_args.len() != 1 {
-                panic!()
-            }
-            let decrypt_args = decrypt_args.into_iter().next().unwrap();
             match mode {
                 Mode::AesGcm128 => {
                     return_to_writer(|| {
@@ -520,10 +594,24 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let party_index = connected.i;
                         if cli.active {
                             let mut party = FurukawaGCMParty::setup(connected, cli.threads)?;
-                            mozaik_decrypt(&mut party, party_index, decrypt_args)
+                            if decrypt_args.len() == 1 {
+                                let decrypt_args = decrypt_args.into_iter().next().unwrap();
+                                let res = mozaik_decrypt(&mut party, party_index, decrypt_args);
+                                // pack res into a list of size 1
+                                res.map(|decrypt_res| vec![decrypt_res])
+                            }else{
+                                batch_mozaik_decrypt(&mut party, party_index, decrypt_args)
+                            }
                         }else{
                             let mut party = ChidaBenchmarkParty::setup(connected, ImplVariant::Optimized, cli.threads)?;
-                            mozaik_decrypt(&mut party, party_index, decrypt_args)
+                            if decrypt_args.len() == 1 {
+                                let decrypt_args = decrypt_args.into_iter().next().unwrap();
+                                let res = mozaik_decrypt(&mut party, party_index, decrypt_args);
+                                // pack res into a list of size 1
+                                res.map(|decrypt_res| vec![decrypt_res])
+                            }else{
+                                batch_mozaik_decrypt(&mut party, party_index, decrypt_args)
+                            }
                         }
                     }, output_writer);
                 }
@@ -542,12 +630,12 @@ fn main() {
 mod rep3_aes_main_test {
     use std::{io::BufWriter, path::PathBuf, sync::Mutex, thread};
     use aes_gcm::{aead::{Aead, Payload}, Aes128Gcm, Key, KeyInit, Nonce};
-    use rand::{Rng, RngCore};
+    use rand::Rng;
 
     use itertools::{izip, Itertools};
     use rand::thread_rng;
 
-    use crate::{aes, conversion::test::secret_share_vector_ring, execute_command, share::{gf8::GF8, test::secret_share_vector, RssShare}, Cli, Commands, DecryptResult, EncryptResult, Mode};
+    use crate::{aes, conversion::test::secret_share_vector_ring, execute_command, gcm, share::{gf8::GF8, test::secret_share_vector, RssShare}, Cli, Commands, DecryptResult, EncryptResult, Mode};
 
 
     const KEY_SHARE_1: &str = "76c2488bd101fd2999a922d351707fcf";
@@ -894,11 +982,12 @@ mod rep3_aes_main_test {
                 execute_command(cli, input_arg.as_bytes(), &mut output);
                 // check what is written to the output
                 let buf = output.into_inner().unwrap();
-                let res: DecryptResult = serde_json::from_slice(&buf).unwrap();
-                assert_eq!(None, res.tag_error);
-                assert_eq!(None, res.error);
-                assert!(res.message_share.is_some());
-                res.message_share.unwrap()
+                let res: Vec<DecryptResult> = serde_json::from_slice(&buf).unwrap();
+                assert_eq!(res.len(), 1);
+                assert_eq!(None, res[0].tag_error);
+                assert_eq!(None, res[0].error);
+                assert!(res[0].message_share.is_some());
+                res[0].message_share.clone().unwrap()
             }
         };
         let h1 = thread::spawn(party_f(0, KEY_SHARE_1));
@@ -949,11 +1038,12 @@ mod rep3_aes_main_test {
                 execute_command(cli, input_arg.as_bytes(), &mut output);
                 // check what is written to the output
                 let buf = output.into_inner().unwrap();
-                let res: DecryptResult = serde_json::from_slice(&buf).unwrap();
-                assert_eq!(None, res.tag_error);
-                assert_eq!(None, res.error);
-                assert!(res.message_share.is_some());
-                res.message_share.unwrap()
+                let res: Vec<DecryptResult> = serde_json::from_slice(&buf).unwrap();
+                assert_eq!(res.len(), 1);
+                assert_eq!(None, res[0].tag_error);
+                assert_eq!(None, res[0].error);
+                assert!(res[0].message_share.is_some());
+                res[0].message_share.clone().unwrap()
             }
         };
         let h1 = thread::spawn(party_f(0, &KEY_SCHEDULE_SHARE_1));
@@ -975,6 +1065,115 @@ mod rep3_aes_main_test {
             assert_eq!(s1.1, s2.0);
             assert_eq!(s2.1, s3.0);
             assert_eq!(m, s1.0.overflowing_add(s2.0).0.overflowing_add(s3.0).0);
+        }
+    }
+
+    #[test]
+    fn decrypt_aes_gcm_128_ks_batched() {
+        const BATCH_SIZE: usize = 64;
+
+        // before running this test, make sure that the ports in p1/p2/p3.toml are free
+        let guard = PORT_LOCK.lock().unwrap();
+
+        let mut rng = thread_rng();
+        let plaintexts = (0..BATCH_SIZE).map(|_| {
+            let mut arr = [0u64; 187];
+            (0..arr.len()).for_each(|i| arr[i] = rng.gen());
+            arr
+        } ).collect_vec();
+
+        let nonces = (0..BATCH_SIZE).map(|_| rng.gen::<[u8; 12]>() ).collect_vec();
+        let keys = (0..BATCH_SIZE).map(|_| rng.gen::<[u8; 16]>() ).collect_vec();
+        let mut ks1 = Vec::new();
+        let mut ks2 = Vec::new();
+        let mut ks3 = Vec::new();
+        keys.iter().for_each(|key| {
+            let ks = aes::test::aes128_keyschedule_plain(key.clone()).into_iter()
+                // transpose the round key because `aes128_keyschedule_plain` returns column-first
+                // but we expect row-first
+                .map(|k| transpose(k))
+                .collect_vec();
+            let flat_ks = ks.into_iter().flatten().map(|x| GF8(x)).collect_vec();
+            let (ksi1, ksi2, ksi3) = secret_share_vector(&mut rng, flat_ks);
+            ks1.push(additive_share_to_string(ksi1));
+            ks2.push(additive_share_to_string(ksi2));
+            ks3.push(additive_share_to_string(ksi3));
+        });
+
+        let ciphertexts = izip!(&plaintexts, &nonces, &keys).map(|(pt, nonce, key)| {
+            let msg = pt.iter().flat_map(|ring_el| ring_el.to_le_bytes()).collect_vec();
+            let (ct, tag)  = gcm::batch::test::aes128_gcm_enc_plain(&hex::encode(key), &hex::encode(nonce), AD, &hex::encode(msg));
+            (ct, tag)
+        }).collect_vec();
+        
+
+        let party_f = |i: usize, key_schedule_shares: Vec<String>, ciphertexts: Vec<(Vec<u8>, Vec<u8>)>, nonces: Vec<[u8; 12]>| {
+            move || {
+                let path = match i {
+                    0 => "p1.toml",
+                    1 => "p2.toml",
+                    2 => "p3.toml",
+                    _ => panic!()
+                };
+                let cli = Cli {
+                    config: PathBuf::from(path),
+                    active: false,
+                    timeout: None,
+                    threads: None,
+                    command: Commands::Decrypt { mode: Mode::AesGcm128 }
+                };
+                assert_eq!(key_schedule_shares.len(), ciphertexts.len());
+                assert_eq!(key_schedule_shares.len(), nonces.len());
+
+                let args = izip!(key_schedule_shares, ciphertexts, nonces).map(|(ks, (ct, tag), nonce)| {
+                    let nonce = hex::encode(nonce);
+                    let ct = hex::encode(ct);
+                    let tag = hex::encode(tag);
+                    format!("{{\"key_schedule_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"ciphertext\": \"{}{}\"}}", ks, nonce, AD, ct, tag)
+                }).join(", ");
+
+                // prepare input arg
+                let input_arg = format!("[{}]", args);
+                let mut output = BufWriter::new(Vec::new());
+                execute_command(cli, input_arg.as_bytes(), &mut output);
+
+                // check what is written to the output
+                let buf = output.into_inner().unwrap();
+                let res: Vec<DecryptResult> = serde_json::from_slice(&buf).unwrap();
+                assert_eq!(res.len(), BATCH_SIZE);
+
+                for i in 0..BATCH_SIZE {
+                    assert!(res[i].tag_error.is_none());
+                    assert!(res[i].error.is_none());
+                    assert!(res[i].message_share.is_some());
+                }
+                res.into_iter().map(|r| r.message_share.unwrap()).collect_vec()
+                
+            }
+        };
+
+        let h1 = thread::spawn(party_f(0, ks1, ciphertexts.clone(), nonces.clone()));
+        let h2 = thread::spawn(party_f(1, ks2, ciphertexts.clone(), nonces.clone()));
+        let h3 = thread::spawn(party_f(2, ks3, ciphertexts, nonces.clone()));
+
+        let share1 = h1.join().unwrap();
+        let share2 = h2.join().unwrap();
+        let share3 = h3.join().unwrap();
+
+        drop(guard);
+
+        for (expected, share_1, share_2, share_3) in izip!(plaintexts, share1, share2, share3) {
+            assert_eq!(expected.len(), share_1.len());
+            assert_eq!(expected.len(), share_2.len());
+            assert_eq!(expected.len(), share_3.len());
+
+            for (m, s1, s2, s3) in izip!(expected, share_1, share_2, share_3) {
+                // check consistent
+                assert_eq!(s1.0, s3.1);
+                assert_eq!(s1.1, s2.0);
+                assert_eq!(s2.1, s3.0);
+                assert_eq!(m, s1.0.overflowing_add(s2.0).0.overflowing_add(s3.0).0);
+            }
         }
     }
 }

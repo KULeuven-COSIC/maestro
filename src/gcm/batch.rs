@@ -384,7 +384,7 @@ fn into_ghash_input_iter<'a>(party_index: usize, associated_data: &'a [u8], ciph
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use aes_gcm::{aead::{Aead, Payload}, Aes128Gcm, Key, KeyInit, Nonce};
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
@@ -611,7 +611,7 @@ mod test {
         }).collect()
     }
 
-    fn aes128_gcm_enc_plain(key: &str, iv: &str, ad: &str, msg: &str) -> (Vec<u8>, Vec<u8>) {
+    pub fn aes128_gcm_enc_plain(key: &str, iv: &str, ad: &str, msg: &str) -> (Vec<u8>, Vec<u8>) {
         let k = hex::decode(key).unwrap();
         let key = Key::<Aes128Gcm>::from_slice(&k);
         let cipher = Aes128Gcm::new(&key);
