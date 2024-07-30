@@ -121,6 +121,17 @@ impl<F: Field> RssShare<F> {
             sii: self.sii * scalar,
         }
     }
+
+    #[inline]
+    pub fn constant(i: usize, value: F) -> Self {
+        if i == 0 {
+            Self::from(value, F::ZERO)
+        } else if i == 2 {
+            Self::from(F::ZERO, value)
+        } else {
+            Self::from(F::ZERO, F::ZERO)
+        }
+    }
 }
 
 impl<F: Field> Add<Self> for RssShare<F> {

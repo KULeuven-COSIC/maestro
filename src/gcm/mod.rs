@@ -7,7 +7,15 @@ use crate::{aes::{self, AesKeyState, GF8InvBlackBox, VectorAesState}, party::{er
 use self::gf128::{GF128, TryFromGF128SliceError};
 pub mod gf128;
 mod party;
+mod batch;
 
+type AesKeySchedule = Vec<AesKeyState>;
+
+/// A AES-128-GCM secret-shared ciphertext, consisting of a ciphertext and tag
+pub struct Aes128GcmCiphertext {
+    pub ciphertext: Vec<RssShare<GF8>>,
+    pub tag: Vec<RssShare<GF8>>
+}
 
 fn ghash_key_and_aes_gcm_cnt<Protocol: GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], n_blocks: usize, aes_keyschedule: &Vec<AesKeyState>) -> MpcResult<Vec<RssShare<GF8>>> {
     assert_eq!(iv.len(), 12, "The only supported IV length is 96 bits");
@@ -56,7 +64,7 @@ fn ghash<'a, Protocol: ArithmeticBlackBox<GF128>>(party: &mut Protocol, ghash_ke
     for block in associated_data.chunks(16) {
         let mut full_block = [0u8; 16];
         full_block[..block.len()].copy_from_slice(&block);
-        let block_gf128 = party.constant(GF128::try_from(full_block.as_slice()).unwrap()); // unwrap is safe since block_bytes has length 16
+        let block_gf128 = party.constant(GF128::from(full_block));
         ghash_state += block_gf128;
         let ghash_state_clone = ghash_state.clone();
         party.mul(slice::from_mut(&mut ghash_state.si), slice::from_mut(&mut ghash_state.sii), slice::from_ref(&ghash_key.si), slice::from_ref(&ghash_key.sii), slice::from_ref(&ghash_state_clone.si), slice::from_ref(&ghash_state_clone.sii))?;
@@ -71,7 +79,7 @@ fn ghash<'a, Protocol: ArithmeticBlackBox<GF128>>(party: &mut Protocol, ghash_ke
             *dst_si = src.si;
             *dst_sii = src.sii;
         });
-        let block_gf128 = RssShare::from(GF128::try_from(block_bytes_si.as_slice()).unwrap(), GF128::try_from(block_bytes_sii.as_slice()).unwrap()); // unwrap is safe since block_bytes has length 16
+        let block_gf128 = RssShare::from(GF128::from(block_bytes_si), GF128::from(block_bytes_sii));
         ghash_state += block_gf128; //into_gf128(block_bytes).unwrap();
         let ghash_state_clone = ghash_state.clone();
         party.mul(slice::from_mut(&mut ghash_state.si), slice::from_mut(&mut ghash_state.sii), slice::from_ref(&ghash_key.si), slice::from_ref(&ghash_key.sii), slice::from_ref(&ghash_state_clone.si), slice::from_ref(&ghash_state_clone.sii))?;
@@ -118,7 +126,7 @@ pub fn get_required_prep_for_aes_128_gcm(ad_len: usize, m_len: usize) -> Require
     RequiredPrepAesGcm128 { blocks: m_blocks, mul_gf128: m_blocks + ad_blocks }
 }
 
-pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext> {
     // check key length
     if key.len() != 16 { return Err(MpcError::InvalidParameters("Invalid key length, expected 128 bit (16 byte) for AES-GCM-128".to_string())); }
     // compute key schedule
@@ -126,7 +134,7 @@ pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox
     aes128_gcm_encrypt_with_ks(party, iv, &ks, message, associated_data)
 }
 
-pub fn aes128_gcm_encrypt_with_ks<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key_schedule: &Vec<AesKeyState>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)> {
+pub fn aes128_gcm_encrypt_with_ks<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key_schedule: &Vec<AesKeyState>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext> {
     // check IV length, key_schedule and message lengths
     if iv.len() != 12 { return Err(MpcError::InvalidParameters("Invalid IV length. Supported IV length is 96 bit (12 byte)".to_string())); }
     if key_schedule.len() != 11 { return Err(MpcError::InvalidParameters("Invalid Key Schedule length. Expected 11 round keys".to_string())); }
@@ -152,7 +160,7 @@ pub fn aes128_gcm_encrypt_with_ks<Protocol: ArithmeticBlackBox<GF8> + Arithmetic
     for i in 0..16 {
         tag[i] += ghash_mask[i];
     }
-    Ok((tag, ciphertext))
+    Ok(Aes128GcmCiphertext { ciphertext, tag })
 }
 
 pub fn aes128_gcm_decrypt<F, Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, nonce: &[u8], key: &[RssShare<GF8>], ciphertext: &[u8], tag: &[u8], associated_data: &[u8], tag_check: F) -> MpcResult<Vec<RssShare<GF8>>> 
@@ -210,38 +218,38 @@ mod test {
     use crate::{chida::{self, online::test::{ChidaSetup, ChidaSetupSimple}, ChidaBenchmarkParty, ChidaParty}, gcm::gf128::GF128, party::{test::{localhost_setup, TestSetup}, ArithmeticBlackBox, MainParty}, share::{gf8::GF8, test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}, RssShare}};
     use super::{aes128_gcm_decrypt, aes128_gcm_encrypt, semi_honest_tag_check};
 
-    struct AesGcm128Testvector {
-        key: &'static str,
-        nonce: &'static str,
-        ad: &'static str,
-        message: &'static str,
-        ciphertext: &'static str,
-        tag: &'static str
+    pub(super) struct AesGcm128Testvector {
+        pub key: String,
+        pub nonce: String,
+        pub ad: String,
+        pub message: String,
+        pub ciphertext: String,
+        pub tag: String
     }
 
-    fn get_test_vectors() -> Vec<AesGcm128Testvector> {
+    pub(super) fn get_test_vectors() -> Vec<AesGcm128Testvector> {
         vec![
-            AesGcm128Testvector { key: "67c6697351ff4aec29cdbaabf2fbe346", nonce: "7cc254f81be8e78d765a2e63", ad: "33", message: "", ciphertext: "", tag: "60a09cbb8d4ab9aecfd8d7b59ddefb54" },
-            AesGcm128Testvector { key: "9fc99a66320db73158a35a255d051758", nonce: "e95ed4abb2cdc69bb454110e", ad: "827441213ddc8770e93ea141e1fc67", message: "", ciphertext: "", tag: "6d06851093b69f6ba0b56178811dff2d" },
-            AesGcm128Testvector { key: "3e017e97eadc6b968f385c2aecb03bfb", nonce: "32af3c54ec18db5c021afe43", ad: "fbfaaa3afb29d1e6053c7c9475d8be61", message: "", ciphertext: "", tag: "afa00954b8f3c9d86e68b1ebcdcaa00d" },
-            AesGcm128Testvector { key: "89f95cbba8990f95b1ebf1b305eff700", nonce: "e9a13ae5ca0bcbd0484764bd", ad: "1f231ea81c7b64c514735ac55e4b79633b", message: "", ciphertext: "", tag: "462b140701577af223f4e73b1fe5b934" },
-            AesGcm128Testvector { key: "706424119e09dcaad4acf21b10af3b33", nonce: "cde3504847155cbb6f2219ba", ad: "9b7df50be11a1c7f23f829f8a41b13b5ca4ee8983238e0794d3d34bc5f4e77", message: "", ciphertext: "", tag: "314cc4b2e7f8218eb53d9c59f2541bee" },
-            AesGcm128Testvector { key: "facb6c05ac86212baa1a55a2be70b573", nonce: "3b045cd33694b3afe2f0e49e", ad: "4f321549fd824ea90870d4b28a2954489a0abcd50e18a844ac5bf38e4cd72d9b", message: "", ciphertext: "", tag: "73feaf67d0edbaeb9d026dddd098e6c6" },
-            AesGcm128Testvector { key: "0942e506c433afcda3847f2dadd47647", nonce: "de321cec4ac430f62023856c", ad: "fbb20704f4ec0bb920ba86c33e05f1ecd96733b79950a3e314d3d934f75ea0f210", message: "", ciphertext: "", tag: "7cf36d2e1b4339d7f726775f4e3c2b7f" },
-            AesGcm128Testvector { key: "a8f6059401beb4bc4478fa4969e623d0", nonce: "1ada696a7e4c7e5125b34884", ad: "", message: "53", ciphertext: "0f", tag: "1c4163e976bc7a5009d67d0b5fdc4178" },
-            AesGcm128Testvector { key: "3a94fb319990325744ee9bbce9e525cf", nonce: "08f5e9e25e5360aad2b2d085", ad: "", message: "fa54d835e8d466826498d9a8877565", ciphertext: "c4a3e75bb2e161c86372536221ba9e", tag: "299f402480bfae50cf56b3918ad02b57" },
-            AesGcm128Testvector { key: "705a8a3f62802944de7ca5894e5759d3", nonce: "51adac869580ec17e485f18c", ad: "", message: "0c66f17cc07cbb22fce466da610b63af", ciphertext: "5455de87929f5640268900109d39c2aa", tag: "71082455dfd07d8a7ee2e48114797aa1" },
-            AesGcm128Testvector { key: "62bc83b4692f3affaf271693ac071fb8", nonce: "6d11342d8def4f89d4b66335", ad: "", message: "c1c7e4248367d8ed9612ec453902d8e50a", ciphertext: "4d1e4013b3be309ea8f4901f1af690563c", tag: "8532a32e20dc74a938ece2528c2fcac9" },
-            AesGcm128Testvector { key: "f89d7709d1a596c1f41f95aa82ca6c49", nonce: "ae90cd1668baac7aa6f2b4a8", ad: "", message: "ca99b2c2372acb08cf61c9c3805e6e0328da4cd76a19edd2d3994c798b0022", ciphertext: "044b9a03ddc189449f4fb3d3d43ce9831f4d0e2b692884db5577510e3d4a39", tag: "334476d1bddf95abb00c8e34eaafe759" },
-            AesGcm128Testvector { key: "569ad418d1fee4d9cd45a391c601ffc9", nonce: "2ad91501432fee150287617c", ad: "", message: "13629e69fc7281cd7165a63eab49cf714bce3a75a74f76ea7e64ff81eb61fdfe", ciphertext: "8e6e51ce2405faf80de42f6cd06fac4ca881be92a490f54deaec347916d4ac66", tag: "9edde34ef3e43749b39d0fa816e0b849" },
-            AesGcm128Testvector { key: "c39b67bf0de98c7e4e32bdf97c8c6ac7", nonce: "5ba43c02f4b2ed7216ecf301", ad: "", message: "4df000108b67cf99505b179f8ed4980a6103d1bca70dbe9bbfab0ed59801d6e5f2", ciphertext: "ab24883cad514002aea36ab260518c098331c50893d625ebcb965eb4832f549b1a", tag: "6e7a9096669dc78854822596e4656ded" },
-            AesGcm128Testvector { key: "d6f67d3ec5168e212e2daf02c6b963c9", nonce: "8a1f7097de0c56891a2b211b", ad: "", message: "", ciphertext: "", tag: "3dd8898125f3e4c151307a88f25c161c" },
-            AesGcm128Testvector { key: "01070dd8fd8b16c2a1a4e3cfd292d298", nonce: "4b3561d555d16c33ddc2bcf7", ad: "ed", message: "de", ciphertext: "58", tag: "40aad058bfb61a9216f2b3655a8338ad" },
-            AesGcm128Testvector { key: "13efe520c7e2abdda44d81881c531aee", nonce: "eb66244c3b791ea8acfb6a68", ad: "f3584606472b260e0dd2ebb21f6c3a", message: "3bc0542aabba4ef8f6c7169e731108", ciphertext: "b9aa6469c619e1aa88ed0b25020113", tag: "891a65175fbbcbb6f1643ab7dc0c8a7b" },
-            AesGcm128Testvector { key: "db0460220aa74d31b55b03a00d220d47", nonce: "5dcd9b877856d5704c9c86ea", ad: "0f98f2eb9c530da7fa5ad8b0b5db50c2fd", message: "5d", ciphertext: "08", tag: "f5f0a775a7aec9acd4ca0dbdcb0b455b" },
-            AesGcm128Testvector { key: "095a2aa5e2a3fbb71347549a31633223", nonce: "4ece765b7571b64d216b2871", ad: "2e25cf3780f9dc629cd719b01e6d4a4fd1", message: "7c731f4ae97bc05a310d7b9c36edca5bbc02dbb5de3d52b65702d4c44c2495", ciphertext: "7d1ec648639b19eb371800cb4723481eaf62d6e3b2b84e673ebcc8f2aec575", tag: "8fb84cb2bb4d70c15a89db657e748b5f" },
-            AesGcm128Testvector { key: "c897b5128030d2db61e056fd1643c871", nonce: "ffca4db5a88a075ee10933a6", ad: "55573b1deef02f6e20024981e2a07ff8e34769e311b698b9419f1822a84bc8fd", message: "a2041a90f449fe154b48962de81525cb5c8fae6d45462786e53fa98d8a718a2c", ciphertext: "3ac4e3e5e673fefde9f666e3b4c10f8763efe743520d02faf3c8cebe4a4adb77", tag: "d03e2b46889ddea2236b97cfb99bfcab" },
-            AesGcm128Testvector { key: "75a4bc6aeeba7f39021567ea2b8cb687", nonce: "1b64f561ab1ce7905b901ee5", ad: "02a811774dcde13b8760748a76db74a1682a28838f1de43a39ccca945ce8795e918ad6de57b719df", message: "188d698e69dd2fd1085754977539d1ae059b4361", ciphertext: "498dbaee28d1fe08eb893027043cabc2680ccb45", tag: "fbbf997f34f293605e440ebf6401f9ab" },
+            AesGcm128Testvector { key: "67c6697351ff4aec29cdbaabf2fbe346".to_string(), nonce: "7cc254f81be8e78d765a2e63".to_string(), ad: "33".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "60a09cbb8d4ab9aecfd8d7b59ddefb54".to_string() },
+            AesGcm128Testvector { key: "9fc99a66320db73158a35a255d051758".to_string(), nonce: "e95ed4abb2cdc69bb454110e".to_string(), ad: "827441213ddc8770e93ea141e1fc67".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "6d06851093b69f6ba0b56178811dff2d".to_string() },
+            AesGcm128Testvector { key: "3e017e97eadc6b968f385c2aecb03bfb".to_string(), nonce: "32af3c54ec18db5c021afe43".to_string(), ad: "fbfaaa3afb29d1e6053c7c9475d8be61".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "afa00954b8f3c9d86e68b1ebcdcaa00d".to_string() },
+            AesGcm128Testvector { key: "89f95cbba8990f95b1ebf1b305eff700".to_string(), nonce: "e9a13ae5ca0bcbd0484764bd".to_string(), ad: "1f231ea81c7b64c514735ac55e4b79633b".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "462b140701577af223f4e73b1fe5b934".to_string() },
+            AesGcm128Testvector { key: "706424119e09dcaad4acf21b10af3b33".to_string(), nonce: "cde3504847155cbb6f2219ba".to_string(), ad: "9b7df50be11a1c7f23f829f8a41b13b5ca4ee8983238e0794d3d34bc5f4e77".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "314cc4b2e7f8218eb53d9c59f2541bee".to_string() },
+            AesGcm128Testvector { key: "facb6c05ac86212baa1a55a2be70b573".to_string(), nonce: "3b045cd33694b3afe2f0e49e".to_string(), ad: "4f321549fd824ea90870d4b28a2954489a0abcd50e18a844ac5bf38e4cd72d9b".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "73feaf67d0edbaeb9d026dddd098e6c6".to_string() },
+            AesGcm128Testvector { key: "0942e506c433afcda3847f2dadd47647".to_string(), nonce: "de321cec4ac430f62023856c".to_string(), ad: "fbb20704f4ec0bb920ba86c33e05f1ecd96733b79950a3e314d3d934f75ea0f210".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "7cf36d2e1b4339d7f726775f4e3c2b7f".to_string() },
+            AesGcm128Testvector { key: "a8f6059401beb4bc4478fa4969e623d0".to_string(), nonce: "1ada696a7e4c7e5125b34884".to_string(), ad: "".to_string(), message: "53".to_string(), ciphertext: "0f".to_string(), tag: "1c4163e976bc7a5009d67d0b5fdc4178".to_string() },
+            AesGcm128Testvector { key: "3a94fb319990325744ee9bbce9e525cf".to_string(), nonce: "08f5e9e25e5360aad2b2d085".to_string(), ad: "".to_string(), message: "fa54d835e8d466826498d9a8877565".to_string(), ciphertext: "c4a3e75bb2e161c86372536221ba9e".to_string(), tag: "299f402480bfae50cf56b3918ad02b57".to_string() },
+            AesGcm128Testvector { key: "705a8a3f62802944de7ca5894e5759d3".to_string(), nonce: "51adac869580ec17e485f18c".to_string(), ad: "".to_string(), message: "0c66f17cc07cbb22fce466da610b63af".to_string(), ciphertext: "5455de87929f5640268900109d39c2aa".to_string(), tag: "71082455dfd07d8a7ee2e48114797aa1".to_string() },
+            AesGcm128Testvector { key: "62bc83b4692f3affaf271693ac071fb8".to_string(), nonce: "6d11342d8def4f89d4b66335".to_string(), ad: "".to_string(), message: "c1c7e4248367d8ed9612ec453902d8e50a".to_string(), ciphertext: "4d1e4013b3be309ea8f4901f1af690563c".to_string(), tag: "8532a32e20dc74a938ece2528c2fcac9".to_string() },
+            AesGcm128Testvector { key: "f89d7709d1a596c1f41f95aa82ca6c49".to_string(), nonce: "ae90cd1668baac7aa6f2b4a8".to_string(), ad: "".to_string(), message: "ca99b2c2372acb08cf61c9c3805e6e0328da4cd76a19edd2d3994c798b0022".to_string(), ciphertext: "044b9a03ddc189449f4fb3d3d43ce9831f4d0e2b692884db5577510e3d4a39".to_string(), tag: "334476d1bddf95abb00c8e34eaafe759".to_string() },
+            AesGcm128Testvector { key: "569ad418d1fee4d9cd45a391c601ffc9".to_string(), nonce: "2ad91501432fee150287617c".to_string(), ad: "".to_string(), message: "13629e69fc7281cd7165a63eab49cf714bce3a75a74f76ea7e64ff81eb61fdfe".to_string(), ciphertext: "8e6e51ce2405faf80de42f6cd06fac4ca881be92a490f54deaec347916d4ac66".to_string(), tag: "9edde34ef3e43749b39d0fa816e0b849".to_string() },
+            AesGcm128Testvector { key: "c39b67bf0de98c7e4e32bdf97c8c6ac7".to_string(), nonce: "5ba43c02f4b2ed7216ecf301".to_string(), ad: "".to_string(), message: "4df000108b67cf99505b179f8ed4980a6103d1bca70dbe9bbfab0ed59801d6e5f2".to_string(), ciphertext: "ab24883cad514002aea36ab260518c098331c50893d625ebcb965eb4832f549b1a".to_string(), tag: "6e7a9096669dc78854822596e4656ded".to_string() },
+            AesGcm128Testvector { key: "d6f67d3ec5168e212e2daf02c6b963c9".to_string(), nonce: "8a1f7097de0c56891a2b211b".to_string(), ad: "".to_string(), message: "".to_string(), ciphertext: "".to_string(), tag: "3dd8898125f3e4c151307a88f25c161c".to_string() },
+            AesGcm128Testvector { key: "01070dd8fd8b16c2a1a4e3cfd292d298".to_string(), nonce: "4b3561d555d16c33ddc2bcf7".to_string(), ad: "ed".to_string(), message: "de".to_string(), ciphertext: "58".to_string(), tag: "40aad058bfb61a9216f2b3655a8338ad".to_string() },
+            AesGcm128Testvector { key: "13efe520c7e2abdda44d81881c531aee".to_string(), nonce: "eb66244c3b791ea8acfb6a68".to_string(), ad: "f3584606472b260e0dd2ebb21f6c3a".to_string(), message: "3bc0542aabba4ef8f6c7169e731108".to_string(), ciphertext: "b9aa6469c619e1aa88ed0b25020113".to_string(), tag: "891a65175fbbcbb6f1643ab7dc0c8a7b".to_string() },
+            AesGcm128Testvector { key: "db0460220aa74d31b55b03a00d220d47".to_string(), nonce: "5dcd9b877856d5704c9c86ea".to_string(), ad: "0f98f2eb9c530da7fa5ad8b0b5db50c2fd".to_string(), message: "5d".to_string(), ciphertext: "08".to_string(), tag: "f5f0a775a7aec9acd4ca0dbdcb0b455b".to_string() },
+            AesGcm128Testvector { key: "095a2aa5e2a3fbb71347549a31633223".to_string(), nonce: "4ece765b7571b64d216b2871".to_string(), ad: "2e25cf3780f9dc629cd719b01e6d4a4fd1".to_string(), message: "7c731f4ae97bc05a310d7b9c36edca5bbc02dbb5de3d52b65702d4c44c2495".to_string(), ciphertext: "7d1ec648639b19eb371800cb4723481eaf62d6e3b2b84e673ebcc8f2aec575".to_string(), tag: "8fb84cb2bb4d70c15a89db657e748b5f".to_string() },
+            AesGcm128Testvector { key: "c897b5128030d2db61e056fd1643c871".to_string(), nonce: "ffca4db5a88a075ee10933a6".to_string(), ad: "55573b1deef02f6e20024981e2a07ff8e34769e311b698b9419f1822a84bc8fd".to_string(), message: "a2041a90f449fe154b48962de81525cb5c8fae6d45462786e53fa98d8a718a2c".to_string(), ciphertext: "3ac4e3e5e673fefde9f666e3b4c10f8763efe743520d02faf3c8cebe4a4adb77".to_string(), tag: "d03e2b46889ddea2236b97cfb99bfcab".to_string() },
+            AesGcm128Testvector { key: "75a4bc6aeeba7f39021567ea2b8cb687".to_string(), nonce: "1b64f561ab1ce7905b901ee5".to_string(), ad: "02a811774dcde13b8760748a76db74a1682a28838f1de43a39ccca945ce8795e918ad6de57b719df".to_string(), message: "188d698e69dd2fd1085754977539d1ae059b4361".to_string(), ciphertext: "498dbaee28d1fe08eb893027043cabc2680ccb45".to_string(), tag: "fbbf997f34f293605e440ebf6401f9ab".to_string() },
         ]
     }
 
@@ -254,22 +262,21 @@ mod test {
             let iv = iv.iter().cloned().collect_vec();
             let ad = ad.iter().cloned().collect_vec();
             move |p: &mut ChidaBenchmarkParty| {
-                let (tag, ct) = aes128_gcm_encrypt(p, &iv, &key, &pt, &ad).unwrap();
-                (tag, ct)
+                aes128_gcm_encrypt(p, &iv, &key, &pt, &ad).unwrap()
             }
         };
 
         let (r1, r2, r3) = ChidaSetupSimple::localhost_setup(program(k1, pt1, iv, ad), program(k2, pt2, iv, ad), program(k3, pt3, iv, ad));
-        let ((tag1, ct1), _) = r1.join().unwrap();
-        let ((tag2, ct2), _) = r2.join().unwrap();
-        let ((tag3, ct3), _) = r3.join().unwrap();
+        let (ctxt1, _) = r1.join().unwrap();
+        let (ctxt2, _) = r2.join().unwrap();
+        let (ctxt3, _) = r3.join().unwrap();
 
-        consistent_vector(&tag1, &tag2, &tag3);
-        consistent_vector(&ct1, &ct2, &ct3);
+        consistent_vector(&ctxt1.tag, &ctxt2.tag, &ctxt3.tag);
+        consistent_vector(&ctxt1.ciphertext, &ctxt2.ciphertext, &ctxt3.ciphertext);
         let expected_ciphertext = expected_ciphertext.iter().map(|x| GF8(*x)).collect_vec();
         let expected_tag = expected_tag.iter().map(|x| GF8(*x)).collect_vec();
-        assert_eq_vector(ct1, ct2, ct3, expected_ciphertext);
-        assert_eq_vector(tag1, tag2, tag3, expected_tag);
+        assert_eq_vector(ctxt1.ciphertext, ctxt2.ciphertext, ctxt3.ciphertext, expected_ciphertext);
+        assert_eq_vector(ctxt1.tag, ctxt2.tag, ctxt3.tag, expected_tag);
     }
 
     fn test_aes_gcm_128_decrypt(keys: &[u8], iv: &[u8], expected_plaintext: &[u8], ad: &[u8], ciphertext: &[u8], tag: &[u8]) {

@@ -113,13 +113,13 @@ impl Mul for GF128 {
     }
 }
 
-#[derive(Debug)]
-pub struct TryFromGF128SliceError(());
+#[derive(Debug, PartialEq)]
+pub struct TryFromGF128SliceError;
 
 impl TryFrom<&[GF8]> for GF128 {
     type Error = TryFromGF128SliceError;
     fn try_from(value: &[GF8]) -> Result<Self, Self::Error> {
-        if value.len() != 16 { return Err(TryFromGF128SliceError(()))}
+        if value.len() != 16 { return Err(TryFromGF128SliceError)}
         let mut bytes = [0u8; 16];
         for i in 0..16 {
             bytes[i] = value[i].0;
@@ -131,7 +131,7 @@ impl TryFrom<&[GF8]> for GF128 {
 impl TryFrom<&[u8]> for GF128 {
     type Error = TryFromGF128SliceError;
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() != 16 { return Err(TryFromGF128SliceError(()))}
+        if value.len() != 16 { return Err(TryFromGF128SliceError)}
         let mut bytes = [0u8; 16];
         bytes.copy_from_slice(value);
         Ok(GF128(bytes))
@@ -168,6 +168,20 @@ impl<D: Digest> FieldDigestExt<GF128> for D {
     }
 }
 
+impl From<[GF8; 16]> for GF128 {
+    fn from(value: [GF8; 16]) -> Self {
+        let mut arr = [0u8; 16];
+        arr.iter_mut().zip(value).for_each(|(dst, src)| *dst = src.0);
+        Self(arr)
+    }
+}
+
+impl From<[u8; 16]> for GF128 {
+    fn from(value: [u8; 16]) -> Self {
+        Self(value)
+    }
+}
+
 // impl FieldVectorCommChannel<GF128> for CommChannel {
 //     fn read_vector(&mut self, buffer: &mut [GF128]) -> std::io::Result<()> {
 //         let mut buf = vec![0u8; 16*buffer.len()];
@@ -192,7 +206,7 @@ impl<D: Digest> FieldDigestExt<GF128> for D {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use crate::share::Field;
+    use crate::{gcm::gf128::TryFromGF128SliceError, share::{gf8::GF8, Field}};
 
     use super::GF128;
 
@@ -258,5 +272,52 @@ mod test {
         for (x,(y,expected)) in xs.into_iter().zip_eq(ys.into_iter().zip_eq(expected)) {
             assert_eq!(x * y, expected);
         }
+    }
+
+    #[test]
+    fn from_gf8_array() {
+        let expected = GF128([0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97]);
+        let actual = GF128::from([GF8(0xa0), GF8(0x0d), GF8(0x26), GF8(0xf5), GF8(0x21), GF8(0x5c), GF8(0x8c), GF8(0x4c), GF8(0xf2), GF8(0x98), GF8(0xbc), GF8(0xcb), GF8(0x21), GF8(0x3f), GF8(0x2c), GF8(0x97)]);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn from_u8_array() {
+        let expected = GF128([0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97]);
+        let actual = GF128::from([0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97]);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn try_from_gf8_slice() {
+        let expected = GF128([0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97]);
+        let slice = [GF8(0xa0), GF8(0x0d), GF8(0x26), GF8(0xf5), GF8(0x21), GF8(0x5c), GF8(0x8c), GF8(0x4c), GF8(0xf2), GF8(0x98), GF8(0xbc), GF8(0xcb), GF8(0x21), GF8(0x3f), GF8(0x2c), GF8(0x97)];
+        let actual = GF128::try_from(slice.as_slice());
+        assert_eq!(Ok(expected), actual);
+
+        let slice_too_short = [GF8(0xa0), GF8(0x0d), GF8(0x26), GF8(0xf5), GF8(0x21), GF8(0x5c), GF8(0x8c), GF8(0x4c), GF8(0xf2), GF8(0x98), GF8(0xbc), GF8(0xcb), GF8(0x21), GF8(0x3f), GF8(0x2c)];
+        assert_eq!(Err(TryFromGF128SliceError), GF128::try_from(slice_too_short.as_slice()));
+
+        let slice_empty: &[GF8] = &[];
+        assert_eq!(Err(TryFromGF128SliceError), GF128::try_from(slice_empty));
+
+        let slice_too_long = [GF8(0xa0), GF8(0x0d), GF8(0x26), GF8(0xf5), GF8(0x21), GF8(0x5c), GF8(0x8c), GF8(0x4c), GF8(0xf2), GF8(0x98), GF8(0xbc), GF8(0xcb), GF8(0x21), GF8(0x3f), GF8(0x2c), GF8(0x97), GF8(0x56)];
+        assert_eq!(Err(TryFromGF128SliceError), GF128::try_from(slice_too_long.as_slice()));
+    }
+
+    #[test]
+    fn try_from_u8_slice() {
+        let expected = GF128([0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97]);
+        let actual = GF128::from([0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97]);
+        assert_eq!(expected, actual);
+
+        let slice_too_short = [0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c];
+        assert_eq!(Err(TryFromGF128SliceError), GF128::try_from(slice_too_short.as_slice()));
+
+        let slice_empty: &[u8] = &[];
+        assert_eq!(Err(TryFromGF128SliceError), GF128::try_from(slice_empty));
+
+        let slice_too_long = [0xa0, 0x0d, 0x26, 0xf5, 0x21, 0x5c, 0x8c, 0x4c, 0xf2, 0x98, 0xbc, 0xcb, 0x21, 0x3f, 0x2c, 0x97, 0x33];
+        assert_eq!(Err(TryFromGF128SliceError), GF128::try_from(slice_too_long.as_slice()));
     }
 }

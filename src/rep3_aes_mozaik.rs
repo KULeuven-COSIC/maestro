@@ -16,7 +16,7 @@ use chida::{ChidaBenchmarkParty, ImplVariant};
 use clap::{Parser, Subcommand};
 use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
 use furukawa::FurukawaGCMParty;
-use gcm::gf128::GF128;
+use gcm::{gf128::GF128, Aes128GcmCiphertext};
 use itertools::{izip, Itertools};
 use network::{Config, ConnectedParty};
 use party::{error::{MpcError, MpcResult}, ArithmeticBlackBox};
@@ -278,7 +278,7 @@ impl From<io::Error> for Rep3AesError {
     }
 }
 
-fn aes128_gcm_encrypt_key_params<Protocol>(party: &mut Protocol, iv: &[u8], key: &KeyParams<RssShare<GF8>>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<(Vec<RssShare<GF8>>, Vec<RssShare<GF8>>)>
+fn aes128_gcm_encrypt_key_params<Protocol>(party: &mut Protocol, iv: &[u8], key: &KeyParams<RssShare<GF8>>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext>
 where Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox
 {
     match key {
@@ -304,10 +304,10 @@ fn aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF
     GF8InvBlackBox::do_preprocessing(party, 1, prep_info.blocks)?;
     ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
     let message_share = convert_ring_to_boolean(party, party_index, &message_share_si, &message_share_sii)?;
-    let (mut tag, mut ct) = aes128_gcm_encrypt_key_params(party, &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
-    ct.append(&mut tag);
+    let mut ct = aes128_gcm_encrypt_key_params(party, &encrypt_args.nonce, &key_share, &message_share, &encrypt_args.associated_data)?;
+    ct.ciphertext.append(&mut ct.tag);
     // open ct||tag
-    let ct_and_tag = party.output_to(&ct, &ct, &ct)?;
+    let ct_and_tag = party.output_to(&ct.ciphertext, &ct.ciphertext, &ct.ciphertext)?;
     ArithmeticBlackBox::<Z64Bool>::finalize(party)?;
     ArithmeticBlackBox::<GF128>::finalize(party)?;
     Ok(EncryptResult::new(ct_and_tag))

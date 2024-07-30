@@ -510,17 +510,6 @@ where
         .collect()
 }
 
-#[inline]
-fn constant<F: Field>(i: usize, value: F) -> RssShare<F> {
-    if i == 0 {
-        RssShare::from(value, F::ZERO)
-    } else if i == 2 {
-        RssShare::from(F::ZERO, value)
-    } else {
-        RssShare::from(F::ZERO, F::ZERO)
-    }
-}
-
 impl Party for MainParty {
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
     fn generate_alpha<F: Field>(&mut self, n: usize) -> Vec<F>
@@ -539,7 +528,7 @@ impl Party for MainParty {
 
     #[inline]
     fn constant<F: Field>(&self, value: F) -> RssShare<F> {
-        constant(self.i, value)
+        RssShare::constant(self.i, value)
     }
 
     // I/O

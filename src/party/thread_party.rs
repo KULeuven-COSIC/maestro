@@ -79,7 +79,7 @@ impl<T> Party for ThreadParty<T> {
 
     #[inline]
     fn constant<F: Field>(&self, value: F) -> RssShare<F> {
-        super::constant(self.i, value)
+        RssShare::constant(self.i, value)
     }
 
     fn send_field<'a, F: Field + 'a>(

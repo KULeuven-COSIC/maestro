@@ -29,10 +29,12 @@ criterion = {version ="0.4", optional = true }
 lazy_static = {version = "1.4.0" }
 rayon = "1.10.0"
 hex = "0.4.3"
+array-init = "2.1.0"
 
 [dev-dependencies]
 # serial_test = "*"
 criterion = "0.5.1"
+aes-gcm = "0.10.3"
 
 [[bin]]
 name = "rep3-aes-mozaik"

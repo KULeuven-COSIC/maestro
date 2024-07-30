@@ -236,6 +236,29 @@ impl AesKeyState {
     }
 }
 
+/// A batch of key schedules represented as `RK_LEN` lists of round keys
+/// E.g. [rk1_1, ..., rk1_m], [rk2_1, ..., rk2_m], ... for m key schedules with [rk1, rk2, ..., rk_RK_LEN]
+pub struct AesKeyScheduleBatch<const RK_LEN: usize> {
+    batched_round_keys: [Vec<AesKeyState>; RK_LEN],
+    /// n_blocks[i] denotes the number of blocks that the i-th round key (batched_round_keys[*][i]) should be applied to
+    n_blocks: Vec<usize>,
+}
+
+impl<const RK_LEN: usize> AesKeyScheduleBatch<RK_LEN> {
+    /// Creates a key schedule batch from a list of key schedules and information on how many blocks to apply which key schedule.
+    /// The i-th key schedule, i.e., `key_schedules[i]` is applied to `n_blocks[i]`-many blocks. The different key schedules are applied
+    /// in order, so that the first key schedule is applied to the first `n_blocks[0]`-many blocks, the second to the blocks `n_blocks[0]` until `n_blocks[0] + n_blocks[1]`, and so on...
+    pub fn new<'a>(key_schedules: &[&[AesKeyState]], n_blocks: Vec<usize>) -> Self {
+        let batch: [Vec<AesKeyState>; RK_LEN] = array_init::array_init(|round| {
+            key_schedules.iter().map(|ks_i| ks_i[round].clone()).collect()
+        });
+        Self {
+            batched_round_keys: batch,
+            n_blocks,
+        }
+    }
+}
+
 pub fn random_state<Protocol: Party>(
     party: &mut Protocol,
     size: usize,
@@ -304,6 +327,47 @@ pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
 
     timer!("aes_add_rk", {
         add_round_key(&mut state, &round_key[10]);
+    });
+
+    Ok(state)
+}
+
+/// Computes the AES-128 forward pass on the inputs with different key schedules applied to the blocks
+/// as described in [AesKeyScheduleBatch].
+pub fn batched_aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
+    party: &mut Protocol,
+    inputs: VectorAesState,
+    key_schedule: &AesKeyScheduleBatch<11>,
+) -> MpcResult<VectorAesState> {
+    let mut state = inputs;
+
+    timer!("aes_add_rk", {
+        add_round_key_batched(&mut state, key_schedule, 0);
+    });
+
+    for r in 1usize..=9 {
+        timer!("aes_sbox", {
+            sbox_layer(party, &mut state.si, &mut state.sii)?;
+        });
+        timer!("aes_shift_rows", {
+            state.shift_rows();
+        });
+        timer!("aes_mix_columns", {
+            state.mix_columns();
+        });
+        timer!("aes_add_rk", {
+            add_round_key_batched(&mut state, key_schedule, r);
+        });
+    }
+    timer!("aes_sbox", {
+        sbox_layer(party, &mut state.si, &mut state.sii)?;
+    });
+    timer!("aes_shift_rows", {
+        state.shift_rows();
+    });
+
+    timer!("aes_add_rk", {
+        add_round_key_batched(&mut state, key_schedule, 10);
     });
 
     Ok(state)
@@ -401,6 +465,29 @@ fn add_round_key(states: &mut VectorAesState, round_key: &AesKeyState) {
     }
 }
 
+fn add_round_key_batched<const RK_LEN: usize>(states: &mut VectorAesState, round_keys: &AesKeyScheduleBatch<RK_LEN>, round: usize) {
+    let round_key_batch = &round_keys.batched_round_keys[round];
+    debug_assert!(round_key_batch.len() > 0);
+    let mut current_round_key = &round_key_batch[0];
+    let mut current_n_blocks = round_keys.n_blocks[0];
+    let mut key_schedule_index = 0;
+    let mut block_cnt = 0;
+    for j in 0..states.n {
+        if block_cnt >= current_n_blocks {
+            // use the round key of the next key schedule for the next n_blocks
+            key_schedule_index += 1;
+            current_round_key = &round_key_batch[key_schedule_index];
+            current_n_blocks = round_keys.n_blocks[key_schedule_index];
+            block_cnt = 0; // reset block counter
+        }
+        for i in 0..16 {
+            states.si[16 * j + i] += current_round_key.si[i];
+            states.sii[16 * j + i] += current_round_key.sii[i];
+        }
+        block_cnt += 1; // increment block counter
+    }
+}
+
 fn sbox_layer<Protocol: GF8InvBlackBox>(
     party: &mut Protocol,
     si: &mut [GF8],
@@ -492,6 +579,38 @@ pub mod test {
         0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB,
         0x16,
     ];
+    
+    pub fn aes128_keyschedule_plain(key: [u8; 16]) -> Vec<[u8; 16]> {
+        const ROUND_CONSTANTS: [u8; 10] = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
+        let mut ks = Vec::with_capacity(11);
+        ks.push([0u8; 16]); // rk0
+
+        // key is interpreted as column-wise (see FIPS 97)
+        for i in 0..4 {
+            for j in 0..4 {
+                ks[0][4 * i + j] = key[4 * j + i];
+            }
+        }
+
+        for i in 1..=10 {
+            let rk = &ks[i-1];
+            let rot = [AES_SBOX[rk[7] as usize], AES_SBOX[rk[11] as usize], AES_SBOX[rk[15] as usize], AES_SBOX[rk[3] as usize]];
+        
+            let mut output = rk.clone();
+            for i in 0..4 {
+                output[4 * i] ^= rot[i];
+            }
+            output[0] ^= ROUND_CONSTANTS[i - 1];
+        
+            for j in 1..4 {
+                for i in 0..4 {
+                    output[4 * i + j] ^= output[4 * i + j - 1];
+                }
+            }
+            ks.push(output);
+        }
+        ks
+    }
 
     fn into_rss_share(
         s1: VectorAesState,
@@ -509,6 +628,66 @@ pub mod test {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn aes128_keyschedule_plain_sanity_test() {
+        // secret-share keys into key schedule
+        let key = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
+        let key_schedule = aes128_keyschedule_plain(key);
+
+        let round_keys: [[u8; 16]; 11] = [
+            // already in row-first representation
+            [
+                0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6,
+                0x88, 0x3c,
+            ],
+            [
+                0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1,
+                0x39, 0x05,
+            ],
+            [
+                0xf2, 0x7a, 0x59, 0x73, 0xc2, 0x96, 0x35, 0x59, 0x95, 0xb9, 0x80, 0xf6, 0xf2, 0x43,
+                0x7a, 0x7f,
+            ],
+            [
+                0x3d, 0x47, 0x1e, 0x6d, 0x80, 0x16, 0x23, 0x7a, 0x47, 0xfe, 0x7e, 0x88, 0x7d, 0x3e,
+                0x44, 0x3b,
+            ],
+            [
+                0xef, 0xa8, 0xb6, 0xdb, 0x44, 0x52, 0x71, 0x0b, 0xa5, 0x5b, 0x25, 0xad, 0x41, 0x7f,
+                0x3b, 0x00,
+            ],
+            [
+                0xd4, 0x7c, 0xca, 0x11, 0xd1, 0x83, 0xf2, 0xf9, 0xc6, 0x9d, 0xb8, 0x15, 0xf8, 0x87,
+                0xbc, 0xbc,
+            ],
+            [
+                0x6d, 0x11, 0xdb, 0xca, 0x88, 0x0b, 0xf9, 0x00, 0xa3, 0x3e, 0x86, 0x93, 0x7a, 0xfd,
+                0x41, 0xfd,
+            ],
+            [
+                0x4e, 0x5f, 0x84, 0x4e, 0x54, 0x5f, 0xa6, 0xa6, 0xf7, 0xc9, 0x4f, 0xdc, 0x0e, 0xf3,
+                0xb2, 0x4f,
+            ],
+            [
+                0xea, 0xb5, 0x31, 0x7f, 0xd2, 0x8d, 0x2b, 0x8d, 0x73, 0xba, 0xf5, 0x29, 0x21, 0xd2,
+                0x60, 0x2f,
+            ],
+            [
+                0xac, 0x19, 0x28, 0x57, 0x77, 0xfa, 0xd1, 0x5c, 0x66, 0xdc, 0x29, 0x00, 0xf3, 0x21,
+                0x41, 0x6e,
+            ],
+            [
+                0xd0, 0xc9, 0xe1, 0xb6, 0x14, 0xee, 0x3f, 0x63, 0xf9, 0x25, 0x0c, 0x0c, 0xa8, 0x89,
+                0xc8, 0xa6,
+            ],
+        ];
+
+       assert_eq!(key_schedule.len(), 11);
+       for (actual, expected) in key_schedule.into_iter().zip(round_keys) {
+            assert_eq!(actual, expected);
+       }
     }
 
     #[test]
