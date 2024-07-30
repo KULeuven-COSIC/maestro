@@ -242,6 +242,7 @@ fn rss_pos<'a>(it: impl Iterator<Item=u64>, first: bool) -> (Vec<Z64Bool>, Vec<Z
 }
 
 pub fn convert_ring_to_boolean<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protocol, party_index: usize, elements_si: &[u64], elements_sii: &[u64]) -> MpcResult<Vec<RssShare<GF8>>> {
+    debug_assert_eq!(elements_si.len(), elements_sii.len());
     // convert shares locally
     let si: (Vec<_>, Vec<_>) = rss_pos(elements_si.iter().copied(), true);
     let sii: (Vec<_>, Vec<_>) = rss_pos(elements_sii.iter().copied(), false);
@@ -268,15 +269,16 @@ fn ripple_carry_adder<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protoco
     debug_assert_eq!(a_i.len(), a_ii.len());
     debug_assert_eq!(a_i.len(), b_i.len());
     debug_assert_eq!(a_i.len(), b_ii.len());
+    let n = a_i.len().div_ceil(64);
     
-    let mut carry_si = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
-    let mut carry_sii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
-    let mut slice_a_i = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
-    let mut slice_a_ii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
-    let mut slice_b_i = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
-    let mut slice_b_ii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
-    let mut slice_c_i = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
-    let mut slice_c_ii = vec![Z64Bool::ZERO; a_i.len() / 64 + 1];
+    let mut carry_si = vec![Z64Bool::ZERO; n];
+    let mut carry_sii = vec![Z64Bool::ZERO; n];
+    let mut slice_a_i = vec![Z64Bool::ZERO; n];
+    let mut slice_a_ii = vec![Z64Bool::ZERO; n];
+    let mut slice_b_i = vec![Z64Bool::ZERO; n];
+    let mut slice_b_ii = vec![Z64Bool::ZERO; n];
+    let mut slice_c_i = vec![Z64Bool::ZERO; n];
+    let mut slice_c_ii = vec![Z64Bool::ZERO; n];
 
     let mut result_i = vec![Z64Bool::ZERO; a_i.len()];
     let mut result_ii = vec![Z64Bool::ZERO; a_i.len()];
@@ -299,6 +301,7 @@ fn ripple_carry_adder<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protoco
         }
         unbit_slice(&mut result_i, &slice_c_i, i);
         unbit_slice(&mut result_ii, &slice_c_ii, i);
+        debug_assert_eq!(slice_c_i.len(), slice_a_i.len());
         party.mul(&mut slice_c_i, &mut slice_c_ii, &slice_a_i, &slice_a_ii, &slice_b_i, &slice_b_ii)?;
         for j in 0..n {
             carry_si[j] += slice_c_i[j];
@@ -344,11 +347,10 @@ pub mod test {
         (0..n).map(|_| rng.next_u64()).collect()
     }
 
-    fn ripple_carry_adder_u64<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>(setup: S) {
+    fn ripple_carry_adder_u64<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>(n: usize) {
         let mut rng = thread_rng();
-        const N: usize = 100;
-        let a = random_u64(&mut rng, N);
-        let b = random_u64(&mut rng, N);
+        let a = random_u64(&mut rng, n);
+        let b = random_u64(&mut rng, n);
 
         let a_shares = secret_share_vector(&mut rng, a.iter().map(|v| Z64Bool(*v)));
         // consistent_vector(&a_shares.0, &a_shares.1, &a_shares.2);
@@ -386,7 +388,9 @@ pub mod test {
 
     #[test]
     fn ripple_carry_adder_u64_chida() {
-        ripple_carry_adder_u64(ChidaSetup)
+        ripple_carry_adder_u64::<_, ChidaSetup>(64);
+        ripple_carry_adder_u64::<_, ChidaSetup>(100);
+        ripple_carry_adder_u64::<_, ChidaSetup>(320);
     }
 
     fn consistent_u64(s1i: &[u64], s1ii: &[u64], s2i: &[u64], s2ii: &[u64], s3i: &[u64], s3ii: &[u64]) {
