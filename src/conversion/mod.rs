@@ -410,7 +410,7 @@ pub mod test {
         assert_eq!(s2ii, s3i);
     }
 
-    fn conv_bool_to_ring<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>(setup: S) {
+    fn conv_bool_to_ring<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>() {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);
@@ -436,7 +436,7 @@ pub mod test {
 
     #[test]
     fn conv_bool_to_ring_chida() {
-        conv_bool_to_ring(ChidaSetup)
+        conv_bool_to_ring::<_, ChidaSetup>()
     }
 
     pub fn secret_share_vector_ring<R: Rng + CryptoRng>(rng: &mut R, values: &[u64]) -> (Vec<u64>,Vec<u64>,Vec<u64>) {
@@ -446,7 +446,7 @@ pub mod test {
         (s1, s2, s3)
     }
 
-    fn conv_ring_to_bool<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>(setup: S) {
+    fn conv_ring_to_bool<P: ArithmeticBlackBox<Z64Bool>, S: TestSetup<P>>() {
         let mut rng = thread_rng();
         const N: usize = 100;
         let a = random_u64(&mut rng, N);
@@ -476,6 +476,6 @@ pub mod test {
 
     #[test]
     fn conv_ring_to_bool_chida() {
-        conv_ring_to_bool(ChidaSetup)
+        conv_ring_to_bool::<_, ChidaSetup>()
     }
 }
