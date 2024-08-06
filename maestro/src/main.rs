@@ -1,4 +1,4 @@
-#![doc = include_str!("../README.md")]
+#![doc = include_str!("../../README.md")]
 #![allow(dead_code)]
 mod aes;
 mod benchmark;
