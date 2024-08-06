@@ -27,7 +27,6 @@ use sha2::Sha256;
 
 use crate::{
     aes::{self, GF8InvBlackBox},
-    benchmark::{BenchmarkProtocol, BenchmarkResult},
     chida::{self, ChidaParty},
     network::{task::IoLayerOwned, ConnectedParty},
     party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats, MainParty, MulTripleRecorder, NoMulTripleRecording, Party},
@@ -93,46 +92,6 @@ pub fn gf4_circuit_benchmark(
     println!("Online Phase:");
     online_comm_stats.print_comm_statistics(party.0.party_index());
     party.0.print_statistics();
-}
-
-pub struct GF4CircuitBenchmark;
-
-impl BenchmarkProtocol for GF4CircuitBenchmark {
-    fn protocol_name(&self) -> String {
-        "gf4-circuit".to_string()
-    }
-    fn run(
-        &self,
-        conn: ConnectedParty,
-        simd: usize,
-        n_worker_threads: Option<usize>,
-    ) -> BenchmarkResult {
-        let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads).unwrap();
-        let _setup_comm_stats = party.io().reset_comm_stats();
-        println!("After setup");
-
-        let input = aes::random_state(party.0.as_party_mut(), simd);
-        // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(party.0.as_party_mut());
-
-        let start = Instant::now();
-        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-        let duration = start.elapsed();
-        println!("After online");
-        let online_comm_stats = party.io().reset_comm_stats();
-        let _ = aes::output(&mut party.0, output).unwrap();
-        println!("After output");
-        party.0.teardown().unwrap();
-        println!("After teardown");
-
-        BenchmarkResult::new(
-            Duration::from_secs(0),
-            duration,
-            CombinedCommStats::empty(),
-            online_comm_stats,
-            party.0.get_additional_timers(),
-        )
-    }
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty

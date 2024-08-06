@@ -1,18 +1,7 @@
 #![doc = include_str!("../../README.md")]
-#![allow(dead_code)]
-mod aes;
+
+mod utils;
 mod benchmark;
-mod chida;
-mod furukawa;
-mod gf4_circuit;
-mod lut256;
-mod network;
-mod party;
-mod share;
-mod wollut16;
-mod wollut16_malsec;
-mod gf4_circuit_malsec;
-mod util;
 
 use std::{path::PathBuf, time::Duration};
 
