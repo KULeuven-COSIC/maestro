@@ -70,6 +70,10 @@ impl GF8InvBlackBox for LUT256Party {
         self.io().wait_for_completion();
         Ok(())
     }
+
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        self.inner.as_party_mut()
+    }
 }
 
 fn lut256_mt(

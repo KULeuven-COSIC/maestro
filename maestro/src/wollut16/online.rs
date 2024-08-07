@@ -3,7 +3,7 @@
 use crate::{
     aes::GF8InvBlackBox,
     network::task::{Direction, IoLayerOwned},
-    party::{error::MpcResult, ArithmeticBlackBox, Party},
+    party::{error::MpcResult, ArithmeticBlackBox, MainParty, Party},
     share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
@@ -669,6 +669,9 @@ impl GF8InvBlackBox for WL16Party {
         } else {
             gf8_inv_layer(self, si, sii)
         }
+    }
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        self.inner.as_party_mut()
     }
 }
 

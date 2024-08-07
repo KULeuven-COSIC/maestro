@@ -20,7 +20,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox}, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
+    aes::GF8InvBlackBox, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
 };
 
 pub mod mult_verification;
@@ -189,6 +189,10 @@ impl GF8InvBlackBox for WL16ASParty {
             self.verify_multiplications()?;
         }
         Ok(())
+    }
+
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        &mut self.inner
     }
 }
 

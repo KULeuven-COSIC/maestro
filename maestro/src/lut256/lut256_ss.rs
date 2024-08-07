@@ -1,9 +1,8 @@
-use std::time::Instant;
 
 use itertools::izip;
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
-use crate::{aes::{self, ss::GF8InvBlackBoxSS}, network::{task::Direction, ConnectedParty}, party::{error::MpcResult, MainParty, NoMulTripleRecording, Party}, share::{gf8::GF8, Field}};
+use crate::{aes::ss::GF8InvBlackBoxSS, network::{task::Direction, ConnectedParty}, party::{error::MpcResult, MainParty, NoMulTripleRecording, Party}, share::{gf8::GF8, Field}};
 
 use super::{lut256_tables, offline, RndOhv256OutputSS};
 
@@ -111,6 +110,10 @@ impl GF8InvBlackBoxSS for Lut256SSParty {
         let res = izip!(data, data_ii, data_iii).map(|(&si, sii, siii)| si + sii + siii).collect();
         self.inner.io().wait_for_completion();
         Ok(res)
+    }
+
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        &mut self.inner
     }
 
 }

@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 maestro = { path = "../maestro" }
+clap = {version = "4.4.13", features = ["derive"]}
+itertools = "0.12.1"

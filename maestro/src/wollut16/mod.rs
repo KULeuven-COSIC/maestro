@@ -14,10 +14,8 @@
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 
-use std::time::Instant;
 
 use crate::{
-    aes::{self, GF8InvBlackBox},
     chida::ChidaParty,
     network::{task::IoLayerOwned, ConnectedParty},
     party::{error::MpcResult, ArithmeticBlackBox, NoMulTripleRecording},
@@ -80,49 +78,6 @@ impl WL16Party {
     pub fn io(&self) -> &IoLayerOwned {
         <ChidaParty as ArithmeticBlackBox<GF4>>::io(&self.inner)
     }
-}
-
-/// This function implements the AES benchmark.
-///
-/// The arguments are
-/// - `connected` - the local party
-/// - `simd` - number of parallel AES calls
-/// - `n_worker_threads` - number of worker threads
-pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
-    let mut party = WL16Party::setup(connected, n_worker_threads).unwrap();
-    let setup_comm_stats = party.io().reset_comm_stats();
-    let start_prep = Instant::now();
-    party.do_preprocessing(0, simd).unwrap();
-    let prep_duration = start_prep.elapsed();
-    let prep_comm_stats = party.io().reset_comm_stats();
-
-    let input = aes::random_state(party.inner.as_party_mut(), simd);
-    // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(party.inner.as_party_mut());
-
-    let start = Instant::now();
-    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-    let duration = start.elapsed();
-    let online_comm_stats = party.io().reset_comm_stats();
-    let _ = aes::output(&mut party.inner, output).unwrap();
-    party.inner.teardown().unwrap();
-
-    println!("Finished benchmark");
-
-    println!(
-        "Party {}: LUT-16 with SIMD={} took {}s (pre-processing) and {}s (online phase)",
-        party.inner.party_index(),
-        simd,
-        prep_duration.as_secs_f64(),
-        duration.as_secs_f64()
-    );
-    println!("Setup:");
-    setup_comm_stats.print_comm_statistics(party.inner.party_index());
-    println!("Pre-Processing:");
-    prep_comm_stats.print_comm_statistics(party.inner.party_index());
-    println!("Online Phase:");
-    online_comm_stats.print_comm_statistics(party.inner.party_index());
-    party.inner.print_statistics();
 }
 
 impl RndOhv16 {

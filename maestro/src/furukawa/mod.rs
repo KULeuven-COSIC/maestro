@@ -10,7 +10,7 @@
 //!   - [furukawa_benchmark] that implements the AES benchmark
 //!   - [FurukawaParty] the party wrapper for the protocol. [FurukawaParty] also implements [ArithmeticBlackBox]
 
-use std::{ops::AddAssign, time::{Duration, Instant}};
+use std::ops::AddAssign;
 
 use itertools::izip;
 use rand_chacha::ChaCha20Rng;
@@ -21,58 +21,19 @@ use rayon::{
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, aes128_no_keyschedule, GF8InvBlackBox},
+    aes::GF8InvBlackBox,
     chida,
     network::{
         task::{Direction, IoLayerOwned},
         ConnectedParty,
     },
     party::{
-        broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, CombinedCommStats, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty
+        broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty
     },
     share::{gf2p64::GF2p64Subfield, gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec}, wollut16_malsec,
 };
 
 pub mod offline;
-
-/// This function implements the AES benchmark.
-///
-/// The arguments are
-/// - `connected` - the local party
-/// - `simd` - number of parallel AES calls
-/// - `n_worker_threads` - number of worker threads
-pub fn furukawa_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
-    let mut party = FurukawaParty::setup(connected, n_worker_threads, false).unwrap();
-    let setup_comm_stats = party.io().reset_comm_stats();
-    let inputs = aes::random_state(&mut party.inner, simd);
-    // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(&mut party.inner);
-
-    let start = Instant::now();
-    party.do_preprocessing(0, simd).unwrap();
-    let prep_duration = start.elapsed();
-    let prep_comm_stats = party.io().reset_comm_stats();
-
-    let start = Instant::now();
-    let output = aes128_no_keyschedule(&mut party, inputs, &ks).unwrap();
-    let online_duration = start.elapsed();
-    let online_comm_stats = party.io().reset_comm_stats();
-    party.finalize().unwrap();
-    let post_sacrifice_duration = start.elapsed();
-    let _ = aes::output(&mut party, output).unwrap();
-    party.inner.teardown().unwrap();
-
-    println!("Finished benchmark");
-
-    println!("Party {}: Furukawa et al. with SIMD={} took {}s (pre-processing), {}s (online), {}s (post-sacrifice), {}s (total)", party.inner.i, simd, prep_duration.as_secs_f64(), online_duration.as_secs_f64(), post_sacrifice_duration.as_secs_f64(), (prep_duration+online_duration+post_sacrifice_duration).as_secs_f64());
-    println!("Setup:");
-    setup_comm_stats.print_comm_statistics(party.inner.i);
-    println!("Pre-Processing:");
-    prep_comm_stats.print_comm_statistics(party.inner.i);
-    println!("Online Phase:");
-    online_comm_stats.print_comm_statistics(party.inner.i);
-    party.inner.print_statistics();
-}
 
 pub struct FurukawaParty<F: Field + Sync + Send + GF2p64Subfield> {
     inner: MainParty,
@@ -114,10 +75,6 @@ where
 
     pub fn start_input_phase(&mut self) -> InputPhase<F> {
         InputPhase::new(self)
-    }
-
-    pub fn inner(&self) -> &MainParty {
-        &self.inner
     }
 
     #[inline]
@@ -489,6 +446,9 @@ impl GF8InvBlackBox for FurukawaParty<GF8> {
         let n_muls_ks = 4 * 10 * 4 * n_keys; // 4 S-boxes per round, 10 rounds, 4 multiplications per S-box
         let n_muls_blocks = 16 * 10 * 4 * n_blocks; // 16 S-boxes per round, 10 rounds, 4 multiplications per S-box
         self.prepare_multiplications(n_muls_ks + n_muls_blocks)
+    }
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        &mut self.inner
     }
 }
 

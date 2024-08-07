@@ -1,9 +1,8 @@
-use std::time::{Duration, Instant};
 
 use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 
-use crate::{aes::{self, GF8InvBlackBox}, furukawa, gf4_circuit, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, CombinedCommStats, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{gf4::BsGF4, gf8::GF8, FieldDigestExt, FieldRngExt, RssShare}, wollut16_malsec};
+use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{gf4::BsGF4, gf8::GF8, FieldDigestExt, FieldRngExt, RssShare}, wollut16_malsec};
 
 mod offline;
 
@@ -154,6 +153,9 @@ impl GF8InvBlackBox for GF4CircuitASParty {
             self.verify_multiplications()?;
         }
         Ok(())
+    }
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        &mut self.inner
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{party::{error::MpcResult, Party}, share::gf8::GF8};
+use crate::{party::{error::MpcResult, MainParty, Party}, share::gf8::GF8};
 
 use super::AesKeyState;
 
@@ -20,6 +20,9 @@ pub trait GF8InvBlackBoxSS {
 
     /// Reveals data to all parties
     fn output(&mut self, data: &[GF8]) -> MpcResult<Vec<GF8>>;
+
+    /// Returns a mutable reference to the underlying [MainParty]
+    fn main_party_mut(&mut self) -> &mut MainParty;
 }
 
 // contains n AES States in parallel (ie si has length n * 16) in (3,3) sharing

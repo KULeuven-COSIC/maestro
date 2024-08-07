@@ -98,6 +98,9 @@ impl GF8InvBlackBox for ChidaBenchmarkParty {
         // no preprocessing needed
         Ok(())
     }
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        &mut self.inner.0
+    }
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for ChidaBenchmarkParty

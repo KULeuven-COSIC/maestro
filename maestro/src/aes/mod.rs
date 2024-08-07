@@ -1,5 +1,5 @@
 use crate::{
-    party::{error::MpcResult, ArithmeticBlackBox, Party},
+    party::{error::MpcResult, ArithmeticBlackBox, MainParty, Party},
     share::{gf8::GF8, RssShare},
 };
 #[cfg(feature = "verbose-timing")]
@@ -15,6 +15,8 @@ pub trait GF8InvBlackBox {
 
     /// run any required pre-processing phase to prepare for computation of the key schedule with n_keys and n_blocks many AES-128 block calls
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()>;
+
+    fn main_party_mut(&mut self) -> &mut MainParty;
 }
 
 // contains n AES States in parallel (ie si has length n * 16)

@@ -1,38 +1,40 @@
 #![doc = include_str!("../../README.md")]
 
+#[macro_use]
 mod utils;
 mod benchmark;
 
-use std::{path::PathBuf, time::Duration};
-
-use crate::{
-    furukawa::MalChidaBenchmark, gf4_circuit::GF4CircuitBenchmark, lut256::LUT256Benchmark,
-    wollut16::LUT16Benchmark,
-};
-use benchmark::BenchmarkProtocol;
-use chida::ChidaBenchmark;
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
-use furukawa::MalChidaRecursiveCheckBenchmark;
-use gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark};
+use benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16BitStringBenchmark, MalLUT16PrepCheckBenchmark}};
 use itertools::Itertools;
-use lut256::lut256_ss::Lut256SSBenchmark;
-use network::ConnectedParty;
-use wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16PrepCheckBenchmark, MalLUT16BitStringBenchmark};
+use std::path::PathBuf;
 
-use crate::chida::ImplVariant;
+use maestro::network::{self, ConnectedParty};
+use utils::{BenchmarkProtocol, BenchmarkResult};
+use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
 struct Cli {
     #[arg(long, value_name = "FILE")]
     config: PathBuf,
+
     #[arg(
         long,
         value_name = "N_THREADS",
         help = "The number of worker threads. Set to 0 to indicate the number of cores on the machine. Optional, default single-threaded"
     )]
     threads: Option<usize>,
-    #[command(subcommand)]
-    command: Commands,
+
+    #[arg(long, help = "The number of parallel AES calls to benchmark.")]
+    simd: usize,
+
+    #[arg(long, help = "The number repetitions of the protocol execution")]
+    rep: usize,
+
+    #[arg(long, help = "Path to write benchmark result data as CSV. Default: result.csv", default_value = "result.csv")]
+    csv: PathBuf,
+    
+    #[arg(value_enum)]
+    target: Vec<ProtocolVariant>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, Hash)]
@@ -54,153 +56,28 @@ pub enum ProtocolVariant {
     MalGF4CircuitRecBeaverCheck,
 }
 
-#[derive(Subcommand)]
-enum Commands {
-    /// Benchmarks the Oblivious AES protocol from Chida et al., "High-Throughput Secure AES Computation" in WAHC'18.
-    ChidaBenchmark {
-        #[arg(long, help = "The number of parallel AES calls to benchmark.")]
-        simd: usize,
-        #[arg(long="simple", action=ArgAction::SetTrue, help="If set, benchmarks the baseline implementation (cf. ImplVariant::Simple). If not set (default), benchmarks the optimized implementation in Chida et al.")]
-        use_simple: bool,
-    },
-    /// Benchmarks the Oblivious AES protocol from Chida et al., "High-Throughput Secure AES Computation" in WAHC'18 in the **malicious** setting using the
-    /// protocol from Furukawa et al with bucket-cut-and-choose and post-sacrifice to check correctness of multiplications.
-    MalChidaBenchmark {
-        #[arg(long, help = "The number of parallel AES calls to benchmark.")]
-        simd: usize,
-    },
-    /// Benchmarks the LUT-16 variant with semi-honest security
-    LUT16Benchmark {
-        #[arg(long, help = "The number of parallel AES calls to benchmark.")]
-        simd: usize,
-    },
-    /// Benchmarks the GF(2^4) circuit variant with semi-honest security
-    GF4CircuitBenchmark {
-        #[arg(long, help = "The number of parallel AES calls to benchmark.")]
-        simd: usize,
-    },
-    /// Benchmarks the LUT-256 variant with semi-honest security
-    LUT256Benchmark {
-        #[arg(long, help = "The number of parallel AES calls to benchmark.")]
-        simd: usize,
-    },
-    /// Benchmarks one or more protocols with runtime and communication data written to CSV file
-    Benchmark {
-        #[arg(long, help = "The number of parallel AES calls to benchmark.")]
-        simd: usize,
-        #[arg(long, help = "The number repetitions of the protocol execution")]
-        rep: usize,
-        #[arg(
-            long,
-            help = "Path to write benchmark result data as CSV. Default: result.csv",
-            default_value = "result.csv"
-        )]
-        csv: PathBuf,
-        #[arg(value_enum)]
-        target: Vec<ProtocolVariant>,
-    },
-}
-
-fn main() {
+fn main() -> Result<(), String> {
     let cli = Cli::parse();
 
     let (party_index, config) = network::Config::from_file(&cli.config).unwrap();
 
-    match cli.command {
-        Commands::ChidaBenchmark { simd, use_simple } => {
-            let variant = if use_simple {
-                ImplVariant::Simple
-            } else {
-                ImplVariant::Optimized
-            };
-            println!("Using {:?}", variant);
-            let connected = ConnectedParty::bind_and_connect(
-                party_index,
-                config,
-                Some(Duration::from_secs(60)),
-            )
-            .unwrap();
-            println!("Connected!");
-            chida::chida_benchmark(connected, simd, variant, cli.threads);
-        }
-        Commands::MalChidaBenchmark { simd } => {
-            let connected = ConnectedParty::bind_and_connect(
-                party_index,
-                config,
-                Some(Duration::from_secs(60)),
-            )
-            .unwrap();
-            println!("Connected!");
-            furukawa::furukawa_benchmark(connected, simd, cli.threads);
-        }
-        Commands::LUT16Benchmark { simd } => {
-            let connected = ConnectedParty::bind_and_connect(
-                party_index,
-                config,
-                Some(Duration::from_secs(60)),
-            )
-            .unwrap();
-            println!("Connected!");
-            wollut16::wollut16_benchmark(connected, simd, cli.threads);
-        }
-        Commands::GF4CircuitBenchmark { simd } => {
-            let connected = ConnectedParty::bind_and_connect(
-                party_index,
-                config,
-                Some(Duration::from_secs(60)),
-            )
-            .unwrap();
-            println!("Connected!");
-            gf4_circuit::gf4_circuit_benchmark(connected, simd, cli.threads);
-        }
-        Commands::LUT256Benchmark { simd } => {
-            let connected = ConnectedParty::bind_and_connect(
-                party_index,
-                config,
-                Some(Duration::from_secs(60)),
-            )
-            .unwrap();
-            println!("Connected!");
-            lut256::lut256_benchmark(connected, simd, cli.threads);
-        }
-        Commands::Benchmark {
-            simd,
-            rep,
-            csv,
-            target,
-        } => {
-            // check non-empty and distinct targets
-            if target.is_empty() {
-                let all_targets: Vec<_> = ProtocolVariant::value_variants()
-                    .iter()
-                    .map(|prot| prot.to_possible_value().unwrap().get_name().to_string())
-                    .collect();
-                println!(
-                    "List of targets is empty: choose any number of targets: {:?}",
-                    all_targets
-                );
-                return;
-            }
-            if !target.iter().all_unique() {
-                println!("Duplicate targets in argument {:?}", target);
-                return;
-            }
-            let mut boxed: Vec<Box<dyn BenchmarkProtocol>> = Vec::new();
-            for v in target {
-                boxed.push(Box::new(v));
-            }
-            benchmark::benchmark_protocols(
-                party_index,
-                &config,
-                rep,
-                simd,
-                cli.threads,
-                boxed,
-                csv,
-            )
-            .unwrap();
-        }
+    // check non-empty and distinct targets
+    if cli.target.is_empty() {
+        let all_targets: Vec<_> = ProtocolVariant::value_variants()
+            .iter()
+            .map(|prot| prot.to_possible_value().unwrap().get_name().to_string())
+            .collect();
+        return Err(format!("List of targets is empty: choose any number of targets: {:?}", all_targets));
     }
+    if !cli.target.iter().all_unique() {
+        return Err(format!("Duplicate targets in argument {:?}", cli.target));
+    }
+    let mut boxed: Vec<Box<dyn BenchmarkProtocol>> = Vec::new();
+    for v in cli.target {
+        boxed.push(Box::new(v));
+    }
+    utils::benchmark_protocols(party_index, &config, cli.rep, cli.simd, cli.threads, boxed, cli.csv).unwrap();
+    Ok(())
 }
 
 impl ProtocolVariant {
@@ -234,7 +111,7 @@ impl BenchmarkProtocol for ProtocolVariant {
         conn: ConnectedParty,
         simd: usize,
         n_worker_threads: Option<usize>,
-    ) -> benchmark::BenchmarkResult {
+    ) -> BenchmarkResult {
         self.get_protocol().run(conn, simd, n_worker_threads)
     }
 }

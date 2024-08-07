@@ -8,10 +8,9 @@
 //!   - [LUT256Party] the party wrapper for the protocol. [LUT256Party] also implements [ArithmeticBlackBox]
 //!
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::{
-    aes::{self, GF8InvBlackBox},
     chida::ChidaParty,
     network::{task::IoLayerOwned, ConnectedParty},
     party::{error::MpcResult, ArithmeticBlackBox},
@@ -93,50 +92,6 @@ impl RndOhv {
         }
         GF8(res)
     }
-}
-
-/// This function implements the AES benchmark.
-///
-/// The arguments are
-/// - `connected` - the local party
-/// - `simd` - number of parallel AES calls
-/// - `n_worker_threads` - number of worker threads
-pub fn lut256_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
-    let mut party = LUT256Party::setup(connected, n_worker_threads).unwrap();
-    let setup_comm_stats = party.io().reset_comm_stats();
-    let start_prep = Instant::now();
-    party.do_preprocessing(0, simd).unwrap();
-    let prep_duration = start_prep.elapsed();
-    let prep_comm_stats = party.io().reset_comm_stats();
-
-    let input = aes::random_state(party.inner.as_party_mut(), simd);
-    // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(party.inner.as_party_mut());
-
-    let start = Instant::now();
-    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-    let duration = start.elapsed();
-    let online_comm_stats = party.io().reset_comm_stats();
-    let _ = aes::output(&mut party.inner, output).unwrap();
-    party.inner.teardown().unwrap();
-
-    println!("Finished benchmark");
-
-    println!(
-        "Party {}: LUT-256 with SIMD={} took {}s (pre-processing) and {}s (online phase)",
-        party.inner.party_index(),
-        simd,
-        prep_duration.as_secs_f64(),
-        duration.as_secs_f64()
-    );
-    println!("LUT time: {}s", party.lut_time.as_secs_f64());
-    println!("Setup:");
-    setup_comm_stats.print_comm_statistics(party.inner.party_index());
-    println!("Pre-Processing:");
-    prep_comm_stats.print_comm_statistics(party.inner.party_index());
-    println!("Online Phase:");
-    online_comm_stats.print_comm_statistics(party.inner.party_index());
-    party.inner.print_statistics();
 }
 
 #[cfg(test)]

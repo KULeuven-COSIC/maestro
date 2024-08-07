@@ -1,7 +1,7 @@
-mod chida;
-mod furukawa;
-mod gf4_circuit_malsec;
-mod gf4_circuit;
-mod lut256;
-mod wollut16_malsec;
-mod wollut16;
+pub mod chida;
+pub mod furukawa;
+pub mod gf4_circuit_malsec;
+pub mod gf4_circuit;
+pub mod lut256;
+pub mod wollut16_malsec;
+pub mod wollut16;

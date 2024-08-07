@@ -15,7 +15,6 @@
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 
-use std::time::{Duration, Instant};
 
 use itertools::{izip, Itertools};
 use rand_chacha::ChaCha20Rng;
@@ -26,10 +25,10 @@ use rayon::{
 use sha2::Sha256;
 
 use crate::{
-    aes::{self, GF8InvBlackBox},
+    aes::GF8InvBlackBox,
     chida::{self, ChidaParty},
     network::{task::IoLayerOwned, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats, MainParty, MulTripleRecorder, NoMulTripleRecording, Party},
+    party::{error::MpcResult, ArithmeticBlackBox, MainParty, MulTripleRecorder, NoMulTripleRecording, Party},
     share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
@@ -50,48 +49,6 @@ impl GF4CircuitSemihonestParty {
     fn io(&self) -> &IoLayerOwned {
         <ChidaParty as ArithmeticBlackBox<GF4>>::io(&self.0)
     }
-}
-
-/// This function implements the AES benchmark.
-///
-/// The arguments are
-/// - `connected` - the local party
-/// - `simd` - number of parallel AES calls
-/// - `n_worker_threads` - number of worker threads
-pub fn gf4_circuit_benchmark(
-    connected: ConnectedParty,
-    simd: usize,
-    n_worker_threads: Option<usize>,
-) {
-    let mut party = GF4CircuitSemihonestParty::setup(connected, n_worker_threads).unwrap();
-    let setup_comm_stats = party.io().reset_comm_stats();
-
-    let input = aes::random_state(party.0.as_party_mut(), simd);
-    // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(party.0.as_party_mut());
-
-    let start = Instant::now();
-    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-    let duration = start.elapsed();
-    let online_comm_stats = party.io().reset_comm_stats();
-    let _ = aes::output(&mut party.0, output).unwrap();
-    party.0.teardown().unwrap();
-
-    println!("Finished benchmark");
-
-    println!(
-        "Party {}: GF(2^4) circuit with SIMD={} took {}s",
-        party.0.party_index(),
-        simd,
-        duration.as_secs_f64()
-    );
-    println!("Setup:");
-    setup_comm_stats.print_comm_statistics(party.0.party_index());
-    println!("Pre-Processing:");
-    CombinedCommStats::empty().print_comm_statistics(party.0.party_index());
-    println!("Online Phase:");
-    online_comm_stats.print_comm_statistics(party.0.party_index());
-    party.0.print_statistics();
 }
 
 impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty
@@ -165,6 +122,9 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
         } else {
             gf8_inv_via_gf4_mul_opt(self.0.as_party_mut(), &mut NoMulTripleRecording, si, sii)
         }
+    }
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        self.0.as_party_mut()
     }
 }
 
