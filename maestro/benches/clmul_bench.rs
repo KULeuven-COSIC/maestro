@@ -1,5 +1,5 @@
 use criterion::*;
-use rep3_aes::share::{gf2p64::GF2p64, FieldRngExt};
+use maestro::share::{gf2p64::GF2p64, FieldRngExt};
 use rand::thread_rng;
 
 fn clmul_bench_variants(c: &mut Criterion) {

@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
 use rand::thread_rng;
-use rep3_aes::{lut256::RndOhv, share::{bs_bool16::BsBool16, FieldRngExt, RssShare}};
+use maestro::{lut256::RndOhv, share::{bs_bool16::BsBool16, FieldRngExt, RssShare}};
 
 const SIMD_SIZE: usize = 10000;
 
