@@ -1,7 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
 use rand::thread_rng;
-use maestro::{lut256::RndOhv, share::{bs_bool16::BsBool16, FieldRngExt, RssShare}};
+use maestro::{lut256::RndOhv, share::bs_bool16::BsBool16};
+use rep3_core::{party::RngExt, share::RssShare};
 
 const SIMD_SIZE: usize = 10000;
 
@@ -254,7 +255,7 @@ fn benchmark_un_bitslice_ss(c: &mut Criterion) {
 
     // prepare a random instance
     let mut rng = thread_rng();
-    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| rng.generate(SIMD_SIZE)).collect_vec();
+    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| BsBool16::generate(&mut rng, SIMD_SIZE)).collect_vec();
     let bitslice_v4 = bitslice.iter().map(|v| {
         v.iter().flat_map(|bs16| [bs16.as_u16() as u8, (bs16.as_u16() >> 8) as u8]).collect_vec()
     }).collect_vec();
@@ -400,8 +401,8 @@ fn benchmark_un_bitslice_rss(c: &mut Criterion) {
     // prepare a random instance
     let mut rng = thread_rng();
     let bitslice: Vec<Vec<RssShare<BsBool16>>> = (0..256).map(|_| {
-        let si = rng.generate(SIMD_SIZE);
-        let sii = rng.generate(SIMD_SIZE);
+        let si = BsBool16::generate(&mut rng, SIMD_SIZE);
+        let sii = BsBool16::generate(&mut rng, SIMD_SIZE);
         si.into_iter().zip(sii).map(|(si, sii)| RssShare::from(si, sii)).collect_vec()
     }).collect_vec();
 
@@ -426,7 +427,7 @@ criterion_main!(unpack_bitslice);
 fn un_bitslice_ss_v2_correct() {
     // prepare a random instance
     let mut rng = thread_rng();
-    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| rng.generate(SIMD_SIZE)).collect_vec();
+    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| BsBool16::generate(&mut rng, SIMD_SIZE)).collect_vec();
 
     let res1 = un_bitslice_ss_v1(&bitslice);
     let res2 = un_bitslice_ss_v2(&bitslice);
@@ -438,7 +439,7 @@ fn un_bitslice_ss_v2_correct() {
 fn un_bitslice_ss_v3_correct() {
     // prepare a random instance
     let mut rng = thread_rng();
-    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| rng.generate(SIMD_SIZE)).collect_vec();
+    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| BsBool16::generate(&mut rng, SIMD_SIZE)).collect_vec();
 
     let res1 = un_bitslice_ss_v1(&bitslice);
     let res2 = un_bitslice_ss_v3(&bitslice);
@@ -450,7 +451,7 @@ fn un_bitslice_ss_v3_correct() {
 fn un_bitslice_ss_v4_correct() {
     // prepare a random instance
     let mut rng = thread_rng();
-    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| rng.generate(SIMD_SIZE)).collect_vec();
+    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| BsBool16::generate(&mut rng, SIMD_SIZE)).collect_vec();
     let bitslice_v4 = bitslice.iter().map(|v| {
         v.iter().flat_map(|bs16| [bs16.as_u16() as u8, (bs16.as_u16() >> 8) as u8]).collect_vec()
     }).collect_vec();
@@ -468,7 +469,7 @@ fn un_bitslice_ss_v4_correct() {
 fn un_bitslice_ss_v5_correct() {
     // prepare a random instance
     let mut rng = thread_rng();
-    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| rng.generate(SIMD_SIZE)).collect_vec();
+    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| BsBool16::generate(&mut rng, SIMD_SIZE)).collect_vec();
 
     let res1 = un_bitslice_ss_v1(&bitslice);
     let res2 = un_bitslice_ss_v5(&bitslice);
@@ -480,7 +481,7 @@ fn un_bitslice_ss_v5_correct() {
 fn un_bitslice_ss_v6_correct() {
     // prepare a random instance
     let mut rng = thread_rng();
-    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| rng.generate(SIMD_SIZE)).collect_vec();
+    let bitslice: Vec<Vec<BsBool16>> = (0..256).map(|_| BsBool16::generate(&mut rng, SIMD_SIZE)).collect_vec();
 
     let res1 = un_bitslice_ss_v1(&bitslice);
     let res2 = un_bitslice_ss_v6(&bitslice);
@@ -493,8 +494,8 @@ fn un_bitslice_v2_correct() {
     // prepare a random instance
     let mut rng = thread_rng();
     let bitslice: Vec<Vec<RssShare<BsBool16>>> = (0..256).map(|_| {
-        let si = rng.generate(SIMD_SIZE);
-        let sii = rng.generate(SIMD_SIZE);
+        let si = BsBool16::generate(&mut rng, SIMD_SIZE);
+        let sii = BsBool16::generate(&mut rng, SIMD_SIZE);
         si.into_iter().zip(sii).map(|(si, sii)| RssShare::from(si, sii)).collect_vec()
     }).collect_vec();
 
@@ -509,8 +510,8 @@ fn un_bitslice_v3_correct() {
     // prepare a random instance
     let mut rng = thread_rng();
     let bitslice: Vec<Vec<RssShare<BsBool16>>> = (0..256).map(|_| {
-        let si = rng.generate(SIMD_SIZE);
-        let sii = rng.generate(SIMD_SIZE);
+        let si = BsBool16::generate(&mut rng, SIMD_SIZE);
+        let sii = BsBool16::generate(&mut rng, SIMD_SIZE);
         si.into_iter().zip(sii).map(|(si, sii)| RssShare::from(si, sii)).collect_vec()
     }).collect_vec();
 
