@@ -1,6 +1,6 @@
-# NAME OF CRATE
+# MAESTRO
 
-This crate implements different oblivious AES protocols for three parties.
+This crate implements different oblivious AES protocols for three parties. The new protocols are described in "MAESTRO: Multi-party AES using Lookup Tables".
 
 ## Setup and Building
 
@@ -29,42 +29,23 @@ The benchmark always requires three parties. These can all be run on one machine
 Running three parties on localhost requires no additional configuration. The config files in the repository `p1.toml`, `p2.toml` and `p3.toml` as well as the required key material `keys/p{i}.key`/`keys/p{i}.pem` is already prepared
 and should work out of the box.
 
-The CLI for the benchmark binary (found in `target/release/rep3-aes`) offers some description and help on the parameters. It looks as follows
+The CLI for the benchmark binary (found in `target/release/benchmark`) offers some description and help on the parameters. It looks as follows
 ```
-$> target/release/rep3-aes -h
-Usage: rep3-aes [OPTIONS] --config <FILE> <COMMAND>
+$> target/release/benchmark -h
+Usage: benchmark [OPTIONS] --config <FILE> --simd <SIMD> --rep <REP> [TARGET]...
 
-Commands:
-  chida-benchmark        Benchmarks the Oblivious AES protocol from Chida et al., "High-Throughput Secure AES Computation" in WAHC'18
-  mal-chida-benchmark    Benchmarks the Oblivious AES protocol from Chida et al., "High-Throughput Secure AES Computation" in WAHC'18 in the **malicious** setting using the protocol from Furukawa et al with bucket-cut-and-choose and post-sacrifice to check correctness of multiplications
-  lut16-benchmark        Benchmarks the LUT-16 variant with semi-honest security
-  gf4-circuit-benchmark  Benchmarks the GF(2^4) circuit variant with semi-honest security
-  lut256-benchmark       Benchmarks the LUT-256 variant with semi-honest security
-  benchmark              Benchmarks one or more protocols with runtime and communication data written to CSV file
-  help                   Print this message or the help of the given subcommand(s)
+Arguments:
+  [TARGET]...  [possible values: chida, mal-chida, mal-chida-rec-check, lut16, gf4-circuit, lut256, lut256-ss, mal-lut16, mal-lut16-prep-check, mal-lut16-all-check, mal-lut16-bitstring, mal-gf4-circuit, mal-gf4-circuit-all-check, mal-gf4-circuit-bucket-beaver-check, mal-gf4-circuit-rec-beaver-check]
 
 Options:
       --config <FILE>        
       --threads <N_THREADS>  The number of worker threads. Set to 0 to indicate the number of cores on the machine. Optional, default single-threaded
+      --simd <SIMD>          The number of parallel AES calls to benchmark.
+      --rep <REP>            The number repetitions of the protocol execution
+      --csv <CSV>            Path to write benchmark result data as CSV. Default: result.csv [default: result.csv]
   -h, --help                 Print help
 ```
-and for the `benchmark` command in particular
-```
-$> target/release/rep3-aes --config p1.toml benchmark -h
-Benchmarks one or more protocols with runtime and communication data written to CSV file
-
-Usage: rep3-aes --config <FILE> benchmark [OPTIONS] --simd <SIMD> --rep <REP> [TARGET]...
-
-Arguments:
-  [TARGET]...  [possible values: chida, mal-chida, lut16, gf4-circuit, lut256, mal-lut16, mal-gf4-circuit]
-
-Options:
-      --simd <SIMD>  The number of parallel AES calls to benchmark.
-      --rep <REP>    The number repetitions of the protocol execution
-      --csv <CSV>    Path to write benchmark result data as CSV. Default: result.csv [default: result.csv]
-  -h, --help         Print help
-```
-The `benchmark` command runs the specified protocols `<REP>` times, each computing the forward direction of `<SIMD>` AES blocks in parallel (without keyschedule). The relevant time and communication metrics are written to the file `<CSV>` in csv format.
+The benchmark binary runs the specified protocols `<REP>` times, each computing the forward direction of `<SIMD>` AES blocks in parallel (without keyschedule). The relevant time and communication metrics are written to the file `<CSV>` in csv format.
 
 The protocols are
 
@@ -77,9 +58,9 @@ The protocols are
 - `mal-gf4-circuit`: maliciously secure version of `gf4-circuit` using Protocol 8 to verify multiplications
 
 To start the benchmark, run (**in 3 terminals**) 
-- `target/release/rep3-aes --config p1.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p1.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
-- `target/release/rep3-aes --config p2.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p2.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
-- `target/release/rep3-aes --config p3.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p3.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
+- `target/release/benchmark --config p1.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p1.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
+- `target/release/benchmark --config p2.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p2.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
+- `target/release/benchmark --config p3.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p3.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
 
 (where the number of threads, SIMD etc can be adapted depending on the capabilities of the machine)
 
@@ -206,3 +187,10 @@ To generate and view the code documentation run
 ```
 cargo doc --open
 ```
+
+## Code Organisation
+The implementation is split into separate crates as follows.
+
+- [rep3-core/](rep3-core) contains generic core networking code for three party MPC protocols and replicated secret-sharing
+- [maestro/](maestro) contains various protocol implementations for oblivious AES
+- [benchmark/](benchmark) contains the benchmarking code
