@@ -1,4 +1,6 @@
-use crate::{party::error::MpcResult, wollut16::{self, RndOhvOutput}};
+use rep3_core::party::error::MpcResult;
+
+use crate::wollut16::{self, RndOhvOutput};
 
 use super::WL16ASParty;
 
@@ -21,7 +23,9 @@ pub fn generate_random_ohv16_mt(party: &mut WL16ASParty, n: usize, use_bitstring
 
 #[cfg(test)]
 mod test {
-    use crate::{party::test::TestSetup, wollut16::offline::test::check_correct_rnd_ohv16, wollut16_malsec::{offline::{generate_random_ohv16, generate_random_ohv16_mt}, test::WL16ASSetup, WL16ASParty}};
+    use rep3_core::test::TestSetup;
+
+    use crate::{wollut16::offline::test::check_correct_rnd_ohv16, wollut16_malsec::{offline::{generate_random_ohv16, generate_random_ohv16_mt}, test::WL16ASSetup, WL16ASParty}};
 
 
     #[test]

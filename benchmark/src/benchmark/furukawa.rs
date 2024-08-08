@@ -1,5 +1,6 @@
 
-use maestro::{aes::GF8InvBlackBox, furukawa::FurukawaParty, network::ConnectedParty, party::ArithmeticBlackBox, share::gf8::GF8};
+use rep3_core::network::ConnectedParty;
+use maestro::{aes::GF8InvBlackBox, furukawa::FurukawaParty, share::gf8::GF8, util::ArithmeticBlackBox};
 
 
 impl_benchmark_protocol!(

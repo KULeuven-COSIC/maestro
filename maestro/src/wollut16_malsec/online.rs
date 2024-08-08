@@ -2,18 +2,19 @@ use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
 #[cfg(feature = "verbose-timing")]
-use {std::time::Instant, crate::party::PARTY_TIMER};
+use {std::time::Instant, rep3_core::party::PARTY_TIMER};
 
 use crate::{
-    network::task::Direction,
-    party::{error::MpcResult, MainParty, MulTripleRecorder, Party},
     share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-        Field,
-    },
-    wollut16::{RndOhv16, RndOhvOutput},
+    }, util::mul_triple_vec::MulTripleRecorder, wollut16::{RndOhv16, RndOhvOutput}
+};
+
+use rep3_core::{
+    network::task::Direction,
+    party::{error::MpcResult, MainParty, Party}, share::HasZero,
 };
 
 /// This protocol implements multiplicative inversion as in `Protocol 3`.

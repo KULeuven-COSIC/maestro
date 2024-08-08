@@ -1,8 +1,8 @@
 use itertools::izip;
-use rand_chacha::ChaCha20Rng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::{furukawa, network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{gf4::BsGF4, Field, FieldRngExt}, wollut16_malsec};
+use crate::{furukawa, share::{gf4::BsGF4, Field}, util::mul_triple_vec::{MulTripleRecorder, MulTripleVector}, wollut16_malsec};
+use rep3_core::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}};
 
 
 pub fn prepare_beaver_triples_recursive_check(party: &mut MainParty, dst: &mut MulTripleVector<BsGF4>, context: &mut BroadcastContext, n: usize) -> MpcResult<()> {
@@ -42,10 +42,7 @@ pub fn optimistic_mul_mt<F: Field + Send>(
     party: &mut MainParty,
     dst: &mut MulTripleVector<F>,
     n: usize,
-) -> MpcResult<()>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-{
+) -> MpcResult<()> {
     let ranges = party.split_range_equally(n);
     let thread_parties = party.create_thread_parties_with_additional_data(ranges, |range_start, range_end| Some(dst.create_thread_mul_triple_recorder(range_start, range_end)));
     let res = party.run_in_threadpool(|| {
@@ -64,14 +61,11 @@ where
     Ok(())
 }
 
-pub fn optimistic_mul<F: Field, P: Party, Rec: MulTripleRecorder<F>>(party: &mut P, rec: &mut Rec, n: usize) -> MpcResult<()>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-{
-    let a = party.generate_random(n);
+pub fn optimistic_mul<F: Field, P: Party, Rec: MulTripleRecorder<F>>(party: &mut P, rec: &mut Rec, n: usize) -> MpcResult<()> {
+    let a = party.generate_random::<F>(n);
     let b = party.generate_random(n);
 
-    let alphas = party.generate_alpha(n);
+    let alphas = party.generate_alpha::<F>(n);
     let ci: Vec<_> = izip!(alphas, a.iter(), b.iter())
         .map(|(alpha_j, aj, bj)| alpha_j + aj.si * bj.si + aj.si * bj.sii + aj.sii * bj.si)
         .collect();
@@ -96,7 +90,9 @@ mod test {
     use itertools::izip;
 
     use super::{optimistic_mul, optimistic_mul_mt, prepare_beaver_triples_recursive_check};
-    use crate::{party::{broadcast::{Broadcast, BroadcastContext}, test::localhost_setup, MainParty, MulTripleRecorder, MulTripleVector}, share::{gf4::BsGF4, test::{assert_eq, consistent}, Field}};
+    use crate::{share::{gf4::BsGF4, test::{assert_eq, consistent}, Field}, util::mul_triple_vec::{MulTripleRecorder, MulTripleVector}};
+    use rep3_core::party::{broadcast::{Broadcast, BroadcastContext}, MainParty};
+    use rep3_core::test::localhost_setup;
 
 
     #[test]

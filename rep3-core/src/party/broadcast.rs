@@ -1,12 +1,16 @@
 use crate::network::task::Direction;
+use crate::network::NetSerializable;
 use crate::party::error::{MpcError, MpcResult};
 use crate::party::MainParty;
-use crate::share::{Field, FieldDigestExt, RssShare};
+use crate::share::RssShare;
 use sha2::digest::FixedOutput;
 use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
+use std::ops::Add;
 use std::slice;
+
+use super::DigestExt;
 
 pub struct BroadcastContext {
     view_next: Sha256,
@@ -22,35 +26,29 @@ pub trait Broadcast {
         message: &[u8],
     ) -> MpcResult<()>;
 
-    fn broadcast_round<F: Field>(
+    fn broadcast_round<T: NetSerializable + DigestExt>(
         &mut self,
         context: &mut BroadcastContext,
-        buffer_next: &mut [F],
-        buffer_prev: &mut [F],
-        message: &[F],
-    ) -> MpcResult<()>
-    where
-        Sha256: FieldDigestExt<F>;
+        buffer_next: &mut [T],
+        buffer_prev: &mut [T],
+        message: &[T],
+    ) -> MpcResult<()>;
 
-    fn open_rss<F: Field>(
+    fn open_rss<T: NetSerializable + Add<Output=T> + Clone + DigestExt>(
         &mut self,
         context: &mut BroadcastContext,
-        share_i: &[F],
-        share_ii: &[F],
-    ) -> MpcResult<Vec<F>>
-    where
-        Sha256: FieldDigestExt<F>;
+        share_i: &[T],
+        share_ii: &[T],
+    ) -> MpcResult<Vec<T>>;
 
     fn compare_view(&mut self, context: BroadcastContext) -> MpcResult<()>;
 
-    fn open_rss_to<F: Field>(
+    fn open_rss_to<T: NetSerializable + Add<Output=T> + Clone + DigestExt>(
         &mut self,
         context: &mut BroadcastContext,
-        shares: &[RssShare<F>],
+        shares: &[RssShare<T>],
         to: usize,
-    ) -> MpcResult<Option<Vec<F>>>
-    where
-        Sha256: FieldDigestExt<F>;
+    ) -> MpcResult<Option<Vec<T>>>;
 }
 
 impl Default for BroadcastContext {
@@ -67,18 +65,14 @@ impl BroadcastContext {
         }
     }
 
-    pub fn add_to_next_view<F: Field>(&mut self, el: &F)
-    where
-        Sha256: FieldDigestExt<F>,
+    pub fn add_to_next_view<T: DigestExt>(&mut self, el: &T)
     {
-        FieldDigestExt::update(&mut self.view_next, slice::from_ref(el));
+        DigestExt::update(&mut self.view_next, slice::from_ref(el));
     }
 
-    pub fn add_to_prev_view<F: Field>(&mut self, el: &F)
-    where
-        Sha256: FieldDigestExt<F>,
+    pub fn add_to_prev_view<T: DigestExt>(&mut self, el: &T)
     {
-        FieldDigestExt::update(&mut self.view_prev, slice::from_ref(el));
+        DigestExt::update(&mut self.view_prev, slice::from_ref(el));
     }
 
     pub fn join(contexts: Vec<Self>) -> Self {
@@ -119,22 +113,20 @@ impl Broadcast for MainParty {
         Ok(())
     }
 
-    fn broadcast_round<F: Field>(
+    fn broadcast_round<T: NetSerializable + DigestExt>(
         &mut self,
         context: &mut BroadcastContext,
-        buffer_next: &mut [F],
-        buffer_prev: &mut [F],
-        message: &[F],
+        buffer_next: &mut [T],
+        buffer_prev: &mut [T],
+        message: &[T],
     ) -> MpcResult<()>
-    where
-        Sha256: FieldDigestExt<F>,
     {
         // first send to P+1
         self.io()
-            .send_field::<F>(Direction::Next, message, message.len());
+            .send_field::<T>(Direction::Next, message, message.len());
         // then send to P-1
         self.io()
-            .send_field::<F>(Direction::Previous, message, message.len());
+            .send_field::<T>(Direction::Previous, message, message.len());
 
         // receive from P-1
         let receive_prev = self
@@ -144,52 +136,48 @@ impl Broadcast for MainParty {
         let receive_next = self.io().receive_field_slice(Direction::Next, buffer_next);
 
         receive_prev.rcv()?;
-        FieldDigestExt::update(&mut context.view_prev, buffer_prev);
+        DigestExt::update(&mut context.view_prev, buffer_prev);
 
         receive_next.rcv()?;
-        FieldDigestExt::update(&mut context.view_next, buffer_next);
+        DigestExt::update(&mut context.view_next, buffer_next);
         self.io().wait_for_completion();
         Ok(())
     }
 
-    fn open_rss<F: Field>(
+    fn open_rss<T: NetSerializable + Add<Output=T> + Clone + DigestExt>(
         &mut self,
         context: &mut BroadcastContext,
-        share_i: &[F],
-        share_ii: &[F],
-    ) -> MpcResult<Vec<F>>
-    where
-        Sha256: FieldDigestExt<F>,
+        share_i: &[T],
+        share_ii: &[T],
+    ) -> MpcResult<Vec<T>>
     {
         // send share_i to P+1
         self.io()
-            .send_field::<F>(Direction::Next, share_i, share_i.len());
+            .send_field::<T>(Direction::Next, share_i, share_i.len());
         // receive share_iii from P-1
         let rcv_share_iii = self.io().receive_field(Direction::Previous, share_i.len());
 
         // also update view_next as we would have received share_ii from P+1 (but due to RSS we know it already)
-        FieldDigestExt::update(&mut context.view_next, share_ii);
+        DigestExt::update(&mut context.view_next, share_ii);
 
         let share_iii = rcv_share_iii.rcv()?;
-        FieldDigestExt::update(&mut context.view_prev, &share_iii);
+        DigestExt::update(&mut context.view_prev, &share_iii);
 
         // reconstruct
         let mut value = Vec::with_capacity(share_i.len());
         for (i, siii) in share_iii.into_iter().enumerate() {
-            value.push(share_i[i] + share_ii[i] + siii);
+            value.push(share_i[i].clone() + share_ii[i].clone() + siii);
         }
         self.io().wait_for_completion();
         Ok(value)
     }
 
-    fn open_rss_to<F: Field>(
+    fn open_rss_to<T: NetSerializable + Add<Output=T> + Clone + DigestExt>(
         &mut self,
         context: &mut BroadcastContext,
-        shares: &[RssShare<F>],
+        shares: &[RssShare<T>],
         to: usize,
-    ) -> MpcResult<Option<Vec<F>>>
-    where
-        Sha256: FieldDigestExt<F>,
+    ) -> MpcResult<Option<Vec<T>>>
     {
         match (self.i, to) {
             (0, 0) | (1, 1) | (2, 2) => {
@@ -198,20 +186,20 @@ impl Broadcast for MainParty {
                     .io()
                     .receive_field(Direction::Previous, shares.len())
                     .rcv()?;
-                FieldDigestExt::update(&mut context.view_prev, &siii);
+                DigestExt::update(&mut context.view_prev, &siii);
                 self.io().wait_for_completion();
                 // reconstruct
                 Ok(Some(
                     shares
                         .iter()
                         .zip(siii)
-                        .map(|(s, siii)| s.si + s.sii + siii)
+                        .map(|(s, siii)| s.si.clone() + s.sii.clone() + siii)
                         .collect(),
                 ))
             }
             (0, 1) | (1, 2) | (2, 0) => {
                 //send my share to P+1
-                self.io().send_field::<F>(
+                self.io().send_field::<T>(
                     Direction::Next,
                     shares.iter().map(|s| &s.si),
                     shares.len(),
@@ -221,9 +209,9 @@ impl Broadcast for MainParty {
             }
             (2, 1) | (0, 2) | (1, 0) => {
                 // update my view of P+1 (who virtually sent sii)
-                FieldDigestExt::update(
+                DigestExt::update(
                     &mut context.view_next,
-                    &shares.iter().map(|s| s.sii).collect::<Vec<_>>(),
+                    &shares.iter().map(|s| s.sii.clone()).collect::<Vec<_>>(),
                 );
                 Ok(None)
             }
@@ -263,31 +251,43 @@ impl Error for BroadcastError {}
 
 #[cfg(test)]
 mod test {
+    use std::ops::Sub;
+
     use crate::network::task::Direction;
     use crate::party::broadcast::{Broadcast, BroadcastContext};
     use crate::party::error::MpcError;
-    use crate::party::test::{PartySetup, TestSetup};
-    use crate::party::MainParty;
-    use crate::share::gf8::GF8;
-    use crate::share::test::secret_share;
-    use crate::share::{FieldDigestExt, FieldRngExt, RssShare};
-    use rand::thread_rng;
+    use crate::party::test::DummyNumber;
+    use crate::party::test_export::{PartySetup, TestSetup};
+    use crate::party::{DigestExt, MainParty, RngExt};
+    use crate::share::{HasZero, RssShare};
+    use rand::{thread_rng, CryptoRng, Rng};
     use sha2::digest::FixedOutput;
     use sha2::{Digest, Sha256};
 
+    fn secret_share<F: Copy + Sub<Output=F> + RngExt, R: Rng + CryptoRng>(
+        rng: &mut R,
+        x: &F,
+    ) -> (RssShare<F>, RssShare<F>, RssShare<F>) {
+        let r = F::generate(rng, 2);
+        let x1 = RssShare::from(*x - r[0] - r[1], r[0]);
+        let x2 = RssShare::from(r[0], r[1]);
+        let x3 = RssShare::from(r[1], *x - r[0] - r[1]);
+        (x1, x2, x3)
+    }
+
     #[test]
-    fn broadcast_round_gf8() {
+    fn broadcast_round() {
         let mut rng = thread_rng();
         const N: usize = 100;
-        let x1 = rng.generate(N);
-        let x2 = rng.generate(N);
-        let x3 = rng.generate(N);
+        let x1 = DummyNumber::generate(&mut rng, N);
+        let x2 = DummyNumber::generate(&mut rng, N);
+        let x3 = DummyNumber::generate(&mut rng, N);
 
-        let program = |msg: Vec<GF8>| {
+        let program = |msg: Vec<DummyNumber>| {
             move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
-                let mut prev_buf = vec![GF8(0); N];
-                let mut next_buf = vec![GF8(0); N];
+                let mut prev_buf = vec![DummyNumber::ZERO; N];
+                let mut next_buf = vec![DummyNumber::ZERO; N];
                 p.broadcast_round(&mut context, &mut next_buf, &mut prev_buf, &msg)
                     .unwrap();
                 (context, prev_buf, next_buf)
@@ -310,9 +310,9 @@ mod test {
         assert_eq!(&x2, &x32);
         assert_eq!(&x1, &x31);
 
-        fn expected_hash(v: &[GF8]) -> Vec<u8> {
+        fn expected_hash(v: &[DummyNumber]) -> Vec<u8> {
             let mut instance = Sha256::new();
-            FieldDigestExt::update(&mut instance, v);
+            DigestExt::update(&mut instance, v);
             instance.finalize_fixed().to_vec()
         }
         let expected_x1 = expected_hash(&x1);
@@ -329,17 +329,17 @@ mod test {
     }
 
     #[test]
-    fn compare_view_gf8_ok() {
+    fn compare_view_ok() {
         let mut rng = thread_rng();
         const N: usize = 100;
-        let x1 = rng.generate(N);
-        let x2 = rng.generate(N);
-        let x3 = rng.generate(N);
-        let program = |msg: Vec<GF8>| {
+        let x1 = DummyNumber::generate(&mut rng, N);
+        let x2 = DummyNumber::generate(&mut rng, N);
+        let x3 = DummyNumber::generate(&mut rng, N);
+        let program = |msg: Vec<DummyNumber>| {
             move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
-                let mut prev_buf = vec![GF8(0); N];
-                let mut next_buf = vec![GF8(0); N];
+                let mut prev_buf = vec![DummyNumber::ZERO; N];
+                let mut next_buf = vec![DummyNumber::ZERO; N];
                 p.broadcast_round(&mut context, &mut next_buf, &mut prev_buf, &msg)
                     .unwrap();
                 p.compare_view(context).unwrap();
@@ -356,24 +356,24 @@ mod test {
     }
 
     #[test]
-    fn compare_view_gf8_fail() {
+    fn compare_view_fail() {
         fn cheating_setup(cheater: usize) {
             let mut rng = thread_rng();
             const N: usize = 100;
-            let x1 = rng.generate(N);
-            let x2 = rng.generate(N);
-            let x3 = rng.generate(N);
-            let program = |msg: Vec<GF8>| {
+            let x1 = DummyNumber::generate(&mut rng, N);
+            let x2 = DummyNumber::generate(&mut rng, N);
+            let x3 = DummyNumber::generate(&mut rng, N);
+            let program = |msg: Vec<DummyNumber>| {
                 move |p: &mut MainParty| {
                     if p.i == cheater {
                         let mut context = BroadcastContext::new();
-                        let mut prev_buf = vec![GF8(0); N];
-                        let mut next_buf = vec![GF8(0); N];
-                        p.io().send_field::<GF8>(Direction::Next, &msg, msg.len());
+                        let mut prev_buf = vec![DummyNumber::ZERO; N];
+                        let mut next_buf = vec![DummyNumber::ZERO; N];
+                        p.io().send_field::<DummyNumber>(Direction::Next, &msg, msg.len());
                         // send the same message except for element N-1 that is different
-                        p.io().send_field::<GF8>(
+                        p.io().send_field::<DummyNumber>(
                             Direction::Previous,
-                            msg.iter().take(N - 1).chain(&vec![GF8(msg[N - 1].0 ^ 0x1)]),
+                            msg.iter().take(N - 1).chain(&vec![DummyNumber(msg[N - 1].0 ^ 0x1)]),
                             msg.len(),
                         );
                         let rcv_next = p.io().receive_field_slice(Direction::Next, &mut next_buf);
@@ -383,13 +383,13 @@ mod test {
                         rcv_next.rcv().unwrap();
                         rcv_prev.rcv().unwrap();
                         p.io().wait_for_completion();
-                        FieldDigestExt::update(&mut context.view_next, &next_buf);
-                        FieldDigestExt::update(&mut context.view_prev, &prev_buf);
+                        DigestExt::update(&mut context.view_next, &next_buf);
+                        DigestExt::update(&mut context.view_prev, &prev_buf);
                         p.compare_view(context).unwrap()
                     } else {
                         let mut context = BroadcastContext::new();
-                        let mut prev_buf = vec![GF8(0); N];
-                        let mut next_buf = vec![GF8(0); N];
+                        let mut prev_buf = vec![DummyNumber::ZERO; N];
+                        let mut next_buf = vec![DummyNumber::ZERO; N];
                         p.broadcast_round(&mut context, &mut next_buf, &mut prev_buf, &msg)
                             .unwrap();
                         match p.compare_view(context) {
@@ -416,10 +416,10 @@ mod test {
     }
 
     #[test]
-    fn open_rss_gf8() {
+    fn open_rss() {
         let mut rng = thread_rng();
         const N: usize = 100;
-        let x = rng.generate(N);
+        let x = DummyNumber::generate(&mut rng, N);
         let mut x1 = Vec::new();
         let mut x2 = Vec::new();
         let mut x3 = Vec::new();
@@ -430,7 +430,7 @@ mod test {
             x3.push(s3);
         }
 
-        let compute = |share: Vec<RssShare<GF8>>| {
+        let compute = |share: Vec<RssShare<DummyNumber>>| {
             move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let xi: Vec<_> = share.iter().map(|s| s.si.clone()).collect();
@@ -452,10 +452,10 @@ mod test {
     }
 
     #[test]
-    fn open_rss_to_gf8() {
+    fn open_rss_to() {
         const N: usize = 100;
         let mut rng = thread_rng();
-        let x = rng.generate(3 * N);
+        let x = DummyNumber::generate(&mut rng, 3*N);
         let mut x1 = Vec::new();
         let mut x2 = Vec::new();
         let mut x3 = Vec::new();
@@ -466,7 +466,7 @@ mod test {
             x3.push(s3);
         }
 
-        let program = |x: Vec<RssShare<GF8>>| {
+        let program = |x: Vec<RssShare<DummyNumber>>| {
             move |p: &mut MainParty| {
                 let mut context = BroadcastContext::new();
                 let open1 = p.open_rss_to(&mut context, &x[0..N], 0).unwrap();

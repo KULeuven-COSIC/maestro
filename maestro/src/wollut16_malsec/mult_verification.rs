@@ -1,17 +1,14 @@
 use std::slice;
 
 use itertools::izip;
-use rand_chacha::ChaCha20Rng;
 use rayon::{iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
-use sha2::Sha256;
-
-use crate::{
+use rep3_core::{
     network::task::Direction,
-    party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, MainParty, MulTripleVector, Party},
-    share::{
-        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare, RssShareVec
-    },
+    party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, DigestExt, MainParty, Party}, share::{HasZero, RssShare, RssShareVec},
 };
+use crate::{share::{
+        bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field, HasTwo, InnerProduct, Invertible
+}, util::mul_triple_vec::MulTripleVector};
 
 /// Protocol `8` to verify the multiplication triples at the end of the protocol.
 pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut BroadcastContext, gf4_triples: &mut MulTripleVector<BsGF4>, gf2_triples: &mut MulTripleVector<BsBool16>, gf64_triples: &mut MulTripleVector<GF2p64>, dont_clear: bool) -> MpcResult<bool> {
@@ -169,13 +166,13 @@ fn add_gf4_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>
         let (bii1, bii2) = bii.unpack();
         let (ci1, ci2) = ci.unpack();
         let (cii1, cii2) = cii.unpack();
-        x_vec[i] = embed_sharing(ai1, aii1).mul_by_sc(weight);
+        x_vec[i] = embed_sharing(ai1, aii1) * weight;
         y_vec[i] = embed_sharing(bi1, bii1);
         z_i.add_prod(&ci1.embed(), &weight);
         z_ii.add_prod(&cii1.embed(), &weight);
         // z += embed_sharing(ci1, cii1).mul_by_sc(weight);
         weight *= rand;
-        x_vec[i + 1] = embed_sharing(ai2, aii2).mul_by_sc(weight);
+        x_vec[i + 1] = embed_sharing(ai2, aii2) * weight;
         y_vec[i + 1] = embed_sharing(bi2, bii2);
         z_i.add_prod(&ci2.embed(), &weight);
         z_ii.add_prod(&cii2.embed(), &weight);
@@ -203,7 +200,7 @@ fn add_gf2_triples(x_vec: &mut [RssShare<GF2p64>], y_vec: &mut [RssShare<GF2p64>
         let ci = gf2_embed(*ci);
         let cii = gf2_embed(*cii);
         for j in 0..16 {
-            x_vec[i + j] = RssShare::from(ai[j],aii[j]).mul_by_sc(weight);
+            x_vec[i + j] = RssShare::from(ai[j],aii[j]) * weight;
             y_vec[i + j] = RssShare::from(bi[j],bii[j]);
             z_i.add_prod(&ci[j], &weight);
             z_ii.add_prod(&cii[j], &weight);
@@ -330,7 +327,7 @@ fn add_gf_triples<F: Field + GF2p64Subfield>(x_vec: &mut [RssShare<GF2p64>], y_v
     let mut z_ii = GF2p64InnerProd::new();
     let mut weight = rand;
     izip!(x_vec.iter_mut(), ai, aii, ci, cii).for_each(|(x_vec, &ai, &aii, ci, cii)| {
-        *x_vec = embed_sharing(ai, aii).mul_by_sc(weight);
+        *x_vec = embed_sharing(ai, aii) * weight;
         z_i.add_prod(&ci.embed(), &weight);
         z_ii.add_prod(&cii.embed(), &weight);
         weight *= rand;
@@ -346,7 +343,7 @@ fn add_gf_triples<F: Field + GF2p64Subfield>(x_vec: &mut [RssShare<GF2p64>], y_v
 /// Protocol to verify the component-wise multiplication triples
 ///
 /// This protocol assumes that the input vectors are of length 2^n for some n.
-fn verify_dot_product<F: Field + Copy + HasTwo + Invertible>(
+fn verify_dot_product<F: Field + DigestExt + HasTwo + Invertible>(
     party: &mut MainParty,
     context: &mut BroadcastContext,
     x_vec: Vec<RssShare<F>>,
@@ -354,8 +351,6 @@ fn verify_dot_product<F: Field + Copy + HasTwo + Invertible>(
     z: RssShare<F>,
 ) -> MpcResult<bool>
 where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
     F: InnerProduct,
 {
     let n = x_vec.len();
@@ -424,7 +419,7 @@ fn compute_poly_dst<F: Field>(dst: &mut [RssShare<F>], x: &[RssShare<F>], r: F) 
     }
 }
 
-fn verify_dot_product_opt<F: Field + Copy + HasTwo + Invertible + Send + Sync>(
+fn verify_dot_product_opt<F: Field + DigestExt + HasTwo + Invertible + Send + Sync>(
     party: &mut MainParty,
     context: &mut BroadcastContext,
     mut x_vec: Vec<RssShare<F>>,
@@ -432,8 +427,6 @@ fn verify_dot_product_opt<F: Field + Copy + HasTwo + Invertible + Send + Sync>(
     z: RssShare<F>,
 ) -> MpcResult<bool>
 where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
     F: InnerProduct,
 {
     let n = x_vec.len();
@@ -533,7 +526,7 @@ where
 }
 
 /// Protocol [TODO Add Number at the end] CheckTriple
-fn check_triple<F: Field + Copy>(
+fn check_triple<F: Field + DigestExt>(
     party: &mut MainParty,
     context: &mut BroadcastContext,
     x: RssShare<F>,
@@ -541,8 +534,6 @@ fn check_triple<F: Field + Copy>(
     z: RssShare<F>,
 ) -> MpcResult<bool>
 where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
     F: InnerProduct,
 {
     // Generate RSS sharing of random value
@@ -555,7 +546,7 @@ where
 
 /// Shared lagrange evaluation of the polynomial h at position x for given (shared) points h(0), h(1), h(2)
 #[inline]
-fn lagrange_deg2<F: Field + Copy + HasTwo + Invertible>(
+fn lagrange_deg2<F: Field + HasTwo + Invertible>(
     h0: &RssShare<F>,
     h1: &RssShare<F>,
     h2: &RssShare<F>,
@@ -572,13 +563,10 @@ fn lagrange_deg2<F: Field + Copy + HasTwo + Invertible>(
     let l1 = w1 * x * (x - F::TWO);
     let l2 = w2 * x * (x - F::ONE);
     // Lagrange interpolation
-    h0.mul_by_sc(l0) + h1.mul_by_sc(l1) + h2.mul_by_sc(l2)
+    (*h0) * l0 + (*h1) * l1 + (*h2) * l2
 }
 
-fn reconstruct<F: Field + Copy>(party: &mut MainParty, context: &mut BroadcastContext, rho: RssShare<F>) -> MpcResult<F>
-where
-    Sha256: FieldDigestExt<F>,
-{
+fn reconstruct<F: Field + DigestExt>(party: &mut MainParty, context: &mut BroadcastContext, rho: RssShare<F>) -> MpcResult<F> {
     party
         .open_rss(
             context,
@@ -591,11 +579,7 @@ where
 /// Coin flip protocol returns a random value in F
 ///
 /// Generates a sharing of a random value that is then reconstructed globally.
-fn coin_flip<F: Field + Copy>(party: &mut MainParty, context: &mut BroadcastContext) -> MpcResult<F>
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-{
+fn coin_flip<F: Field + DigestExt>(party: &mut MainParty, context: &mut BroadcastContext) -> MpcResult<F> {
     let r: RssShare<F> = party.generate_random(1)[0];
     reconstruct(party, context, r)
 }
@@ -603,12 +587,8 @@ where
 /// Coin flip protocol returns a n random values in F
 ///
 /// Generates a sharing of a n random values that is then reconstructed globally.
-fn coin_flip_n<F: Field + Copy>(party: &mut MainParty, context: &mut BroadcastContext, n: usize) -> MpcResult<Vec<F>>
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-{
-    let (r_i, r_ii): (Vec<_>, Vec<_>) = party.generate_random(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
+fn coin_flip_n<F: Field + DigestExt>(party: &mut MainParty, context: &mut BroadcastContext, n: usize) -> MpcResult<Vec<F>> {
+    let (r_i, r_ii): (Vec<_>, Vec<_>) = party.generate_random::<F>(n).into_iter().map(|rss| (rss.si, rss.sii)).unzip();
     party.open_rss(context, &r_i, &r_ii)
 }
 
@@ -619,8 +599,6 @@ fn weak_mult<F: Field + Copy + Sized>(
     y: &RssShare<F>,
 ) -> MpcResult<RssShare<F>>
 where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
     F: InnerProduct,
 {
     // Compute a sum sharing of x*y
@@ -633,11 +611,7 @@ where
 fn ss_to_rss_shares<F: Field + Copy + Sized>(
     party: &mut MainParty,
     sum_shares: &[F],
-) -> MpcResult<RssShareVec<F>>
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-{
+) -> MpcResult<RssShareVec<F>> {
     let n = sum_shares.len();
     let alphas = party.generate_alpha(n);
     let s_i: Vec<F> = sum_shares.iter().zip(alphas).map(|(s, a)| *s + a).collect();
@@ -659,11 +633,7 @@ where
 fn single_ss_to_rss_shares<F: Field + Copy + Sized>(
     party: &mut MainParty,
     sum_share: F,
-) -> MpcResult<RssShare<F>>
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-{
+) -> MpcResult<RssShare<F>> {
     // Convert zs to RSS sharing
     let s_i = [sum_share + party.generate_alpha(1).next().unwrap()];
     let mut s_ii = [F::ZERO; 1];
@@ -679,11 +649,12 @@ mod test {
 
     use itertools::izip;
     use rand::{thread_rng, CryptoRng, Rng};
-
+    use rep3_core::{party::{broadcast::{Broadcast, BroadcastContext}, MainParty}, share::{HasZero, RssShare}};
+    use rep3_core::test::{PartySetup, TestSetup};
     use crate::{
-        party::{broadcast::{Broadcast, BroadcastContext}, test::{PartySetup, TestSetup}, MainParty, MulTripleRecorder, MulTripleVector}, share::{
-            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, FieldRngExt, InnerProduct, RssShare
-        }, wollut16_malsec::{
+        share::{
+            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, InnerProduct
+        }, util::mul_triple_vec::{MulTripleRecorder, MulTripleVector}, wollut16_malsec::{
             mult_verification::{verify_dot_product_opt, verify_multiplication_gf_triples, verify_multiplication_gf_triples_mt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::localhost_setup_wl16as,
             WL16ASParty,
         }
@@ -691,11 +662,8 @@ mod test {
 
     use super::{lagrange_deg2, ss_to_rss_shares, verify_dot_product, weak_mult};
 
-    fn gen_rand_vec<R: Rng + CryptoRng, F: Field>(rng: &mut R, n: usize) -> Vec<F>
-    where
-        R: FieldRngExt<F>,
-    {
-        rng.generate(n)
+    fn gen_rand_vec<R: Rng + CryptoRng, F: Field>(rng: &mut R, n: usize) -> Vec<F> {
+        F::generate(rng, n)
     }
 
     #[test]

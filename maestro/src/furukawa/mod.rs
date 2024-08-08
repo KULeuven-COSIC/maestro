@@ -13,40 +13,26 @@
 use std::ops::AddAssign;
 
 use itertools::izip;
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use sha2::Sha256;
+use rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, ThreadParty}, share::{RssShare, RssShareVec}};
 
 use crate::{
-    aes::GF8InvBlackBox,
-    chida,
-    network::{
-        task::{Direction, IoLayerOwned},
-        ConnectedParty,
-    },
-    party::{
-        broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party, ThreadParty
-    },
-    share::{gf2p64::GF2p64Subfield, gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec}, wollut16_malsec,
+    aes::GF8InvBlackBox, chida, share::{gf2p64::GF2p64Subfield, gf8::GF8, Field}, util::{mul_triple_vec::{MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec
 };
 
 pub mod offline;
 
-pub struct FurukawaParty<F: Field + Sync + Send + GF2p64Subfield> {
+pub struct FurukawaParty<F: Field + DigestExt + Sync + Send + GF2p64Subfield> {
     inner: MainParty,
     triples_to_check: MulTripleVector<F>,
     pre_processing: Option<MulTripleVector<F>>,
     use_recursive_check: bool,
 }
 
-impl<F: Field + Sync + Send + GF2p64Subfield> FurukawaParty<F>
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-{
+impl<F: Field + DigestExt + Sync + Send + GF2p64Subfield> FurukawaParty<F> {
     pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, use_recursive_check: bool) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
@@ -87,15 +73,12 @@ where
         }
     }
 
-    pub fn mul(&mut self, ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<(Vec<F>, Vec<F>)>
-    where
-        F: Copy,
-    {
+    pub fn mul(&mut self, ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<(Vec<F>, Vec<F>)> {
         debug_assert_eq!(ai.len(), aii.len());
         debug_assert_eq!(ai.len(), bi.len());
         debug_assert_eq!(ai.len(), bii.len());
 
-        let ci: Vec<_> = izip!(self.inner.generate_alpha(ai.len()), ai, aii, bi, bii)
+        let ci: Vec<_> = izip!(self.inner.generate_alpha::<F>(ai.len()), ai, aii, bi, bii)
             .map(|(alpha_j, ai_j, aii_j, bi_j, bii_j)| {
                 alpha_j + *ai_j * *bi_j + *ai_j * *bii_j + *aii_j * *bi_j
             })
@@ -219,16 +202,12 @@ where
     }
 }
 
-pub struct InputPhase<'a, F: Field + Sync + Send + GF2p64Subfield> {
+pub struct InputPhase<'a, F: Field + DigestExt + Sync + Send + GF2p64Subfield> {
     party: &'a mut FurukawaParty<F>,
     context: BroadcastContext,
 }
 
-impl<'a, F: Field + Sync + Send + GF2p64Subfield> InputPhase<'a, F>
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-{
+impl<'a, F: Field + DigestExt + Sync + Send + GF2p64Subfield> InputPhase<'a, F> {
     fn new(party: &'a mut FurukawaParty<F>) -> Self {
         Self {
             party,
@@ -292,16 +271,12 @@ where
     }
 }
 
-pub struct OutputPhase<'a, F: Field + Sync + Send + GF2p64Subfield> {
+pub struct OutputPhase<'a, F: Field + DigestExt + Sync + Send + GF2p64Subfield> {
     party: &'a mut FurukawaParty<F>,
     context: BroadcastContext,
 }
 
-impl<'a, F: Field + Sync + Send + GF2p64Subfield> OutputPhase<'a, F>
-where
-    Sha256: FieldDigestExt<F>,
-    ChaCha20Rng: FieldRngExt<F>,
-{
+impl<'a, F: Field + DigestExt + Sync + Send + GF2p64Subfield> OutputPhase<'a, F> {
     fn new(party: &'a mut FurukawaParty<F>) -> Self {
         Self {
             party,
@@ -330,13 +305,7 @@ where
     }
 }
 
-impl<F: Field + Send + Sync + GF2p64Subfield> ArithmeticBlackBox<F> for FurukawaParty<F>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field + DigestExt + Send + Sync + GF2p64Subfield> ArithmeticBlackBox<F> for FurukawaParty<F> {
 
     fn io(&self) -> &IoLayerOwned {
         self.inner.io()
@@ -510,24 +479,21 @@ pub mod test {
         test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
         test_inv_aes128_no_keyschedule_gf8,
     };
-    use crate::party::test::TestSetup;
-    use crate::party::ArithmeticBlackBox;
+    use crate::share::gf8::GF8;
+    use crate::share::Field;
+    use crate::util::ArithmeticBlackBox;
+    use rep3_core::network::ConnectedParty;
+    use rep3_core::test::{localhost_connect, TestSetup};
+    use rep3_core::party::{DigestExt, RngExt};
+    use rep3_core::share::RssShare;
     use crate::share::gf2p64::GF2p64Subfield;
     use crate::share::test::{assert_eq, consistent};
     use rand::thread_rng;
-    use rand_chacha::ChaCha20Rng;
-    use sha2::Sha256;
-
-    use crate::{
-        network::ConnectedParty,
-        party::test::localhost_connect,
-        share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare},
-    };
 
     use super::FurukawaParty;
 
     pub fn localhost_setup_furukawa<
-        F: Field + Send + 'static + Sync + GF2p64Subfield,
+        F: Field + DigestExt + Send + 'static + Sync + GF2p64Subfield,
         T1: Send + 'static,
         F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
         T2: Send + 'static,
@@ -544,21 +510,13 @@ pub mod test {
         JoinHandle<(T1, FurukawaParty<F>)>,
         JoinHandle<(T2, FurukawaParty<F>)>,
         JoinHandle<(T3, FurukawaParty<F>)>,
-    )
-    where
-        Sha256: FieldDigestExt<F>,
-        ChaCha20Rng: FieldRngExt<F>,
-    {
-        fn adapter<F: Field + Send + Sync + GF2p64Subfield, T, Fx: FnOnce(&mut FurukawaParty<F>) -> T>(
+    ) {
+        fn adapter<F: Field + DigestExt + Send + Sync + GF2p64Subfield, T, Fx: FnOnce(&mut FurukawaParty<F>) -> T>(
             conn: ConnectedParty,
             f: Fx,
             n_worker_threads: Option<usize>,
             use_recursive_check: bool,
-        ) -> (T, FurukawaParty<F>)
-        where
-            Sha256: FieldDigestExt<F>,
-            ChaCha20Rng: FieldRngExt<F>,
-        {
+        ) -> (T, FurukawaParty<F>) {
             let mut party = FurukawaParty::setup(conn, n_worker_threads, use_recursive_check).unwrap();
             let t = f(&mut party);
             party.finalize().unwrap();
@@ -573,11 +531,7 @@ pub mod test {
     }
 
     pub struct FurukawaSetup;
-    impl<F: Field + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaSetup
-    where
-        Sha256: FieldDigestExt<F>,
-        ChaCha20Rng: FieldRngExt<F>,
-    {
+    impl<F: Field + DigestExt + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaSetup {
         fn localhost_setup<
             T1: Send + 'static,
             F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
@@ -618,11 +572,7 @@ pub mod test {
     }
 
     struct FurukawaRecursiveCheckSetup;
-    impl<F: Field + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaRecursiveCheckSetup
-    where
-        Sha256: FieldDigestExt<F>,
-        ChaCha20Rng: FieldRngExt<F>,
-    {
+    impl<F: Field + DigestExt + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaRecursiveCheckSetup {
         fn localhost_setup<
                     T1: Send + 'static,
                     F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
@@ -666,9 +616,9 @@ pub mod test {
     fn input_gf8() {
         const N: usize = 100;
         let mut rng = thread_rng();
-        let x1 = rng.generate(N);
-        let x2 = rng.generate(N);
-        let x3 = rng.generate(N);
+        let x1 = GF8::generate(&mut rng, N);
+        let x2 = GF8::generate(&mut rng, N);
+        let x3 = GF8::generate(&mut rng, N);
 
         let program = |x: Vec<GF8>| move |p: &mut FurukawaParty<GF8>| p.input_round(&x).unwrap();
 

@@ -2,7 +2,8 @@
 use itertools::izip;
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
-use crate::{aes::ss::GF8InvBlackBoxSS, network::{task::Direction, ConnectedParty}, party::{error::MpcResult, MainParty, NoMulTripleRecording, Party}, share::{gf8::GF8, Field}};
+use crate::{aes::ss::GF8InvBlackBoxSS, share::gf8::GF8, util::mul_triple_vec::NoMulTripleRecording};
+use rep3_core::{network::{task::Direction, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::HasZero};
 
 use super::{lut256_tables, offline, RndOhv256OutputSS};
 
@@ -122,7 +123,9 @@ impl GF8InvBlackBoxSS for Lut256SSParty {
 mod test {
     use std::thread::JoinHandle;
 
-    use crate::{aes::ss::test::{test_aes128_no_keyschedule_gf8_ss, test_inv_aes128_no_keyschedule_gf8_ss, test_sub_bytes_ss}, network::ConnectedParty, party::test::{localhost_connect, TestSetup}};
+    use crate::aes::ss::test::{test_aes128_no_keyschedule_gf8_ss, test_inv_aes128_no_keyschedule_gf8_ss, test_sub_bytes_ss};
+    use rep3_core::network::ConnectedParty;
+    use rep3_core::test::{localhost_connect, TestSetup};
 
     use super::Lut256SSParty;
 

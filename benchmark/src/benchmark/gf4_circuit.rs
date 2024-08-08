@@ -1,4 +1,5 @@
-use maestro::{gf4_circuit::GF4CircuitSemihonestParty, network::ConnectedParty};
+use rep3_core::network::ConnectedParty;
+use maestro::gf4_circuit::GF4CircuitSemihonestParty;
 
 
 impl_benchmark_protocol!(

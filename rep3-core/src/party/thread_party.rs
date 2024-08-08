@@ -1,16 +1,12 @@
-use std::{borrow::Borrow, cell::OnceCell};
+use std::{borrow::Borrow, cell::OnceCell, ops::Sub};
 
 use rand_chacha::ChaCha20Rng;
 
-use crate::{
-    network::{
-        task::{Direction, IoLayer},
-        FieldSliceReceiver, FieldVectorReceiver,
-    },
-    share::{Field, FieldRngExt, RssShare, RssShareVec},
-};
+use crate::{network::{
+        task::{Direction, IoLayer}, NetSerializable, NetSliceReceiver, NetVectorReceiver
+    }, share::{HasZero, RssShare, RssShareVec}};
 
-use super::{correlated_randomness::SharedRng, Party};
+use super::{correlated_randomness::SharedRng, Party, RngExt};
 
 pub struct ThreadParty<T> {
     /// Party index 0, 1 or 2
@@ -20,6 +16,7 @@ pub struct ThreadParty<T> {
     range_end: usize,
     random_next: SharedRng,
     random_prev: SharedRng,
+    #[allow(dead_code)]
     random_local: ChaCha20Rng,
     io_layer: OnceCell<IoLayer>,
     pub additional_data: T,
@@ -63,29 +60,23 @@ impl<T> ThreadParty<T> {
 }
 
 impl<T> Party for ThreadParty<T> {
-    fn generate_alpha<F: Field>(&mut self, n: usize) -> impl Iterator<Item=F>
-    where
-        ChaCha20Rng: FieldRngExt<F>,
-    {
+    fn generate_alpha<E: RngExt + Sub<Output=E>>(&mut self, n: usize) -> impl Iterator<Item=E> {
         super::generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
-    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
-    where
-        ChaCha20Rng: FieldRngExt<F>,
-    {
+    fn generate_random<E: RngExt>(&mut self, n: usize) -> RssShareVec<E> {
         super::generate_random(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
     #[inline]
-    fn constant<F: Field>(&self, value: F) -> RssShare<F> {
+    fn constant<F: HasZero>(&self, value: F) -> RssShare<F> {
         super::constant(self.i, value)
     }
 
-    fn send_field<'a, F: Field + 'a>(
+    fn send_field<'a, N: NetSerializable + 'a>(
         &self,
         direction: Direction,
-        elements: impl IntoIterator<Item = impl Borrow<F>>,
+        elements: impl IntoIterator<Item = impl Borrow<N>>,
         len: usize,
     ) {
         self.io_layer
@@ -94,22 +85,22 @@ impl<T> Party for ThreadParty<T> {
             .send_field_thread(direction, self.range_start, elements, len)
     }
 
-    fn receive_field<F: Field>(
+    fn receive_field<N: NetSerializable>(
         &self,
         direction: Direction,
         num_elements: usize,
-    ) -> FieldVectorReceiver<F> {
+    ) -> NetVectorReceiver<N> {
         self.io_layer
             .get()
             .unwrap()
             .receive_field_thread(direction, self.range_start, num_elements)
     }
 
-    fn receive_field_slice<'a, F: Field>(
+    fn receive_field_slice<'a, N: NetSerializable>(
         &self,
         direction: Direction,
-        dst: &'a mut [F],
-    ) -> FieldSliceReceiver<'a, F> {
+        dst: &'a mut [N],
+    ) -> NetSliceReceiver<'a, N> {
         self.io_layer
             .get()
             .unwrap()
@@ -124,16 +115,12 @@ mod test {
     use itertools::{izip, Itertools};
     use rand::RngCore;
 
-    use crate::{
-        party::{
-            test::{PartySetup, TestSetup},
-            MainParty, Party,
-        },
-        share::{gf8::GF8, test::consistent, Field, RssShare},
-    };
+    use crate::{network::NetSerializable, party::{
+            test::DummyNumber, test_export::{PartySetup, TestSetup}, MainParty, Party
+        }, share::{HasZero, RssShare}};
 
     #[test]
-    fn thread_parties_correlated_randomness() {
+    fn thread_parties_correlated_randomness_bytes() {
         struct RngOutput {
             shared_prev: Vec<u8>,
             shared_next: Vec<u8>,
@@ -201,10 +188,10 @@ mod test {
     }
 
     #[test]
-    fn thread_parties_correlated_randomness_gf8() {
+    fn thread_parties_correlated_randomness() {
         struct RngOutput {
-            alpha: Vec<GF8>,
-            random: Vec<RssShare<GF8>>,
+            alpha: Vec<DummyNumber>,
+            random: Vec<RssShare<DummyNumber>>,
         }
 
         const THREADS: usize = 3;
@@ -246,7 +233,7 @@ mod test {
             assert_eq!(o1.alpha.len(), o2.alpha.len());
             assert_eq!(o2.alpha.len(), o3.alpha.len());
             for (alpha1, alpha2, alpha3) in izip!(o1.alpha, o2.alpha, o3.alpha) {
-                assert_eq!(GF8::ZERO, alpha1 + alpha2 + alpha3);
+                assert_eq!(DummyNumber::ZERO, alpha1 + alpha2 + alpha3);
             }
 
             assert_eq!(o1.random.len(), o2.random.len());
@@ -254,11 +241,14 @@ mod test {
             let n = o1.random.len();
             // reconstruct random elements
             let rand = izip!(o1.random, o2.random, o3.random).map(|(r1, r2, r3)| {
-                consistent(&r1, &r2, &r3);
+                // check consistent
+                assert_eq!(r1.sii, r2.si);
+                assert_eq!(r2.sii, r3.si);
+                assert_eq!(r3.sii, r1.si);
                 r1.si + r2.si + r3.si
             });
-            // we serialize rand as bytes to workaround that GF8 does not implement Ord, Eq or Hash
-            random_elements.insert(GF8::as_byte_vec(rand, n));
+            // we serialize rand as bytes to workaround that DummyNumber does not implement Ord, Eq or Hash
+            random_elements.insert(DummyNumber::as_byte_vec(rand, n));
         }
 
         assert_eq!(random_elements.len(), THREADS);

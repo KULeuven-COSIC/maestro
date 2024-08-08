@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
-
-use maestro::{aes::{self, ss::GF8InvBlackBoxSS, GF8InvBlackBox}, lut256::{lut256_ss::Lut256SSParty, LUT256Party}, network::ConnectedParty, party::CombinedCommStats};
+use rep3_core::{network::ConnectedParty, party::CombinedCommStats};
+use maestro::{aes::{self, ss::GF8InvBlackBoxSS, GF8InvBlackBox}, lut256::{lut256_ss::Lut256SSParty, LUT256Party}};
 
 use crate::utils::{BenchmarkProtocol, BenchmarkResult};
 

@@ -1,4 +1,5 @@
-use maestro::{aes::GF8InvBlackBox, network::ConnectedParty, wollut16::WL16Party};
+use rep3_core::network::ConnectedParty;
+use maestro::{aes::GF8InvBlackBox, wollut16::WL16Party};
 
 impl_benchmark_protocol!(
     LUT16Benchmark,  // benchmark struct name

@@ -1,6 +1,7 @@
 use itertools::izip;
+use rep3_core::share::RssShare;
 
-use crate::share::{bs_bool16::BsBool16, gf2p64::GF2p64, Field, RssShare};
+use crate::share::{bs_bool16::BsBool16, gf2p64::GF2p64, Field};
 
 pub trait MulTripleRecorder<F: Field> {
     /// "Child" recorder type for multi-threading
@@ -206,7 +207,8 @@ impl BitStringMulTripleRecorder for MulTripleVector<GF2p64> {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use crate::{party::{BitStringMulTripleRecorder, MulTripleVector}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, Field}};
+    use rep3_core::share::HasZero;
+    use crate::{share::{bs_bool16::BsBool16, gf2p64::GF2p64, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleVector}};
 
 
     #[test]

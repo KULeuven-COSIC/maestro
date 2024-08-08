@@ -10,11 +10,11 @@
 
 use std::time::Duration;
 
+use rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::error::MpcResult};
+
 use crate::{
     chida::ChidaParty,
-    network::{task::IoLayerOwned, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox},
-    share::gf8::GF8,
+    share::gf8::GF8, util::ArithmeticBlackBox,
 };
 mod lut256_tables;
 pub mod offline;
@@ -98,9 +98,9 @@ impl RndOhv {
 mod test {
     use std::thread::JoinHandle;
 
-    use crate::{
+    use rep3_core::{
         network::ConnectedParty,
-        party::test::{localhost_connect, TestSetup},
+        test::{localhost_connect, TestSetup},
     };
 
     use super::LUT256Party;

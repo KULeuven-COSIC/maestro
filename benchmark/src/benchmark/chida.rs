@@ -1,5 +1,6 @@
 
-use maestro::{chida::{ChidaBenchmarkParty, ImplVariant}, network::ConnectedParty};
+use rep3_core::network::ConnectedParty;
+use maestro::chida::{ChidaBenchmarkParty, ImplVariant};
 
 use impl_benchmark_protocol;
 

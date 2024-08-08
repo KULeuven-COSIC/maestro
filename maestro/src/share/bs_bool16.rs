@@ -8,9 +8,10 @@ use std::{
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
+use rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero};
 use sha2::Digest;
 
-use super::{Field, FieldDigestExt, FieldRngExt};
+use super::Field;
 
 /// A vector in `GF(2)^16`, i.e., a bit-sliced vector of 16 booleans.
 ///
@@ -33,17 +34,21 @@ impl BsBool16 {
 impl Field for BsBool16 {
     const NBYTES: usize = 2;
 
-    const ZERO: Self = Self(0x0000);
-
     /// Each component is one
     const ONE: Self = Self(0xffff);
 
-    fn serialized_size(n_elements: usize) -> usize {
-        2 * n_elements
-    }
-
     fn is_zero(&self) -> bool {
         self.0 == 0
+    }
+}
+
+impl HasZero for BsBool16 {
+    const ZERO: Self = Self(0x0000);
+}
+
+impl NetSerializable for BsBool16 {
+    fn serialized_size(n_elements: usize) -> usize {
+        2 * n_elements
     }
 
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, _len: usize) -> Vec<u8> {
@@ -113,52 +118,53 @@ impl AddAssign for BsBool16 {
     }
 }
 
-impl<R: Rng + CryptoRng> FieldRngExt<BsBool16> for R {
-    fn fill(&mut self, buf: &mut [BsBool16]) {
+impl RngExt for BsBool16 {
+    fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
         for i in 0..buf.len() / 2 {
-            let rng = self.next_u32();
+            let rng = rng.next_u32();
             buf[2 * i].0 = rng as u16;
             buf[2 * i + 1].0 = (rng >> 16) as u16;
         }
         if buf.len() % 2 != 0 {
-            let rng = self.next_u32();
+            let rng = rng.next_u32();
             buf[buf.len() - 1].0 = rng as u16;
         }
     }
 
-    fn generate(&mut self, n: usize) -> Vec<BsBool16> {
+    fn generate<R: Rng + CryptoRng>(rng: &mut R, n: usize) -> Vec<Self> {
         let mut v = vec![BsBool16::ZERO; n];
         for i in 0..n / 2 {
-            let rng = self.next_u32();
+            let rng = rng.next_u32();
             v[2 * i].0 = rng as u16;
             v[2 * i + 1].0 = (rng >> 16) as u16;
         }
         if n % 2 != 0 {
-            let rng = self.next_u32();
+            let rng = rng.next_u32();
             v[n - 1].0 = rng as u16;
         }
         v
     }
 }
 
-impl<D: Digest> FieldDigestExt<BsBool16> for D {
-    fn update(&mut self, message: &[BsBool16]) {
+impl DigestExt for BsBool16 {
+    fn update<D: Digest>(digest: &mut D, message: &[Self]) {
         for m in message {
-            self.update([m.0 as u8, (m.0 >> 8) as u8]);
+            digest.update([m.0 as u8, (m.0 >> 8) as u8]);
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::share::{bs_bool16::BsBool16, Field, FieldRngExt};
+    use crate::share::bs_bool16::BsBool16;
     use rand::thread_rng;
+    use rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
 
     #[test]
     fn serialization() {
         let mut rng = thread_rng();
-        let list_even: Vec<BsBool16> = rng.generate(500);
-        let list_odd: Vec<BsBool16> = rng.generate(45);
+        let list_even: Vec<BsBool16> = BsBool16::generate(&mut rng, 500);
+        let list_odd: Vec<BsBool16> = BsBool16::generate(&mut rng, 45);
 
         assert_eq!(
             list_even,

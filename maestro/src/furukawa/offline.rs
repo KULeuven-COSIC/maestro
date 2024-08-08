@@ -1,25 +1,20 @@
 use std::ops::AddAssign;
 
-use crate::{
+use rep3_core::{
     network::task::Direction,
     party::{
-        broadcast::{Broadcast, BroadcastContext},
-        correlated_randomness::GlobalRng,
-        error::{MpcError, MpcResult},
-        MainParty, Party,
-    },
-    share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
+        broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, DigestExt, MainParty, Party
+    }, share::{RssShare, RssShareVec},
 };
 use itertools::izip;
 use rand::Rng;
 use rand::{seq::SliceRandom, CryptoRng, RngCore};
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
-use sha2::Sha256;
-use crate::party::MulTripleVector;
+
+use crate::{share::Field, util::mul_triple_vec::MulTripleVector};
 
 // required bucket size B for B=C for 2^10, 2^11, ..., 2^19; all batches > 2^19 use B=3; all batches < 2^10 use B=5
 const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];
@@ -30,14 +25,10 @@ const BUCKET_SIZE: [usize; 10] = [5, 5, 5, 4, 4, 4, 4, 4, 4, 3];
 /// Note that unless `n` is a power of 2 larger or equal to 2^10, this function will generate more triples but only return exactly `n`.
 /// Depending on `next_power_of_two(n)`, different bucket sizes are chosen internally.
 #[allow(non_snake_case)]
-pub fn bucket_cut_and_choose<F: Field + Send + Sync>(
+pub fn bucket_cut_and_choose<F: Field + DigestExt + Send + Sync>(
     party: &mut MainParty,
     n: usize,
-) -> MpcResult<MulTripleVector<F>>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
+) -> MpcResult<MulTripleVector<F>> {
     // choose params
     let pow = n.checked_next_power_of_two().expect("n too large");
     let (N, B) = if pow <= (1 << 10) {
@@ -157,10 +148,7 @@ type OptimisticMulResult<F> = (RssShareVec<F>, RssShareVec<F>, Vec<F>, Vec<F>);
 pub fn optimistic_mul_mt<F: Field + Send>(
     party: &mut MainParty,
     M: usize,
-) -> MpcResult<OptimisticMulResult<F>>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-{
+) -> MpcResult<OptimisticMulResult<F>> {
     let ranges = party.split_range_equally(M);
     let thread_parties = party.create_thread_parties(ranges);
     let res = party.run_in_threadpool(|| {
@@ -188,14 +176,11 @@ where
 }
 
 #[allow(non_snake_case)]
-pub fn optimistic_mul<F: Field, P: Party>(party: &mut P, M: usize) -> MpcResult<OptimisticMulResult<F>>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-{
+pub fn optimistic_mul<F: Field, P: Party>(party: &mut P, M: usize) -> MpcResult<OptimisticMulResult<F>> {
     let a = party.generate_random(M);
     let b = party.generate_random(M);
 
-    let alphas = party.generate_alpha(M);
+    let alphas = party.generate_alpha::<F>(M);
     let ci: Vec<_> = izip!(alphas, a.iter(), b.iter())
         .map(|(alpha_j, aj, bj)| alpha_j + aj.si * bj.si + aj.si * bj.sii + aj.sii * bj.si)
         .collect();
@@ -316,7 +301,7 @@ fn open_and_check<F: Field + PartialEq + Copy>(
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
 #[allow(clippy::too_many_arguments)]
-pub fn sacrifice<F: Field + Copy + AddAssign>(
+pub fn sacrifice<F: Field + DigestExt>(
     party: &mut MainParty,
     n: usize,
     sacrifice_bucket_size: usize,
@@ -332,10 +317,7 @@ pub fn sacrifice<F: Field + Copy + AddAssign>(
     bii_to_sacrifice: &mut [F],
     ci_to_sacrifice: &mut [F],
     cii_to_sacrifice: &mut [F],
-) -> MpcResult<()>
-where
-    Sha256: FieldDigestExt<F>,
-{
+) -> MpcResult<()> {
     let context = sacrifice_party(
         party,
         n,
@@ -377,7 +359,7 @@ where
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
 #[allow(clippy::too_many_arguments)]
 #[rustfmt::skip]
-pub fn sacrifice_mt<F: Field + Send + Sync>(
+pub fn sacrifice_mt<F: Field + DigestExt + Send + Sync>(
     party: &mut MainParty,
     n: usize,
     sacrifice_bucket_size: usize,
@@ -393,10 +375,7 @@ pub fn sacrifice_mt<F: Field + Send + Sync>(
     bii_to_sacrifice: &mut [F],
     ci_to_sacrifice: &mut [F],
     cii_to_sacrifice: &mut [F],
-) -> MpcResult<()>
-where
-    Sha256: FieldDigestExt<F>,
-{
+) -> MpcResult<()> {
     let ranges = party.split_range_equally(n);
     let chunk_size = ranges[0].1 - ranges[0].0;
     let sac_chunk_size = sacrifice_bucket_size * chunk_size;
@@ -447,7 +426,7 @@ where
 ///
 /// This function returns `Ok(())` if the `x_to_check` values form a correct multiplication triple, otherwise it returns Err.
 #[allow(clippy::too_many_arguments)]
-fn sacrifice_party<P: Party, F: Field + Copy + AddAssign>(
+fn sacrifice_party<P: Party, F: Field + DigestExt + Copy + AddAssign>(
     party: &mut P,
     n: usize,
     sacrifice_bucket_size: usize,
@@ -463,10 +442,7 @@ fn sacrifice_party<P: Party, F: Field + Copy + AddAssign>(
     bii_to_sacrifice: &mut [F],
     ci_to_sacrifice: &mut [F],
     cii_to_sacrifice: &mut [F],
-) -> MpcResult<BroadcastContext>
-where
-    Sha256: FieldDigestExt<F>,
-{
+) -> MpcResult<BroadcastContext> {
     // the first n elements are to be checked
     // the other bucket_size-1 * n elements are sacrificed
     // for element j to be checked, we sacrifice elements j + n*i for i=1..bucket_size
@@ -586,11 +562,12 @@ pub mod test {
 
     use crate::{
         furukawa::{offline::bucket_cut_and_choose, MulTripleVector},
-        party::{
-            test::{simple_localhost_setup, PartySetup, TestSetup},
-            MainParty,
-        },
-        share::{gf8::GF8, test::consistent, Field, RssShare},
+        share::{gf8::GF8, test::consistent, Field},
+    };
+    use rep3_core::{
+        test::{simple_localhost_setup, PartySetup, TestSetup},
+        party::MainParty,
+        share::RssShare,
     };
 
     fn into_rss<'a: 'b, 'b: 'a, F: Field>(

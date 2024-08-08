@@ -4,8 +4,9 @@ use itertools::{izip, repeat_n, Itertools};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    chida, party::{error::MpcResult, BitStringMulTripleRecorder, MainParty, MulTripleRecorder, Party}, share::{bs_bool16::BsBool16, gf8::GF8, Field, RssShare}, util, wollut16
+    chida, share::{bs_bool16::BsBool16, gf8::GF8, Field}, util::{self, mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder}}, wollut16
 };
+use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
 
 use super::{RndOhv256Output, RndOhv256OutputSS};
 
@@ -280,6 +281,7 @@ fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {
 mod test {
     use itertools::{izip, repeat_n, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
+    use rep3_core::{test::TestSetup, share::{HasZero, RssShare, RssShareVec}};
 
     use crate::{
         chida::{online::test::ChidaSetup, ChidaParty},
@@ -287,13 +289,12 @@ mod test {
             offline::{generate_ohv256_output, generate_ohv256_ss_output, generate_rndohv256, generate_rndohv256_mt, generate_rndohv256_ss, generate_rndohv256_ss_mt},
             RndOhv,
         },
-        party::{test::TestSetup, MulTripleVector, NoMulTripleRecording},
         share::{
             bs_bool16::BsBool16,
             gf8::GF8,
             test::{assert_eq, consistent, secret_share_vector},
-            Field, FieldRngExt, RssShare, RssShareVec,
-        },
+            Field,
+        }, util::mul_triple_vec::{MulTripleVector, NoMulTripleRecording},
     };
 
     use super::{generate_ohv, un_bitslice8};
@@ -305,10 +306,7 @@ mod test {
         Vec<RssShareVec<F>>,
         Vec<RssShareVec<F>>,
         Vec<RssShareVec<F>>,
-    )
-    where
-        R: FieldRngExt<F>,
-    {
+    ) {
         let mut s1 = Vec::with_capacity(v.len());
         let mut s2 = Vec::with_capacity(v.len());
         let mut s3 = Vec::with_capacity(v.len());

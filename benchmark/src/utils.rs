@@ -7,7 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use maestro::{aes::{self, GF8InvBlackBox}, network::{Config, ConnectedParty}, party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats}, share::gf8::GF8};
+use maestro::{aes::{self, GF8InvBlackBox}, share::gf8::GF8, util::ArithmeticBlackBox};
+use rep3_core::{network::{Config, ConnectedParty}, party::{error::MpcResult, CombinedCommStats}};
 
 pub struct BenchmarkResult {
     prep_time: Duration,

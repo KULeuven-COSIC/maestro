@@ -154,7 +154,7 @@ impl AsMut<ChaCha20Rng> for GlobalRng {
 #[cfg(test)]
 mod test {
     use crate::party::correlated_randomness::GlobalRng;
-    use crate::party::test::simple_localhost_setup;
+    use crate::party::test_export::simple_localhost_setup;
     use rand::RngCore;
 
     #[test]

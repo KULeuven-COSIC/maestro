@@ -5,10 +5,12 @@ use itertools::izip;
 use rayon::prelude::*;
 
 use crate::{
-    chida, lut256, party::{error::MpcResult, BitStringMulTripleRecorder, MainParty, MulTripleRecorder, Party}, share::{bs_bool16::BsBool16, gf4::GF4, Field, RssShare}, wollut16::{RndOhv16, RndOhvOutput}
+    chida, lut256, share::{bs_bool16::BsBool16, gf4::GF4, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder}, wollut16::{RndOhv16, RndOhvOutput}
 };
+use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
+
 #[cfg(feature = "verbose-timing")]
-use {crate::party::PARTY_TIMER, std::time::Instant};
+use {rep3_core::party::PARTY_TIMER, std::time::Instant};
 
 fn map_si(rss: &RssShare<BsBool16>) -> &BsBool16 {
     &rss.si
@@ -451,16 +453,14 @@ pub mod test {
     use rand::thread_rng;
 
     use crate::{
-        chida::{online::test::ChidaSetup, ChidaParty},
-        party::{test::TestSetup, MulTripleVector, NoMulTripleRecording},
-        share::{
-            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}, RssShare
-        },
-        wollut16::{
+        chida::{online::test::ChidaSetup, ChidaParty}, share::{
+            bs_bool16::BsBool16, gf2p64::GF2p64, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}
+        }, util::mul_triple_vec::{MulTripleVector, NoMulTripleRecording}, wollut16::{
             offline::{generate_ohv16_with_bitstring_recording, generate_random_ohv16, generate_random_ohv16_bitstring, generate_random_ohv16_bitstring_mt, generate_random_ohv16_mt},
             RndOhvOutput,
-        },
+        }
     };
+    use rep3_core::{test::TestSetup, share::RssShare};
 
     use super::{generate_ohv16, un_bitslice4};
 

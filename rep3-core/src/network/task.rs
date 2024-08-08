@@ -11,14 +11,14 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crate::{party::CombinedCommStats, share::Field};
+use crate::party::CombinedCommStats;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 
 #[cfg(feature = "verbose-timing")]
 use {crate::party::Timer, std::time::Instant};
 
-use super::{non_blocking::NonBlockingCommChannel, receiver, CommChannel};
+use super::{non_blocking::NonBlockingCommChannel, receiver, CommChannel, NetSerializable};
 
 #[derive(Copy, Clone, Debug)]
 pub enum Direction {
@@ -670,7 +670,7 @@ impl IoLayerOwned {
         self.task_layer.get().unwrap().send(direction, bytes)
     }
 
-    pub fn send_field<'a, F: Field + 'a>(
+    pub fn send_field<'a, F: NetSerializable + 'a>(
         &self,
         direction: Direction,
         elements: impl IntoIterator<Item = impl Borrow<F>>,
@@ -694,22 +694,22 @@ impl IoLayerOwned {
         self.task_layer.get().unwrap().receive_slice(direction, dst)
     }
 
-    pub fn receive_field<F: Field>(
+    pub fn receive_field<F: NetSerializable>(
         &self,
         direction: Direction,
         num_elements: usize,
-    ) -> receiver::FieldVectorReceiver<F> {
+    ) -> receiver::NetVectorReceiver<F> {
         self.task_layer
             .get()
             .unwrap()
             .receive_field(direction, num_elements)
     }
 
-    pub fn receive_field_slice<'a, F: Field>(
+    pub fn receive_field_slice<'a, F: NetSerializable>(
         &self,
         direction: Direction,
         dst: &'a mut [F],
-    ) -> receiver::FieldSliceReceiver<'a, F> {
+    ) -> receiver::NetSliceReceiver<'a, F> {
         self.task_layer
             .get()
             .unwrap()
@@ -944,7 +944,7 @@ impl IoLayer {
         receiver::SliceReceiver::new(self.receive_raw(direction, Some(thread_id), dst.len()), dst)
     }
 
-    pub fn send_field<'a, F: Field + 'a>(
+    pub fn send_field<'a, F: NetSerializable + 'a>(
         &self,
         direction: Direction,
         elements: impl IntoIterator<Item = impl Borrow<F>>,
@@ -961,7 +961,7 @@ impl IoLayer {
         self.send(direction, as_bytes)
     }
 
-    pub fn send_field_thread<'a, F: Field + 'a>(
+    pub fn send_field_thread<'a, F: NetSerializable + 'a>(
         &self,
         direction: Direction,
         thread_id: usize,
@@ -979,47 +979,47 @@ impl IoLayer {
         self.send_helper(direction, Some(thread_id), as_bytes)
     }
 
-    pub fn receive_field<F: Field>(
+    pub fn receive_field<F: NetSerializable>(
         &self,
         direction: Direction,
         num_elements: usize,
-    ) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(
+    ) -> receiver::NetVectorReceiver<F> {
+        receiver::NetVectorReceiver::new(
             self.receive_raw(direction, None, F::serialized_size(num_elements)),
             num_elements,
         )
     }
 
-    pub fn receive_field_thread<F: Field>(
+    pub fn receive_field_thread<F: NetSerializable>(
         &self,
         direction: Direction,
         thread_id: usize,
         num_elements: usize,
-    ) -> receiver::FieldVectorReceiver<F> {
-        receiver::FieldVectorReceiver::new(
+    ) -> receiver::NetVectorReceiver<F> {
+        receiver::NetVectorReceiver::new(
             self.receive_raw(direction, Some(thread_id), F::serialized_size(num_elements)),
             num_elements,
         )
     }
 
-    pub fn receive_field_slice<'a, F: Field>(
+    pub fn receive_field_slice<'a, F: NetSerializable>(
         &self,
         direction: Direction,
         dst: &'a mut [F],
-    ) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(
+    ) -> receiver::NetSliceReceiver<'a, F> {
+        receiver::NetSliceReceiver::new(
             self.receive_raw(direction, None, F::serialized_size(dst.len())),
             dst,
         )
     }
 
-    pub fn receive_field_slice_thread<'a, F: Field>(
+    pub fn receive_field_slice_thread<'a, F: NetSerializable>(
         &self,
         direction: Direction,
         thread_id: usize,
         dst: &'a mut [F],
-    ) -> receiver::FieldSliceReceiver<'a, F> {
-        receiver::FieldSliceReceiver::new(
+    ) -> receiver::NetSliceReceiver<'a, F> {
+        receiver::NetSliceReceiver::new(
             self.receive_raw(direction, Some(thread_id), F::serialized_size(dst.len())),
             dst,
         )
@@ -1035,7 +1035,7 @@ mod test {
 
     use crate::{
         network::{receiver::VecReceiver, task::U64_BYTE_SIZE, CommChannel},
-        party::test::localhost_connect,
+        party::test_export::localhost_connect,
     };
 
     use super::{Direction, IoLayerOwned, TaskQueue};

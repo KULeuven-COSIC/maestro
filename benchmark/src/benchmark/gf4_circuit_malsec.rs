@@ -1,4 +1,5 @@
-use maestro::{aes::GF8InvBlackBox, gf4_circuit_malsec::{GF4CircuitASParty, MultCheckType}, network::ConnectedParty, party::ArithmeticBlackBox};
+use rep3_core::network::ConnectedParty;
+use maestro::{aes::GF8InvBlackBox, gf4_circuit_malsec::{GF4CircuitASParty, MultCheckType}, util::ArithmeticBlackBox};
 
 impl_benchmark_protocol!(
     GF4CircuitASBenchmark, // benchmark struct name

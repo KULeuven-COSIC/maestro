@@ -1,4 +1,6 @@
-use crate::{party::{error::MpcResult, MainParty, Party}, share::gf8::GF8};
+use rep3_core::party::{error::MpcResult, MainParty, Party};
+
+use crate::share::gf8::GF8;
 
 use super::AesKeyState;
 
@@ -272,25 +274,25 @@ fn inv_sbox_layer<Protocol: GF8InvBlackBoxSS>(
 #[cfg(test)]
 pub mod test {
     use itertools::{izip, repeat_n, Itertools};
-    use rand::thread_rng;
+    use rand::{thread_rng, CryptoRng, Rng};
+    use rep3_core::test::TestSetup;
 
     use crate::aes::ss::{aes128_inv_no_keyschedule, aes128_no_keyschedule};
     use crate::aes::test::{secret_share_aes_key_state, AES_SBOX};
     use crate::aes::AesKeyState;
     use crate::share::gf8::GF8;
-    use crate::{party::test::TestSetup, share::Field};
-    use crate::share::FieldRngExt;
+    use crate::share::Field;
 
     use super::{sbox_layer, GF8InvBlackBoxSS, VectorAesStateSS};
 
-    fn secret_share_ss<R: FieldRngExt<F>, F: Field>(rng: &mut R, values: &[F]) -> (Vec<F>, Vec<F>, Vec<F>) {
-        let s1 = rng.generate(values.len());
-        let s2 = rng.generate(values.len());
+    fn secret_share_ss<R: Rng + CryptoRng, F: Field>(rng: &mut R, values: &[F]) -> (Vec<F>, Vec<F>, Vec<F>) {
+        let s1 = F::generate(rng, values.len());
+        let s2 = F::generate(rng, values.len());
         let s3 = values.iter().enumerate().map(|(i, &v)| v - s1[i] - s2[i]).collect();
         (s1, s2, s3)
     }
 
-    fn secret_share_vectorstate_ss<R: FieldRngExt<GF8>>(rng: &mut R, state: &[GF8]) -> (VectorAesStateSS, VectorAesStateSS, VectorAesStateSS) {
+    fn secret_share_vectorstate_ss<R: Rng + CryptoRng>(rng: &mut R, state: &[GF8]) -> (VectorAesStateSS, VectorAesStateSS, VectorAesStateSS) {
         assert_eq!(state.len() % 16, 0);
         let (s1, s2, s3) = secret_share_ss(rng, state);
         let state1 = VectorAesStateSS::from_bytes(s1);

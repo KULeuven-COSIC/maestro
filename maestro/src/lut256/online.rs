@@ -1,19 +1,16 @@
 use std::time::Instant;
 
 use itertools::izip;
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
-use sha2::Sha256;
 
 use crate::{
-    aes::GF8InvBlackBox,
-    network::task::{Direction, IoLayerOwned},
-    party::{error::MpcResult, ArithmeticBlackBox, MainParty, NoMulTripleRecording},
-    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
+    aes::GF8InvBlackBox, chida::ChidaParty, share::{gf8::GF8, Field}, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox}
 };
+use rep3_core::{network::task::{Direction, IoLayerOwned},
+party::{error::MpcResult, MainParty}, share::{RssShare, RssShareVec}};
 
 use super::{lut256_tables, offline, LUT256Party, RndOhv256Output};
 
@@ -110,20 +107,14 @@ fn lut256(si: &mut [GF8], sii: &mut [GF8], ciii: &[GF8], rnd_ohv: &[RndOhv256Out
     });
 }
 
-impl<F: Field> ArithmeticBlackBox<F> for LUT256Party
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field> ArithmeticBlackBox<F> for LUT256Party {
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.inner.pre_processing(n_multiplications)
+        <ChidaParty as ArithmeticBlackBox<F>>::pre_processing(&mut self.inner, n_multiplications)
     }
 
     fn io(&self) -> &IoLayerOwned {
-        self.inner.io()
+        <ChidaParty as ArithmeticBlackBox<F>>::io(&self.inner)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -163,7 +154,7 @@ where
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.inner.finalize()
+        <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.inner)
     }
 }
 

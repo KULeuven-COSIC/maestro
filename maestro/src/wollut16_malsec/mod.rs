@@ -16,11 +16,11 @@
 
 use std::time::Instant;
 
-use rand_chacha::ChaCha20Rng;
-use sha2::Sha256;
-
 use crate::{
-    aes::GF8InvBlackBox, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, RssShare}, wollut16::RndOhvOutput
+    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16::RndOhvOutput
+};
+use rep3_core::{
+    network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare
 };
 
 pub mod mult_verification;
@@ -92,8 +92,6 @@ impl WL16ASParty {
 }
 
 impl ArithmeticBlackBox<GF8> for WL16ASParty {
-    type Digest = Sha256;
-    type Rng = ChaCha20Rng;
 
     #[inline]
     fn constant(&self, value: GF8) -> RssShare<GF8> {
@@ -200,9 +198,9 @@ impl GF8InvBlackBox for WL16ASParty {
 mod test {
     use std::thread::JoinHandle;
 
-    use crate::{
+    use rep3_core::{
         network::ConnectedParty,
-        party::test::{localhost_connect, TestSetup},
+        test::{localhost_connect, TestSetup},
     };
 
     use super::WL16ASParty;

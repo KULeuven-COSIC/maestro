@@ -1,4 +1,6 @@
-use crate::{lut256::RndOhv, share::{bs_bool16::BsBool16, RssShare}};
+use rep3_core::share::RssShare;
+
+use crate::{lut256::RndOhv, share::bs_bool16::BsBool16};
 
 const UN_BITSLICE_SS_SPLIT: usize = 500;
 const UN_BITSLICE_RSS_SPLIT: usize = 1000;

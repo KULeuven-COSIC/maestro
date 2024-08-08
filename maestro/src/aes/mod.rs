@@ -1,9 +1,8 @@
-use crate::{
-    party::{error::MpcResult, ArithmeticBlackBox, MainParty, Party},
-    share::{gf8::GF8, RssShare},
-};
+use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::RssShare};
+
+use crate::{share::gf8::GF8, util::ArithmeticBlackBox};
 #[cfg(feature = "verbose-timing")]
-use {crate::party::PARTY_TIMER, std::time::Instant};
+use {rep3_core::party::PARTY_TIMER, std::time::Instant};
 
 pub mod ss;
 
@@ -461,17 +460,15 @@ pub mod test {
 
     use itertools::repeat_n;
     use rand::{thread_rng, CryptoRng, Rng};
-
+    use rep3_core::{test::TestSetup, share::RssShare};
     use crate::{
         aes::{
             aes128_inv_no_keyschedule, aes128_keyschedule, aes128_no_keyschedule, sbox_layer,
             INV_GF8,
         },
-        party::test::TestSetup,
         share::{
             gf8::GF8,
             test::{assert_eq, consistent, secret_share},
-            RssShare,
         },
     };
 

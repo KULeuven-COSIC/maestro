@@ -12,11 +12,9 @@
 
 use std::time::Duration;
 
-use crate::aes::{self};
+use rep3_core::{network::ConnectedParty, party::{error::MpcResult, MainParty}};
 
-use crate::network::ConnectedParty;
-use crate::party::error::MpcResult;
-use crate::party::MainParty;
+use crate::aes::{self};
 
 pub mod online;
 

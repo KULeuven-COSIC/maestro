@@ -17,10 +17,10 @@
 
 use crate::{
     chida::ChidaParty,
-    network::{task::IoLayerOwned, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox, NoMulTripleRecording},
-    share::gf4::GF4,
+    share::gf4::GF4, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox},
 };
+use rep3_core::{network::{task::IoLayerOwned, ConnectedParty},
+party::error::MpcResult};
 
 pub mod offline;
 pub mod online;
@@ -122,9 +122,9 @@ impl RndOhv16 {
 mod test {
     use std::thread::JoinHandle;
 
-    use crate::{
+    use rep3_core::{
         network::ConnectedParty,
-        party::test::{localhost_connect, TestSetup},
+        test::{localhost_connect, TestSetup},
     };
 
     use super::WL16Party;

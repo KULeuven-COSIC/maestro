@@ -6,29 +6,58 @@ mod commitment;
 pub mod correlated_randomness;
 pub mod error;
 mod thread_party;
-mod mul_triple_vec;
 
 use crate::network::task::{Direction, IoLayerOwned};
-use crate::network::{self, ConnectedParty};
+use crate::network::{self, ConnectedParty, NetSerializable};
 use crate::party::correlated_randomness::SharedRng;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec};
+use crate::share::{HasZero, RssShare, RssShareVec};
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
+use sha2::Digest;
 use std::borrow::Borrow;
 use std::io::{self, Write};
+use std::ops::Sub;
 use std::thread;
 
 use self::error::MpcResult;
 pub use self::thread_party::ThreadParty;
-pub use self::mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording, MulTripleVector, BitStringMulTripleRecorder};
+
 use std::time::Duration;
 #[cfg(feature = "verbose-timing")]
 use {
-    crate::network::task::IO_TIMER,
     lazy_static::lazy_static,
     std::{collections::HashMap, sync::Mutex},
 };
+#[cfg(feature = "verbose-timing")]
+pub use crate::network::task::IO_TIMER;
+
+///Provides methods to feed elements into a hash function.
+pub trait DigestExt: Sized {
+    /// Feeds a slice of elements to a hash function.
+    fn update<D: Digest>(digest: &mut D, message: &[Self]);
+}
+
+/// Provides methods to generate random values.
+pub trait RngExt: Sized + Clone + HasZero {
+    /// Fill the given buffer with random elements.
+    fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]);
+
+    /// Generate a random vector of elements of length `n`.
+    fn generate<R: Rng + CryptoRng>(rng: &mut R, n: usize) -> Vec<Self> {
+        let mut v = vec![Self::ZERO; n];
+        Self::fill(rng, &mut v);
+        v
+    }
+}
+
+// impl<T: Sized + Clone + HasZero + NetSerializable> RngExt for T {
+//     fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
+//         let mut bytes = vec![0u8; Self::serialized_size(buf.len())];
+//         rng.fill_bytes(&mut bytes);
+//         Self::from_byte_slice(bytes, buf);
+//     }
+// }
 
 #[derive(Clone, Copy)]
 pub struct CommStats {
@@ -108,61 +137,31 @@ impl CombinedCommStats {
     }
 }
 
-pub trait ArithmeticBlackBox<F: Field> {
-    type Digest: FieldDigestExt<F>;
-    type Rng: FieldRngExt<F>;
-
-    fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()>;
-    fn generate_random(&mut self, n: usize) -> RssShareVec<F>;
-    /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F>;
-    fn io(&self) -> &IoLayerOwned;
-
-    fn input_round(
-        &mut self,
-        my_input: &[F],
-    ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>;
-    fn constant(&self, value: F) -> RssShare<F>;
-    fn mul(
-        &mut self,
-        ci: &mut [F],
-        cii: &mut [F],
-        ai: &[F],
-        aii: &[F],
-        bi: &[F],
-        bii: &[F],
-    ) -> MpcResult<()>;
-    fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
-    fn finalize(&mut self) -> MpcResult<()>;
-}
-
 pub trait Party {
-    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
-    where
-        ChaCha20Rng: FieldRngExt<F>;
+    fn generate_random<T: RngExt>(&mut self, n: usize) -> RssShareVec<T>;
+    
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    fn generate_alpha<F: Field>(&mut self, n: usize) -> impl Iterator<Item=F>
-    where
-        ChaCha20Rng: FieldRngExt<F>;
-    fn constant<F: Field>(&self, value: F) -> RssShare<F>;
+    fn generate_alpha<T: RngExt + Sub<Output=T>>(&mut self, n: usize) -> impl Iterator<Item=T>;
+    
+    fn constant<T: HasZero>(&self, value: T) -> RssShare<T>;
 
     // I/O operations
-    fn send_field<'a, F: Field + 'a>(
+    fn send_field<'a, T: NetSerializable + 'a>(
         &self,
         direction: Direction,
-        elements: impl IntoIterator<Item = impl Borrow<F>>,
+        elements: impl IntoIterator<Item = impl Borrow<T>>,
         len: usize,
     );
-    fn receive_field<F: Field>(
+    fn receive_field<T: NetSerializable>(
         &self,
         direction: Direction,
         num_elements: usize,
-    ) -> network::FieldVectorReceiver<F>;
-    fn receive_field_slice<'a, F: Field>(
+    ) -> network::NetVectorReceiver<T>;
+    fn receive_field_slice<'a, T: NetSerializable>(
         &self,
         direction: Direction,
-        dst: &'a mut [F],
-    ) -> network::FieldSliceReceiver<'a, F>;
+        dst: &'a mut [T],
+    ) -> network::NetSliceReceiver<'a, T>;
 }
 
 pub struct MainParty {
@@ -477,27 +476,21 @@ impl MainParty {
 }
 
 #[inline]
-fn generate_alpha<F: Field, R: Rng + CryptoRng>(next: &mut R, prev: &mut R, n: usize) -> impl Iterator<Item=F>
-where
-    R: FieldRngExt<F>,
-{
-    next.generate(n)
+fn generate_alpha<T: RngExt + Sub<Output=T>, R: Rng + CryptoRng>(next: &mut R, prev: &mut R, n: usize) -> impl Iterator<Item=T> {
+    T::generate(next, n)
         .into_iter()
-        .zip(prev.generate(n))
+        .zip(T::generate(prev, n))
         .map(|(next, prev)| next - prev)
 }
 
 #[inline]
-fn generate_random<F: Field, R: Rng + CryptoRng>(
+fn generate_random<T: RngExt, R: Rng + CryptoRng>(
     next: &mut R,
     prev: &mut R,
     n: usize,
-) -> RssShareVec<F>
-where
-    R: FieldRngExt<F>,
-{
-    let si = prev.generate(n);
-    let sii = next.generate(n);
+) -> RssShareVec<T> {
+    let si = T::generate(prev, n);
+    let sii = T::generate(next, n);
     si.into_iter()
         .zip(sii)
         .map(|(si, sii)| RssShare::from(si, sii))
@@ -505,7 +498,7 @@ where
 }
 
 #[inline]
-fn constant<F: Field>(i: usize, value: F) -> RssShare<F> {
+fn constant<F: HasZero>(i: usize, value: F) -> RssShare<F> {
     if i == 0 {
         RssShare::from(value, F::ZERO)
     } else if i == 2 {
@@ -517,48 +510,42 @@ fn constant<F: Field>(i: usize, value: F) -> RssShare<F> {
 
 impl Party for MainParty {
     /// returns alpha_i s.t. alpha_1 + alpha_2 + alpha_3 = 0
-    fn generate_alpha<F: Field>(&mut self, n: usize) -> impl Iterator<Item=F>
-    where
-        ChaCha20Rng: FieldRngExt<F>,
-    {
+    fn generate_alpha<T: RngExt + Sub<Output=T>>(&mut self, n: usize) -> impl Iterator<Item=T> {
         generate_alpha(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
-    fn generate_random<F: Field>(&mut self, n: usize) -> RssShareVec<F>
-    where
-        ChaCha20Rng: FieldRngExt<F>,
-    {
+    fn generate_random<T: RngExt>(&mut self, n: usize) -> RssShareVec<T> {
         generate_random(self.random_next.as_mut(), self.random_prev.as_mut(), n)
     }
 
     #[inline]
-    fn constant<F: Field>(&self, value: F) -> RssShare<F> {
+    fn constant<F: HasZero>(&self, value: F) -> RssShare<F> {
         constant(self.i, value)
     }
 
     // I/O
-    fn send_field<'a, F: Field + 'a>(
+    fn send_field<'a, T: NetSerializable + 'a>(
         &self,
         direction: Direction,
-        elements: impl IntoIterator<Item = impl Borrow<F>>,
+        elements: impl IntoIterator<Item = impl Borrow<T>>,
         len: usize,
     ) {
         self.io().send_field(direction, elements, len)
     }
 
-    fn receive_field<F: Field>(
+    fn receive_field<T: NetSerializable>(
         &self,
         direction: Direction,
         num_elements: usize,
-    ) -> network::FieldVectorReceiver<F> {
+    ) -> network::NetVectorReceiver<T> {
         self.io().receive_field(direction, num_elements)
     }
 
-    fn receive_field_slice<'a, F: Field>(
+    fn receive_field_slice<'a, T: NetSerializable>(
         &self,
         direction: Direction,
-        dst: &'a mut [F],
-    ) -> network::FieldSliceReceiver<'a, F> {
+        dst: &'a mut [T],
+    ) -> network::NetSliceReceiver<'a, T> {
         self.io().receive_field_slice(direction, dst)
     }
 }
@@ -591,27 +578,21 @@ impl Timer {
     }
 }
 
-#[cfg(any(test, feature = "benchmark-helper"))]
-pub mod test {
-    use crate::network::task::Direction;
-    use crate::network::{Config, ConnectedParty, CreatedParty};
-    use crate::party::correlated_randomness::SharedRng;
-    use crate::party::MainParty;
-    use rand::RngCore;
+/// Exposes useful testing functionalities
+pub mod test_export {
+    use std::{fs::File, io::BufReader, net::{IpAddr, Ipv4Addr}, path::PathBuf, str::FromStr, thread::{self, JoinHandle}};
+
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use std::fs::File;
-    use std::io::BufReader;
-    use std::net::{IpAddr, Ipv4Addr};
-    use std::path::PathBuf;
-    use std::str::FromStr;
-    use std::thread;
-    use std::thread::JoinHandle;
+
+    use crate::network::{Config, ConnectedParty, CreatedParty};
+
+    use super::MainParty;
 
     const TEST_KEY_DIR: &str = "keys";
 
     type KeyPair = (PrivateKeyDer<'static>, CertificateDer<'static>);
 
-    pub fn create_certificates() -> (KeyPair, KeyPair, KeyPair) {
+    pub(crate) fn create_certificates() -> (KeyPair, KeyPair, KeyPair) {
         fn key_path(filename: &str) -> PathBuf {
             let mut p = PathBuf::from("../");
             p.push(TEST_KEY_DIR);
@@ -866,6 +847,99 @@ pub mod test {
         ((t1, t2, t3), (p1, p2, p3))
     }
 
+}
+
+#[cfg(test)]
+pub mod test {
+    use crate::network::task::Direction;
+    use crate::network::{Config, ConnectedParty, CreatedParty, NetSerializable};
+    use crate::party::correlated_randomness::SharedRng;
+    use crate::party::test_export::{create_certificates, localhost_setup, simple_localhost_setup};
+    use crate::party::MainParty;
+    use crate::share::HasZero;
+    use rand::{CryptoRng, Fill, Rng, RngCore};
+    use sha2::Digest;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::ops::{Add, Sub};
+    use std::str::FromStr;
+    use std::thread;
+
+    use super::test_export::localhost_connect;
+    use super::{DigestExt, RngExt};
+
+    /// Dummy test implementation for Z / 256Z
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct DummyNumber(pub u8);
+
+    impl HasZero for DummyNumber {
+        const ZERO: Self = DummyNumber(0);
+    }
+
+    impl DigestExt for DummyNumber {
+        fn update<D: Digest>(digest: &mut D, message: &[DummyNumber]) {
+            for m in message {
+                digest.update(&[m.0]);
+            }
+        }
+    }
+
+    impl Fill for DummyNumber {
+        fn try_fill<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Result<(), rand::Error> {
+            self.0 = rng.gen();
+            Ok(())
+        }
+    }
+
+    impl RngExt for DummyNumber {
+        fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
+            let mut byte_buf = vec![0u8; buf.len()];
+            rng.fill_bytes(&mut byte_buf);
+            for i in 0..buf.len() {
+                buf[i].0 = byte_buf[i];
+            }
+        }
+        // fn generate(&mut self, n: usize) -> Vec<DummyNumber> {
+        //     let mut buf = vec![DummyNumber::ZERO; n];
+        //     RngExt::fill(self, &mut buf);
+        //     buf
+        // }
+    }
+
+    impl NetSerializable for DummyNumber {
+        fn serialized_size(n_elements: usize) -> usize {
+            n_elements
+        }
+
+        fn as_byte_vec(it: impl IntoIterator<Item = impl std::borrow::Borrow<Self>>, _len: usize) -> Vec<u8> {
+            it.into_iter().map(|x| x.borrow().0).collect()
+        }
+        
+        fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
+            debug_assert_eq!(dest.len(), v.len());
+            for i in 0..dest.len() {
+                dest[i] = DummyNumber(v[i]);
+            }
+        }
+
+        fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
+            v.into_iter().map(|byte| DummyNumber(byte)).collect()
+        }
+    }
+
+    impl Add for DummyNumber {
+        type Output = Self;
+        fn add(self, rhs: Self) -> Self::Output {
+            Self(self.0.wrapping_add(rhs.0))
+        }
+    }
+
+    impl Sub for DummyNumber {
+        type Output = Self;
+        fn sub(self, rhs: Self) -> Self::Output {
+            Self(self.0.wrapping_sub(rhs.0))
+        }
+    }
+
     #[test]
     fn correct_channel_connection() {
         let f1 = |mut p: ConnectedParty| {
@@ -946,7 +1020,6 @@ pub mod test {
 
     #[test]
     fn correct_split_range_single_thread() {
-        const THREADS: usize = 3;
         fn split_range_single_test(p: &mut MainParty) {
             let range = p.split_range_equally(3);
             assert_eq!(vec![(0, 3)], range);

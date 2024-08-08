@@ -12,10 +12,11 @@ use std::{
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
+use rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero};
 use sha2::Digest;
 
 use super::{
-    bs_bool16::BsBool16, gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible, RssShare
+    bs_bool16::BsBool16, gf4::GF4, gf8::GF8, Field, HasTwo, InnerProduct, Invertible, RssShare
 };
 
 /// An element of `GF(2^64) := GF(2)[X] / X^64 + X^4 + X^3 + X + 1`
@@ -418,14 +419,18 @@ impl GF2p64 {
 impl Field for GF2p64 {
     const NBYTES: usize = 8;
 
-    const ZERO: Self = Self(0u64);
-
     const ONE: Self = Self(1u64);
 
     fn is_zero(&self) -> bool {
         self.0 == 0u64
     }
+}
 
+impl HasZero for GF2p64 {
+    const ZERO: Self = Self(0u64);
+}
+
+impl NetSerializable for GF2p64 {
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         // Using big-endian encoding
         it.into_iter()
@@ -705,24 +710,24 @@ impl Debug for GF2p64 {
     }
 }
 
-impl<R: Rng + CryptoRng> FieldRngExt<GF2p64> for R {
-    fn generate(&mut self, n: usize) -> Vec<GF2p64> {
-        let mut r = vec![0; n * GF2p64::NBYTES];
-        self.fill_bytes(&mut r);
-        GF2p64::from_byte_vec(r, n)
+impl RngExt for GF2p64 {
+    fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
+        let mut v = vec![0u8; buf.len() * GF2p64::NBYTES];
+        rng.fill_bytes(&mut v);
+        Self::from_byte_slice(v, buf)
     }
 
-    fn fill(&mut self, buf: &mut [GF2p64]) {
-        let mut v = vec![0u8; buf.len() * GF2p64::NBYTES];
-        self.fill_bytes(&mut v);
-        GF2p64::from_byte_slice(v, buf)
+    fn generate<R: Rng + CryptoRng>(rng: &mut R, n: usize) -> Vec<Self> {
+        let mut r = vec![0; n * GF2p64::NBYTES];
+        rng.fill_bytes(&mut r);
+        GF2p64::from_byte_vec(r, n)
     }
 }
 
-impl<D: Digest> FieldDigestExt<GF2p64> for D {
-    fn update(&mut self, message: &[GF2p64]) {
+impl DigestExt for GF2p64 {
+    fn update<D: Digest>(digest: &mut D, message: &[Self]) {
         for x in message {
-            self.update(x.0.to_be_bytes());
+            digest.update(x.0.to_be_bytes());
         }
     }
 }
@@ -825,9 +830,10 @@ impl GF2p64Subfield for GF4 {
 mod test {
     use itertools::Itertools;
     use rand::thread_rng;
+    use rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
 
     use crate::share::{
-        bs_bool16::BsBool16, gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, FieldRngExt, InnerProduct, Invertible
+        bs_bool16::BsBool16, gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, InnerProduct, Invertible
     };
 
     #[cfg(any(
@@ -942,8 +948,8 @@ mod test {
     #[allow(deprecated)]
     fn test_inner_product() {
         let mut rng = thread_rng();
-        let a: Vec<GF2p64> = rng.generate(29);
-        let b: Vec<GF2p64> = rng.generate(29);
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
         assert_eq!(
             GF2p64::fallback_inner_product(&a, &b),
             GF2p64::inner_product(&a, &b)
@@ -984,8 +990,8 @@ mod test {
     #[test]
     fn test_fast_mul() {
         let mut rng = thread_rng();
-        let a: Vec<GF2p64> = rng.generate(128);
-        let b: Vec<GF2p64> = rng.generate(128);
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 128);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 128);
         a.into_iter().zip(b).for_each(|(a, b)| {
             assert_eq!(a*b, GF2p64::mul_clmul_u64_fast(&a,&b))
         });
@@ -1018,8 +1024,8 @@ mod test {
     #[test]
     fn test_inner_gf2p64_inner_prod_correctness() {
         let mut rng = thread_rng();
-        let a: Vec<GF2p64> = rng.generate(29);
-        let b: Vec<GF2p64> = rng.generate(29);
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
 
         let expected = GF2p64::inner_product(&a, &b);
         let mut actual = GF2p64InnerProd::new();

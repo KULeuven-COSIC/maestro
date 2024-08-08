@@ -9,6 +9,7 @@ use rustls::{
     ClientConfig, ClientConnection, RootCertStore, ServerConfig, ServerConnection, StreamOwned,
 };
 use serde::Deserialize;
+use std::borrow::Borrow;
 use std::fs::File;
 use std::io::{BufReader, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream};
@@ -20,7 +21,30 @@ mod non_blocking;
 mod receiver;
 pub mod task;
 
-pub use receiver::{FieldSliceReceiver, FieldVectorReceiver};
+pub use receiver::{NetSliceReceiver, NetVectorReceiver};
+
+pub trait NetSerializable: Sized {
+    /// The field size in byte
+    // const NBYTES: usize;
+
+    /// Returns the size in byte of a serialization of n_elements many elements
+    fn serialized_size(n_elements: usize) -> usize;
+
+    /// The field size in bits
+    // const NBITS: usize = 8 * Self::NBYTES;
+
+    // /// Returns if the value is zero
+    // fn is_zero(&self) -> bool;
+
+    /// Serializes the elements
+    fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, len: usize) -> Vec<u8>;
+
+    /// Deserializes elements from a byte vector
+    fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
+
+    /// Deserializes elements from a byte vector into a slice
+    fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
+}
 
 /// The network configuration of a party.
 pub struct Config {
@@ -298,7 +322,6 @@ impl CreatedParty {
     }
 
     /// Returns the port of the [CreatedParty].
-    #[cfg(any(test, feature = "benchmark-helper"))]
     pub fn port(&self) -> io::Result<u16> {
         self.server_socket
             .local_addr()
@@ -563,11 +586,12 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use crate::{network::non_blocking::NonBlockingCommChannel, party::test::localhost_connect};
+    use crate::{network::non_blocking::NonBlockingCommChannel, party::test_export::localhost_connect};
 
     use super::non_blocking::NonBlockingStream;
 
     // #[test]
+    #[allow(unused)]
     fn tcp_single_thread_throughput() {
         const BUF_SIZES: [usize; 4] = [1024, 2048, 4096, 8192];
         const DATA: usize = 1_000_000_000;

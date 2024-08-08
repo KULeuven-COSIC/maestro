@@ -1,26 +1,20 @@
 use itertools::izip;
-use rand_chacha::ChaCha20Rng;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
-use sha2::Sha256;
+use rep3_core::party::{MainParty, Party};
+use rep3_core::share::{RssShare, RssShareVec};
 
 use crate::aes::GF8InvBlackBox;
-use crate::network::task::{Direction, IoLayerOwned};
-use crate::party::error::MpcResult;
-use crate::party::{ArithmeticBlackBox, MainParty, Party};
+use crate::util::ArithmeticBlackBox;
+use rep3_core::network::task::{Direction, IoLayerOwned};
+use rep3_core::party::error::MpcResult;
 use crate::share::gf8::GF8;
-use crate::share::{Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec};
+use crate::share::Field;
 
 use super::aes::VectorAesState;
 use super::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
 
-impl<F: Field> ArithmeticBlackBox<F> for ChidaParty
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field> ArithmeticBlackBox<F> for ChidaParty {
 
     fn pre_processing(&mut self, _n_multiplications: usize) -> MpcResult<()> {
         Ok(()) // no pre-processing needed
@@ -103,20 +97,13 @@ impl GF8InvBlackBox for ChidaBenchmarkParty {
     }
 }
 
-impl<F: Field> ArithmeticBlackBox<F> for ChidaBenchmarkParty
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
-
+impl<F: Field> ArithmeticBlackBox<F> for ChidaBenchmarkParty {
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.inner.pre_processing(n_multiplications)
+        <ChidaParty as ArithmeticBlackBox<F>>::pre_processing(&mut self.inner, n_multiplications)
     }
 
     fn io(&self) -> &IoLayerOwned {
-        self.inner.io()
+        <ChidaParty as ArithmeticBlackBox<F>>::io(&self.inner)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -156,7 +143,7 @@ where
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.inner.finalize()
+        <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.inner)
     }
 }
 
@@ -305,10 +292,7 @@ fn append(a: &[GF8], b: &[GF8]) -> Vec<GF8> {
 pub fn input_round<F: Field>(
     party: &mut MainParty,
     input: &[F],
-) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-{
+) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
     let n = input.len();
     // create 3n random elements
     let random = party.generate_random(3 * n);
@@ -507,10 +491,7 @@ pub fn mul_no_sync<P: Party, F: Field>(
     aii: &[F],
     bi: &[F],
     bii: &[F],
-) -> MpcResult<()>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-{
+) -> MpcResult<()> {
     debug_assert_eq!(ci.len(), ai.len());
     debug_assert_eq!(ci.len(), aii.len());
     debug_assert_eq!(ci.len(), bi.len());
@@ -534,10 +515,7 @@ pub fn mul<F: Field>(
     aii: &[F],
     bi: &[F],
     bii: &[F],
-) -> MpcResult<()>
-where
-    ChaCha20Rng: FieldRngExt<F>,
-{
+) -> MpcResult<()> {
     mul_no_sync(party, ci, cii, ai, aii, bi, bii)?;
     party.wait_for_completion();
     Ok(())
@@ -555,14 +533,14 @@ pub mod test {
         input_round, input_round_aes_states, mul, output_round, VectorAesState,
     };
     use crate::chida::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
-    use crate::network::ConnectedParty;
-    use crate::party::test::{localhost_connect, PartySetup, TestSetup};
-    use crate::party::MainParty;
+    use rep3_core::network::ConnectedParty;
+    use rep3_core::test::{localhost_connect, PartySetup, TestSetup};
+    use rep3_core::party::{MainParty, RngExt};
+    use rep3_core::share::RssShare;
     use crate::share::gf8::GF8;
     use crate::share::test::{
         assert_eq, consistent, random_secret_shared_vector, secret_share_vector,
     };
-    use crate::share::{FieldRngExt, RssShare};
     use rand::thread_rng;
 
     use super::square_layer;
@@ -840,9 +818,9 @@ pub mod test {
     fn input_aesstate() {
         const N: usize = 10;
         let mut rng = thread_rng();
-        let in1 = rng.generate(16 * N);
-        let in2 = rng.generate(16 * N);
-        let in3 = rng.generate(16 * N);
+        let in1 = GF8::generate(&mut rng, 16 * N);
+        let in2 = GF8::generate(&mut rng, 16 * N);
+        let in3 = GF8::generate(&mut rng, 16 * N);
         let program = |my_input: Vec<GF8>| {
             move |p: &mut MainParty| {
                 let mut v = Vec::with_capacity(N);
@@ -897,9 +875,9 @@ pub mod test {
     fn input_round_gf8() {
         const N: usize = 100;
         let mut rng = thread_rng();
-        let in1 = rng.generate(N);
-        let in2 = rng.generate(N);
-        let in3 = rng.generate(N);
+        let in1 = GF8::generate(&mut rng, N);
+        let in2 = GF8::generate(&mut rng, N);
+        let in3 = GF8::generate(&mut rng, N);
         let program = |my_input: Vec<GF8>| {
             move |p: &mut MainParty| {
                 let (a, b, c) = input_round(p, &my_input).unwrap();

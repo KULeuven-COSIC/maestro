@@ -1,8 +1,6 @@
 
-use rand_chacha::ChaCha20Rng;
-use sha2::Sha256;
-
-use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, ArithmeticBlackBox, MainParty, MulTripleRecorder, MulTripleVector, Party}, share::{gf4::BsGF4, gf8::GF8, FieldDigestExt, FieldRngExt, RssShare}, wollut16_malsec};
+use rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare};
+use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, share::{gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
 
 mod offline;
 
@@ -72,13 +70,7 @@ impl GF4CircuitASParty {
     }
 }
 
-impl ArithmeticBlackBox<GF8> for GF4CircuitASParty
-where
-    ChaCha20Rng: FieldRngExt<GF8>,
-    Sha256: FieldDigestExt<GF8>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl ArithmeticBlackBox<GF8> for GF4CircuitASParty {
 
     fn pre_processing(&mut self, _n_multiplications: usize) -> MpcResult<()> {
        // nothing to do
@@ -163,7 +155,8 @@ impl GF8InvBlackBox for GF4CircuitASParty {
 mod test {
     use std::thread::JoinHandle;
 
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, network::ConnectedParty, party::test::{localhost_connect, TestSetup}};
+    use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes};
+    use rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
 
     use super::{GF4CircuitASParty, MultCheckType};
 

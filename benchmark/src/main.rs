@@ -6,9 +6,9 @@ mod benchmark;
 
 use benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16BitStringBenchmark, MalLUT16PrepCheckBenchmark}};
 use itertools::Itertools;
+use rep3_core::network::{self, ConnectedParty};
 use std::path::PathBuf;
 
-use maestro::network::{self, ConnectedParty};
 use utils::{BenchmarkProtocol, BenchmarkResult};
 use clap::{Parser, ValueEnum};
 

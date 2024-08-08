@@ -1,26 +1,25 @@
 //! This module contains the online phase components.
 
 use crate::{
-    aes::GF8InvBlackBox,
-    network::task::{Direction, IoLayerOwned},
-    party::{error::MpcResult, ArithmeticBlackBox, MainParty, Party},
-    share::{
+    aes::GF8InvBlackBox, chida::ChidaParty, share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-        Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec,
-    },
+        Field,
+    }, util::ArithmeticBlackBox
+};
+use rep3_core::{
+    network::task::{Direction, IoLayerOwned},
+    party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare, RssShareVec},
 };
 use itertools::{izip, Itertools};
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
-use sha2::Sha256;
 
 #[cfg(feature = "verbose-timing")]
-use {crate::party::PARTY_TIMER, std::time::Instant};
+use {rep3_core::party::PARTY_TIMER, std::time::Instant};
 
 use super::{RndOhv16, RndOhvOutput, WL16Party};
 
@@ -651,7 +650,7 @@ pub fn lut_with_rnd_ohv_bitsliced_opt(
 }
 
 impl GF8InvBlackBox for WL16Party {
-    fn constant(&self, value: GF8) -> crate::share::RssShare<GF8> {
+    fn constant(&self, value: GF8) -> RssShare<GF8> {
         self.inner.constant(value)
     }
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
@@ -675,20 +674,14 @@ impl GF8InvBlackBox for WL16Party {
     }
 }
 
-impl<F: Field> ArithmeticBlackBox<F> for WL16Party
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field> ArithmeticBlackBox<F> for WL16Party {
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.inner.pre_processing(n_multiplications)
+        <ChidaParty as ArithmeticBlackBox<F>>::pre_processing(&mut self.inner, n_multiplications)
     }
 
     fn io(&self) -> &IoLayerOwned {
-        self.inner.io()
+        <ChidaParty as ArithmeticBlackBox<F>>::io(&self.inner)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -728,7 +721,7 @@ where
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.inner.finalize()
+        <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.inner)
     }
 }
 
@@ -742,12 +735,11 @@ mod test {
             test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
             test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
         },
-        party::test::TestSetup,
         share::{
             gf4::GF4,
             gf8::GF8,
             test::{assert_eq, consistent, secret_share_vector},
-            Field, FieldRngExt, RssShare,
+            Field
         },
         wollut16::{
             online::{gf8_inv_layer_opt, gf8_inv_layer_opt_mt, GF4_INV},
@@ -755,18 +747,16 @@ mod test {
             WL16Party,
         },
     };
+    use rep3_core::{test::TestSetup, party::RngExt, share::RssShare};
 
     use super::{gf8_inv_layer, lut_layer};
 
     fn secret_share_additive<R: Rng + CryptoRng, F: Field>(
         rng: &mut R,
         it: impl ExactSizeIterator<Item = F>,
-    ) -> (Vec<F>, Vec<F>, Vec<F>)
-    where
-        R: FieldRngExt<F>,
-    {
-        let s1 = rng.generate(it.len());
-        let s2 = rng.generate(it.len());
+    ) -> (Vec<F>, Vec<F>, Vec<F>) {
+        let s1 = F::generate(rng, it.len());
+        let s2 = F::generate(rng, it.len());
         let s3 = izip!(it, s1.iter(), s2.iter())
             .map(|(el, r1, r2)| el - *r1 - *r2)
             .collect();
@@ -934,7 +924,7 @@ mod test {
         const N_THREADS: usize = 6;
         const N: usize = 100000;
         let mut rng = thread_rng();
-        let inputs: Vec<GF8> = rng.generate(N);
+        let inputs: Vec<GF8> = GF8::generate(&mut rng, N);
         let mut rng = thread_rng();
         let (s1, s2, s3) = secret_share_vector(&mut rng, inputs.clone().into_iter());
         let program = |v: Vec<RssShare<GF8>>| {

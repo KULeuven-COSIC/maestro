@@ -17,25 +17,19 @@
 
 
 use itertools::{izip, Itertools};
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use sha2::Sha256;
+use rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}};
 
 use crate::{
-    aes::GF8InvBlackBox,
-    chida::{self, ChidaParty},
-    network::{task::IoLayerOwned, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox, MainParty, MulTripleRecorder, NoMulTripleRecording, Party},
-    share::{
+    aes::GF8InvBlackBox, chida::{self, ChidaParty}, share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-        Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec,
-    },
-    wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4},
+        Field,
+    }, util::{mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording}, ArithmeticBlackBox}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}
 };
 
 /// The party wrapper for the GF4 circuit protocol.
@@ -51,20 +45,14 @@ impl GF4CircuitSemihonestParty {
     }
 }
 
-impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty {
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.0.pre_processing(n_multiplications)
+        <ChidaParty as ArithmeticBlackBox<F>>::pre_processing(&mut self.0, n_multiplications)
     }
 
     fn io(&self) -> &IoLayerOwned {
-        self.0.io()
+        <ChidaParty as ArithmeticBlackBox<F>>::io(&self.0)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -104,7 +92,7 @@ where
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.0.finalize()
+        <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.0)
     }
 }
 
@@ -354,14 +342,12 @@ fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
 mod test {
     use std::thread::JoinHandle;
 
-    use crate::{
-        aes::test::{
+    use rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
+
+    use crate::aes::test::{
             test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
             test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
-        },
-        network::ConnectedParty,
-        party::test::{localhost_connect, TestSetup},
-    };
+        };
 
     use super::GF4CircuitSemihonestParty;
 
