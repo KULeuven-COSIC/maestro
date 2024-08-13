@@ -1,7 +1,7 @@
 use itertools::izip;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::{furukawa, share::{gf4::BsGF4, Field}, util::mul_triple_vec::{MulTripleRecorder, MulTripleVector}, wollut16_malsec};
+use crate::{furukawa, share::{gf4::BsGF4, Field}, util::mul_triple_vec::{BsGF4Encoder, MulTripleRecorder, MulTripleVector}, wollut16_malsec};
 use rep3_core::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}};
 
 
@@ -16,9 +16,9 @@ pub fn prepare_beaver_triples_recursive_check(party: &mut MainParty, dst: &mut M
     
     // now check them
     let res = if party.has_multi_threading() {
-        wollut16_malsec::mult_verification::verify_multiplication_triples_mt(party, context, dst, &mut MulTripleVector::new(), &mut MulTripleVector::new(), true)
+        wollut16_malsec::mult_verification::verify_multiplication_triples_mt(party, context, &mut [&mut BsGF4Encoder(dst)], true)
     }else{
-        wollut16_malsec::mult_verification::verify_multiplication_triples(party, context, dst, &mut MulTripleVector::new(), &mut MulTripleVector::new(), true)
+        wollut16_malsec::mult_verification::verify_multiplication_triples(party, context, &mut [&mut BsGF4Encoder(dst)], true)
     };
     match res {
         Ok(true) => {

@@ -17,7 +17,7 @@
 use std::time::Instant;
 
 use crate::{
-    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16::RndOhvOutput
+    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16::RndOhvOutput
 };
 use rep3_core::{
     network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare
@@ -76,9 +76,9 @@ impl WL16ASParty {
     fn verify_multiplications(&mut self) -> MpcResult<()> {
         let t = Instant::now();
         let res = if self.inner.has_multi_threading() {
-            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check, false)
+            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check)], false)
         }else{
-            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut self.gf2_triples_to_check, &mut self.gf64_triples_to_check, false)
+            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check)], false)
         };
         match res {
             Ok(true) => {

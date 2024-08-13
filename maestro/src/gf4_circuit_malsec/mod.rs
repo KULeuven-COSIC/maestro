@@ -1,6 +1,6 @@
 
 use rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare};
-use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, share::{gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
+use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, share::{gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsGF4Encoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
 
 mod offline;
 
@@ -38,9 +38,9 @@ impl GF4CircuitASParty {
             match self.check_type {
                 MultCheckType::Recursive { .. } => {
                     let res = if self.inner.has_multi_threading() {
-                        wollut16_malsec::mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut MulTripleVector::new(), &mut MulTripleVector::new(), false)
+                        wollut16_malsec::mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check)], false)
                     }else{
-                        wollut16_malsec::mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut self.gf4_triples_to_check, &mut MulTripleVector::new(), &mut MulTripleVector::new(), false)
+                        wollut16_malsec::mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check)], false)
                     };
                     match res {
                         Ok(true) => Ok(()),

@@ -20,7 +20,7 @@ use rayon::{
 use rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, ThreadParty}, share::{RssShare, RssShareVec}};
 
 use crate::{
-    aes::GF8InvBlackBox, chida, share::{gf2p64::GF2p64Subfield, gf8::GF8, Field}, util::{mul_triple_vec::{MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec
+    aes::GF8InvBlackBox, chida, share::{gf2p64::GF2p64Subfield, gf8::GF8, Field}, util::{mul_triple_vec::{GF2p64SubfieldEncoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec
 };
 
 pub mod offline;
@@ -172,9 +172,9 @@ impl<F: Field + DigestExt + Sync + Send + GF2p64Subfield> FurukawaParty<F> {
         println!("Verifying multiplications");
         let mut context = BroadcastContext::new();
         let err = if self.inner.has_multi_threading() && self.triples_to_check.len() > self.inner.num_worker_threads() {
-            wollut16_malsec::mult_verification::verify_multiplication_gf_triples_mt(&mut self.inner, &mut context, &mut self.triples_to_check, false)
+            wollut16_malsec::mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut context, &mut [&mut GF2p64SubfieldEncoder(&mut self.triples_to_check)], false)
         }else {
-            wollut16_malsec::mult_verification::verify_multiplication_gf_triples(&mut self.inner, &mut context, &mut self.triples_to_check, false)
+            wollut16_malsec::mult_verification::verify_multiplication_triples(&mut self.inner, &mut context, &mut [&mut GF2p64SubfieldEncoder(&mut self.triples_to_check)], false)
         };
         match err {
             Ok(true) => {
