@@ -17,7 +17,7 @@
 use std::time::Instant;
 
 use crate::{
-    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16::RndOhvOutput
+    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16::RndOhvOutput
 };
 use rep3_core::{
     network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare
@@ -34,24 +34,28 @@ pub struct WL16ASParty{
     check_after_prep: bool,
     check_after_sbox: bool,
     use_bitstring_check: bool,
+    use_gf4p4_check: bool, // whether to use the trick to check 3 multiplications at once during the online phase
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<BsGF4>,
     gf2_triples_to_check: MulTripleVector<BsBool16>,
     gf64_triples_to_check: MulTripleVector<GF2p64>,
+    gf4p4_triples_to_check: GF4p4TripleVector,
     broadcast_context: BroadcastContext,
 }
 
 impl WL16ASParty {
-    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, use_bitstring_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, use_bitstring_check: bool, use_gf4p4_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             check_after_prep,
             check_after_sbox,
             use_bitstring_check,
+            use_gf4p4_check,
             gf4_triples_to_check: MulTripleVector::new(),
             gf2_triples_to_check: MulTripleVector::new(),
             gf64_triples_to_check: MulTripleVector::new(),
+            gf4p4_triples_to_check: GF4p4TripleVector::new(),
             broadcast_context: BroadcastContext::new(),
         })
     }
@@ -76,9 +80,9 @@ impl WL16ASParty {
     fn verify_multiplications(&mut self) -> MpcResult<()> {
         let t = Instant::now();
         let res = if self.inner.has_multi_threading() {
-            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check)], false)
+            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check), &mut GF4p4TripleEncoder(&mut self.gf4p4_triples_to_check)], false)
         }else{
-            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check)], false)
+            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check), &mut GF4p4TripleEncoder(&mut self.gf4p4_triples_to_check)], false)
         };
         match res {
             Ok(true) => {
@@ -162,10 +166,17 @@ impl GF8InvBlackBox for WL16ASParty {
         self.prepare_rand_ohv(n_rnd_ohv + n_rnd_ohv_ks)?;
         
 
-        let n_mul_ks = (4 * 10 * n_keys * 3)/2; // 4 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
-        let n_mul = (16 * 10 * n_blocks * 3)/2; // 16 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
-        // allocate more memory for triples
-        self.gf4_triples_to_check.reserve_for_more_triples(n_mul_ks + n_mul);
+        if self.use_gf4p4_check {
+            let n_mul_ks = (4 * 10 * n_keys)/2; // 4 S-boxes per round, 10 rounds, 1 mult. per S-box (but 2 GF4 elements are packed together)
+            let n_mul = (16 * 10 * n_blocks)/2; // 16 S-boxes per round, 10 rounds, 1 mult. per S-box (but 2 GF4 elements are packed together)
+            // allocate more memory for triples
+            self.gf4p4_triples_to_check.reserve_for_more_triples(n_mul_ks + n_mul);
+        }else{
+            let n_mul_ks = (4 * 10 * n_keys * 3)/2; // 4 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
+            let n_mul = (16 * 10 * n_blocks * 3)/2; // 16 S-boxes per round, 10 rounds, 3 mult. per S-box (but 2 GF4 elements are packed together)
+            // allocate more memory for triples
+            self.gf4_triples_to_check.reserve_for_more_triples(n_mul_ks + n_mul);
+        }
         Ok(())
     }
 
@@ -176,9 +187,17 @@ impl GF8InvBlackBox for WL16ASParty {
         }
         let remainning = self.prep_ohv.len() - si.len();
         if self.inner.has_multi_threading() && self.inner.num_worker_threads() <= si.len() {
-            online::gf8_inv_layer_mt(&mut self.inner, &mut self.gf4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?
+            if self.use_gf4p4_check {
+                online::gf8_inv_layer_gf4p4_check_mt(&mut self.inner, &mut self.gf4p4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?    
+            }else{
+                online::gf8_inv_layer_mt(&mut self.inner, &mut self.gf4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?
+            }
         }else{
-            online::gf8_inv_layer(&mut self.inner, &mut self.gf4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?
+            if self.use_gf4p4_check {
+                online::gf8_inv_layer_gf4p4_check(&mut self.inner, &mut self.gf4p4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?
+            }else{
+                online::gf8_inv_layer(&mut self.inner, &mut self.gf4_triples_to_check, si, sii, &self.prep_ohv[remainning..])?
+            }            
         }
         // remove used pre-processing material
         self.prep_ohv.truncate(remainning);
@@ -196,7 +215,7 @@ impl GF8InvBlackBox for WL16ASParty {
 
 #[cfg(test)]
 mod test {
-    use std::thread::JoinHandle;
+    use std::{marker::PhantomData, thread::JoinHandle};
 
     use rep3_core::{
         network::ConnectedParty,
@@ -205,24 +224,55 @@ mod test {
 
     use super::WL16ASParty;
 
-    pub fn localhost_setup_wl16as<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,WL16ASParty)>, JoinHandle<(T2,WL16ASParty)>, JoinHandle<(T3,WL16ASParty)>) {
-        fn adapter<T, Fx: FnOnce(&mut WL16ASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16ASParty) {
-            let mut party = WL16ASParty::setup(conn, false, false, false, n_worker_threads).unwrap();
+    pub trait WL16Params {
+        const CHECK_AFTER_PREP: bool;
+        const CHECK_AFTER_SBOX: bool;
+        const BIT_STRING_CHECK: bool;
+        const GF4P4_CHECK: bool;
+    }
+
+    pub struct WL16DefaultParams;
+    impl WL16Params for WL16DefaultParams {
+        const CHECK_AFTER_PREP: bool = false;
+        const CHECK_AFTER_SBOX: bool = false;
+        const BIT_STRING_CHECK: bool = false;
+        const GF4P4_CHECK: bool = false;
+    }
+
+    pub struct WL16BitString;
+    impl WL16Params for WL16BitString {
+        const CHECK_AFTER_PREP: bool = false;
+        const CHECK_AFTER_SBOX: bool = false;
+        const BIT_STRING_CHECK: bool = true;
+        const GF4P4_CHECK: bool = false;
+    }
+
+    pub struct WL16GF4p4Check;
+    impl WL16Params for WL16GF4p4Check {
+        const CHECK_AFTER_PREP: bool = false;
+        const CHECK_AFTER_SBOX: bool = false;
+        const BIT_STRING_CHECK: bool = false;
+        const GF4P4_CHECK: bool = true;
+    }
+
+    pub fn localhost_setup_wl16as<P: WL16Params, T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> (JoinHandle<(T1,WL16ASParty)>, JoinHandle<(T2,WL16ASParty)>, JoinHandle<(T3,WL16ASParty)>) {
+        fn adapter<P: WL16Params, T, Fx: FnOnce(&mut WL16ASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16ASParty) {
+            let mut party = WL16ASParty::setup(conn, P::CHECK_AFTER_PREP, P::CHECK_AFTER_SBOX, P::BIT_STRING_CHECK, P::GF4P4_CHECK, n_worker_threads).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();
             (t, party)
         }
-        localhost_connect(move |conn_party| adapter(conn_party, f1, n_worker_threads), move |conn_party| adapter(conn_party, f2, n_worker_threads), move |conn_party| adapter(conn_party, f3, n_worker_threads))
+        localhost_connect(move |conn_party| adapter::<P,_,_>(conn_party, f1, n_worker_threads), move |conn_party| adapter::<P,_,_>(conn_party, f2, n_worker_threads), move |conn_party| adapter::<P,_,_>(conn_party, f3, n_worker_threads))
     }
 
-    pub struct WL16ASSetup;
-    impl TestSetup<WL16ASParty> for WL16ASSetup {
+    pub struct WL16ASSetup<Params: WL16Params>(PhantomData<Params>);
+    impl<Params: WL16Params> TestSetup<WL16ASParty> for WL16ASSetup<Params> {
         fn localhost_setup<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3) -> (std::thread::JoinHandle<(T1,WL16ASParty)>, std::thread::JoinHandle<(T2,WL16ASParty)>, std::thread::JoinHandle<(T3,WL16ASParty)>) {
-            localhost_setup_wl16as(f1, f2, f3, None)
+            localhost_setup_wl16as::<Params, _, _, _, _, _, _>(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<T1: Send + 'static, F1: Send + FnOnce(&mut WL16ASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut WL16ASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut WL16ASParty) -> T3 + 'static>(n_threads: usize, f1: F1, f2: F2, f3: F3) -> (JoinHandle<(T1,WL16ASParty)>, JoinHandle<(T2,WL16ASParty)>, JoinHandle<(T3,WL16ASParty)>) {
-            localhost_setup_wl16as(f1, f2, f3, Some(n_threads))
+            localhost_setup_wl16as::<Params, _, _, _, _, _, _>(f1, f2, f3, Some(n_threads))
         }
     }
 }

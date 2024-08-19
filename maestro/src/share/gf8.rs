@@ -17,7 +17,7 @@ use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
-/// An element of `GF(2^8) := GF(2)[X] / `.
+/// An element of `GF(2^8) := GF(2)[X] / X^8 + X^4 + X^3 + X + 1`.
 ///
 /// An element is represented as a single byte.
 #[derive(Copy, Clone, Default, PartialEq)]

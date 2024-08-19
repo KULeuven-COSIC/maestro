@@ -1,7 +1,7 @@
-use itertools::izip;
+use itertools::{izip, Itertools};
 use rep3_core::share::{HasZero, RssShare};
 
-use crate::share::{bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field};
+use crate::share::{bs_bool16::BsBool16, gf2p64::{embed_gf4p4_deg2, embed_gf4p4_deg3, GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field};
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
 pub trait MulTripleRecorder<F: Field> {
@@ -380,11 +380,201 @@ impl<'a> MulTripleEncoder for BsGF4Encoder<'a> {
     mul_triple_encoder_impl!(encode_bsgf4, 2);
 }
 
+pub trait GF4p4TripleRecorder {
+    /// Records multiplication triples: (x0 + x1 * alpha) * (y0 + y1 * alpha) = z0 + (z1 * alpha) + (z2 * alpha^2)
+    /// where x0, x1, y0, y1, z0, z1, z2 are elements in (2,3) shares in [GF4].
+    fn record_mul_triple(&mut self, x0_i: BsGF4, x0_ii: BsGF4, x1_i: BsGF4, x1_ii: BsGF4, y0_i: BsGF4, y0_ii: BsGF4, y1_i: BsGF4, y1_ii: BsGF4, z0_i: BsGF4, z0_ii: BsGF4, z1_i: BsGF4, z1_ii: BsGF4, z2_i: BsGF4, z2_ii: BsGF4);
+}
+
+/// Records multiplication triples: (x0 + x1 * alpha) * (y0 + y1 * alpha) = z0 + (z1 * alpha) + (z2 * alpha^2)
+/// where x0, x1, y0, y1, z0, z1, z2 are elements in (2,3) shares in [GF4].
+pub struct GF4p4TripleVector {
+    a: Vec<RssShare<GF2p64>>,
+    b: Vec<RssShare<GF2p64>>,
+    c: Vec<RssShare<GF2p64>>,
+}
+
+impl GF4p4TripleVector {
+    pub fn new() -> Self {
+        Self {
+            a: Vec::new(),
+            b: Vec::new(),
+            c: Vec::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.a.len()
+    }
+
+    pub fn reserve_for_more_triples(&mut self, n: usize) {
+        self.a.reserve_exact(n);
+        self.b.reserve_exact(n);
+        self.c.reserve_exact(n);
+    }
+
+    pub fn clear(&mut self) {
+        self.a.clear();
+        self.b.clear();
+        self.c.clear();
+    }
+
+    pub fn create_thread_mul_triple_recorders(&mut self, task_sizes: &[usize]) -> Vec<GF4P4TripleVectorChild> {
+        let total_range = task_sizes.iter().sum();
+        // get a slice of total_range elements
+        self.a.append(&mut vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); total_range]);
+        self.b.append(&mut vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); total_range]);
+        self.c.append(&mut vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); total_range]);
+
+        let len = self.a.len();
+
+        let mut a_slice = &mut self.a[len-total_range..];
+        let mut b_slice = &mut self.b[len-total_range..];
+        let mut c_slice = &mut self.c[len-total_range..];
+
+        let mut res = Vec::new();
+        for len in task_sizes {
+            let (front_a, back_a) = a_slice.split_at_mut(*len);
+            a_slice = back_a;
+            let (front_b, back_b) = b_slice.split_at_mut(*len);
+            b_slice = back_b;
+            let (front_c, back_c) = c_slice.split_at_mut(*len);
+            c_slice = back_c;
+            res.push(GF4P4TripleVectorChild::new(front_a, front_b, front_c));
+        }
+        res
+    }
+}
+
+impl GF4p4TripleRecorder for GF4p4TripleVector {
+    /// Records multiplication triples: (x0 + x1 * alpha) * (y0 + y1 * alpha) = z0 + (z1 * alpha) + (z2 * alpha^2)
+    /// where x0, x1, y0, y1, z0, z1, z2 are elements in (2,3) shares in [GF4].
+    fn record_mul_triple(&mut self, x0_i: BsGF4, x0_ii: BsGF4, x1_i: BsGF4, x1_ii: BsGF4, y0_i: BsGF4, y0_ii: BsGF4, y1_i: BsGF4, y1_ii: BsGF4, z0_i: BsGF4, z0_ii: BsGF4, z1_i: BsGF4, z1_ii: BsGF4, z2_i: BsGF4, z2_ii: BsGF4) {
+        let (x0_i_h, x0_i_l) = x0_i.unpack();
+        let (x0_ii_h, x0_ii_l) = x0_ii.unpack();
+        let (x1_i_h, x1_i_l) = x1_i.unpack();
+        let (x1_ii_h, x1_ii_l) = x1_ii.unpack();
+        self.a.push(RssShare::from(embed_gf4p4_deg2(x0_i_l, x1_i_l), embed_gf4p4_deg2(x0_ii_l, x1_ii_l)));
+        self.a.push(RssShare::from(embed_gf4p4_deg2(x0_i_h, x1_i_h), embed_gf4p4_deg2(x0_ii_h, x1_ii_h)));
+
+        let (y0_i_h, y0_i_l) = y0_i.unpack();
+        let (y0_ii_h, y0_ii_l) = y0_ii.unpack();
+        let (y1_i_h, y1_i_l) = y1_i.unpack();
+        let (y1_ii_h, y1_ii_l) = y1_ii.unpack();
+        self.b.push(RssShare::from(embed_gf4p4_deg2(y0_i_l, y1_i_l), embed_gf4p4_deg2(y0_ii_l, y1_ii_l)));
+        self.b.push(RssShare::from(embed_gf4p4_deg2(y0_i_h, y1_i_h), embed_gf4p4_deg2(y0_ii_h, y1_ii_h)));
+
+        let (z0_i_h, z0_i_l) = z0_i.unpack();
+        let (z0_ii_h, z0_ii_l) = z0_ii.unpack();
+        let (z1_i_h, z1_i_l) = z1_i.unpack();
+        let (z1_ii_h, z1_ii_l) = z1_ii.unpack();
+        let (z2_i_h, z2_i_l) = z2_i.unpack();
+        let (z2_ii_h, z2_ii_l) = z2_ii.unpack();
+        self.c.push(RssShare::from(embed_gf4p4_deg3(z0_i_l, z1_i_l, z2_i_l), embed_gf4p4_deg3(z0_ii_l, z1_ii_l, z2_ii_l)));
+        self.c.push(RssShare::from(embed_gf4p4_deg3(z0_i_h, z1_i_h, z2_i_h), embed_gf4p4_deg3(z0_ii_h, z1_ii_h, z2_ii_h)));
+    }
+}
+
+pub struct GF4P4TripleVectorChild<'a>{
+    a: &'a mut [RssShare<GF2p64>],
+    b: &'a mut [RssShare<GF2p64>],
+    c: &'a mut [RssShare<GF2p64>],
+    idx: usize,
+}
+
+impl<'a> GF4P4TripleVectorChild<'a> {
+    fn new(a: &'a mut [RssShare<GF2p64>], b: &'a mut [RssShare<GF2p64>], c: &'a mut [RssShare<GF2p64>]) -> Self {
+        Self { a, b, c, idx: 0 }
+    }
+}
+
+impl<'a> GF4p4TripleRecorder for GF4P4TripleVectorChild<'a> {
+    /// Records multiplication triples: (x0 + x1 * alpha) * (y0 + y1 * alpha) = z0 + (z1 * alpha) + (z2 * alpha^2)
+    /// where x0, x1, y0, y1, z0, z1, z2 are elements in (2,3) shares in [GF4].
+    fn record_mul_triple(&mut self, x0_i: BsGF4, x0_ii: BsGF4, x1_i: BsGF4, x1_ii: BsGF4, y0_i: BsGF4, y0_ii: BsGF4, y1_i: BsGF4, y1_ii: BsGF4, z0_i: BsGF4, z0_ii: BsGF4, z1_i: BsGF4, z1_ii: BsGF4, z2_i: BsGF4, z2_ii: BsGF4) {
+        let (x0_i_h, x0_i_l) = x0_i.unpack();
+        let (x0_ii_h, x0_ii_l) = x0_ii.unpack();
+        let (x1_i_h, x1_i_l) = x1_i.unpack();
+        let (x1_ii_h, x1_ii_l) = x1_ii.unpack();
+        self.a[self.idx] = RssShare::from(embed_gf4p4_deg2(x0_i_l, x1_i_l), embed_gf4p4_deg2(x0_ii_l, x1_ii_l));
+        self.a[self.idx+1] = RssShare::from(embed_gf4p4_deg2(x0_i_h, x1_i_h), embed_gf4p4_deg2(x0_ii_h, x1_ii_h));
+
+        let (y0_i_h, y0_i_l) = y0_i.unpack();
+        let (y0_ii_h, y0_ii_l) = y0_ii.unpack();
+        let (y1_i_h, y1_i_l) = y1_i.unpack();
+        let (y1_ii_h, y1_ii_l) = y1_ii.unpack();
+        self.b[self.idx] = RssShare::from(embed_gf4p4_deg2(y0_i_l, y1_i_l), embed_gf4p4_deg2(y0_ii_l, y1_ii_l));
+        self.b[self.idx+1] = RssShare::from(embed_gf4p4_deg2(y0_i_h, y1_i_h), embed_gf4p4_deg2(y0_ii_h, y1_ii_h));
+
+        let (z0_i_h, z0_i_l) = z0_i.unpack();
+        let (z0_ii_h, z0_ii_l) = z0_ii.unpack();
+        let (z1_i_h, z1_i_l) = z1_i.unpack();
+        let (z1_ii_h, z1_ii_l) = z1_ii.unpack();
+        let (z2_i_h, z2_i_l) = z2_i.unpack();
+        let (z2_ii_h, z2_ii_l) = z2_ii.unpack();
+        self.c[self.idx] = RssShare::from(embed_gf4p4_deg3(z0_i_l, z1_i_l, z2_i_l), embed_gf4p4_deg3(z0_ii_l, z1_ii_l, z2_ii_l));
+        self.c[self.idx+1] = RssShare::from(embed_gf4p4_deg3(z0_i_h, z1_i_h, z2_i_h), embed_gf4p4_deg3(z0_ii_h, z1_ii_h, z2_ii_h));
+        self.idx += 2;
+    }
+}
+
+pub struct GF4p4TripleEncoder<'a>(pub &'a mut GF4p4TripleVector);
+
+/// Encodes multiplication triples: (x0 + x1 * alpha) * (y0 + y1 * alpha) = z0 + (z1 * alpha) + (z2 * alpha^2)
+/// where x0, x1, y0, y1, z0, z1, z2 are elements in (2,3) shares in [GF4].
+impl<'a> MulTripleEncoder for GF4p4TripleEncoder<'a> {
+    fn len_triples_in(&self) -> usize {
+        self.0.len()
+    }
+
+    fn len_triples_out(&self) -> usize {
+        self.0.len()
+    }
+
+    fn add_triples(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], zi: &mut GF2p64InnerProd, zii: &mut GF2p64InnerProd, weight: &mut GF2p64, rand: GF2p64) {
+        let mut local_weight = *weight;
+        x.copy_from_slice(&self.0.a);
+        y.copy_from_slice(&self.0.b);
+        izip!(x.iter_mut(), self.0.c.iter()).for_each(|(xi, c)| {
+            *xi = *xi * local_weight;
+            zi.add_prod(&c.si, &local_weight);
+            zii.add_prod(&c.sii, &local_weight);
+            local_weight *= rand;
+        });
+    }
+
+    fn add_triples_par(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], z: &mut RssShare<GF2p64>, weight: GF2p64, rand: &[GF2p64], chunk_size: usize) {
+        x.copy_from_slice(&self.0.a);
+        y.copy_from_slice(&self.0.b);
+        let zvec: Vec<RssShare<GF2p64>> = x.par_chunks_exact_mut(chunk_size)
+            .zip_eq(self.0.c.par_chunks_exact_mut(chunk_size))
+            .zip_eq(rand)
+            .map(|((x_chunk, c_chunk), r)| {
+                let mut local_weight = weight;
+                let mut zi = GF2p64InnerProd::new();
+                let mut zii = GF2p64InnerProd::new();
+                x_chunk.iter_mut().zip_eq(c_chunk).for_each(|(xi, ci)| {
+                    *xi = *xi * local_weight;
+                    zi.add_prod(&ci.si, &local_weight);
+                    zii.add_prod(&ci.sii, &local_weight);
+                    local_weight *= *r;
+                });
+                RssShare::from(zi.sum(), zii.sum())
+            }).collect();
+        zvec.into_iter().for_each(|zi| *z = *z + zi);
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use itertools::Itertools;
-    use rep3_core::share::HasZero;
-    use crate::{share::{bs_bool16::BsBool16, gf2p64::GF2p64, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleVector}};
+    use itertools::{izip, Itertools};
+    use rand::thread_rng;
+    use rep3_core::{party::RngExt, share::HasZero};
+    use crate::{share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, GF4p4TripleRecorder, GF4p4TripleVector, MulTripleVector}};
 
 
     #[test]
@@ -568,5 +758,30 @@ mod test {
             assert_eq!(rec.ci[i], GF2p64::ZERO);
             assert_eq!(rec.cii[i], GF2p64::ZERO);
         }
+    }
+
+    #[test]
+    fn record_gf4p4_triple() {
+        const N: usize = 100;
+        let mut rng = thread_rng();
+        let a = BsGF4::generate(&mut rng, N);
+        let b = BsGF4::generate(&mut rng, N);
+        let c = BsGF4::generate(&mut rng, N);
+        let d = BsGF4::generate(&mut rng, N);
+        let mut rec = GF4p4TripleVector::new();
+        rec.reserve_for_more_triples(2*N);
+        izip!(a,b,c,d).for_each(|(a,b,c,d)| {
+            // test correct multiplication
+            //(a + b*alpha) * (c + d*alpha) = a*c + (a*d + b*c)*alpha + b*d*alpha^2
+            rec.record_mul_triple(a, BsGF4::ZERO, b, BsGF4::ZERO, c, BsGF4::ZERO, d, BsGF4::ZERO, a*c, BsGF4::ZERO, a*d + b*c, BsGF4::ZERO, b*d, BsGF4::ZERO);
+        });
+
+        debug_assert_eq!(rec.a.len(), 2*N);
+        debug_assert_eq!(rec.b.len(), 2*N);
+        debug_assert_eq!(rec.c.len(), 2*N);
+
+        izip!(rec.a, rec.b, rec.c).for_each(|(a, b, c)| {
+            assert_eq!(c.si, a.si * b.si);
+        })
     }
 }

@@ -429,7 +429,7 @@ mod test {
         share::{
             bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, InnerProduct
         }, util::mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF2p64SubfieldEncoder, MulTripleRecorder, MulTripleVector}, wollut16_malsec::{
-            mult_verification::{verify_dot_product_opt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::localhost_setup_wl16as,
+            mult_verification::{verify_dot_product_opt, verify_multiplication_triples, verify_multiplication_triples_mt}, test::{localhost_setup_wl16as, WL16DefaultParams},
             WL16ASParty,
         }
     };
@@ -507,7 +507,7 @@ mod test {
             |h0: RssShare<GF2p64>, h1: RssShare<GF2p64>, h2: RssShare<GF2p64>, x: GF2p64| {
                 move |_p: &mut WL16ASParty| lagrange_deg2(&h0, &h1, &h2, x)
             };
-        let (h1, h2, h3) = localhost_setup_wl16as(
+        let (h1, h2, h3) = localhost_setup_wl16as::<WL16DefaultParams, _, _, _, _, _, _>(
             program(h01, h11, h21, x),
             program(h02, h12, h22, x),
             program(h03, h13, h23, x),

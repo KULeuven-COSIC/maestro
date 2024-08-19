@@ -25,7 +25,7 @@ pub fn generate_random_ohv16_mt(party: &mut WL16ASParty, n: usize, use_bitstring
 mod test {
     use rep3_core::test::TestSetup;
 
-    use crate::{wollut16::offline::test::check_correct_rnd_ohv16, wollut16_malsec::{offline::{generate_random_ohv16, generate_random_ohv16_mt}, test::WL16ASSetup, WL16ASParty}};
+    use crate::{wollut16::offline::test::check_correct_rnd_ohv16, wollut16_malsec::{offline::{generate_random_ohv16, generate_random_ohv16_mt}, test::{WL16ASSetup, WL16BitString, WL16DefaultParams}, WL16ASParty}};
 
 
     #[test]
@@ -40,7 +40,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::localhost_setup(program(), program(), program());
+        let (h1,h2,h3) = WL16ASSetup::<WL16DefaultParams>::localhost_setup(program(), program(), program());
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -64,7 +64,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::localhost_setup_multithreads(N_THREADS, program(), program(), program());
+        let (h1,h2,h3) = WL16ASSetup::<WL16DefaultParams>::localhost_setup_multithreads(N_THREADS, program(), program(), program());
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -86,7 +86,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::localhost_setup(program(), program(), program());
+        let (h1,h2,h3) = WL16ASSetup::<WL16BitString>::localhost_setup(program(), program(), program());
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();
@@ -110,7 +110,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::localhost_setup_multithreads(N_THREADS, program(), program(), program());
+        let (h1,h2,h3) = WL16ASSetup::<WL16BitString>::localhost_setup_multithreads(N_THREADS, program(), program(), program());
         let (o1, _) = h1.join().unwrap();
         let (o2, _) = h2.join().unwrap();
         let (o3, _) = h3.join().unwrap();

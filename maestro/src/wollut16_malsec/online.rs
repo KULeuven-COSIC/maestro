@@ -9,7 +9,7 @@ use crate::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-    }, util::mul_triple_vec::MulTripleRecorder, wollut16::{RndOhv16, RndOhvOutput}
+    }, util::mul_triple_vec::{GF4p4TripleRecorder, GF4p4TripleVector, MulTripleRecorder}, wollut16::{RndOhv16, RndOhvOutput}
 };
 
 use rep3_core::{
@@ -125,6 +125,104 @@ pub fn gf8_inv_layer_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, tr
     })?;
     // add observed triples
     triple_rec.join_thread_mul_triple_recorders(observed_triples);
+    Ok(())
+}
+
+/// This protocol implements multiplicative inversion as in `Protocol 3` with reduced number of multiplication checks.
+///
+/// Given a (2,3)-RSS shared vector `[[x]]`` of elements in `GF(2^8)`,
+/// the protocol computes the component-wise multiplicative inverse.
+///
+/// The function inputs are:
+/// - `party` - the local [WL16ASParty] `P_i`
+/// - `si` - the first component of `[[x]]_i`
+/// - `sii` - the second component of `[[x]]_i`
+///
+/// The output, the share `[[x^-1]]_i`, is written into `(s_i,s_ii)`.
+pub fn gf8_inv_layer_gf4p4_check<P: Party, Rec: GF4p4TripleRecorder>(party: &mut P, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+    debug_assert_eq!(si.len(), sii.len());
+    // Step 1 WOL conversion
+    let (ah_i, al_i) = wol_bitslice_gf4(si);
+    let (ah_ii, al_ii) = wol_bitslice_gf4(sii);
+    // Step 3 Compute v
+    let mut v: Vec<_> = izip!(ah_i.iter(), ah_ii.iter(), al_i.iter(), al_ii.iter())
+        .map(|(ahi, ahii, ali, alii)| {
+            let e_mul_ah2 = ahi.square_mul_e();
+            let al2 = ali.square();
+            let ah_mul_al = (*ahi * *ali) + (*ahi + *ahii) * (*ali + *alii);
+            e_mul_ah2 + al2 + ah_mul_al
+        })
+        .collect();
+    // Step 4 LUT Layer
+    let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v.clone(), rnd_ohv)?;
+    // Step 5 local multiplication
+    let mut ah_prime: Vec<_> = izip!(ah_i.iter(), ah_ii.iter(), v_inv_i.iter(), v_inv_ii.iter())
+        .map(|(ahi, ahii, vinvi, vinvii)| (*ahi * *vinvi) + (*ahi + *ahii) * (*vinvi + *vinvii))
+        .collect();
+    let mut al_prime: Vec<_> = izip!(
+        ah_i.iter(),
+        ah_ii.iter(),
+        al_i.iter(),
+        al_ii.iter(),
+        v_inv_i.iter(),
+        v_inv_ii.iter()
+    )
+    .map(|(ahi, ahii, ali, alii, vinvi, vinvii)| {
+        let ah_plus_al_i = *ahi + *ali;
+        let ah_plus_al_ii = *ahii + *alii;
+        (ah_plus_al_i * *vinvi) + (ah_plus_al_i + ah_plus_al_ii) * (*vinvi + *vinvii)
+    })
+    .collect();
+    // Step 6 Resharing
+    let mut v_ii = vec![BsGF4::ZERO; v.len()];
+    let mut ah_prime_ii = vec![BsGF4::ZERO; v.len()];
+    let mut al_prime_ii = vec![BsGF4::ZERO; v.len()];
+    ss_to_rss_layer(
+        party,
+        &mut v,
+        &mut v_ii,
+        &mut ah_prime,
+        &mut ah_prime_ii,
+        &mut al_prime,
+        &mut al_prime_ii,
+    )?;
+
+    // Step 7 Preparation for multiplication triples for verification
+    izip!(v, v_ii, ah_i, ah_ii, al_i, al_ii, v_inv_i, v_inv_ii, ah_prime.iter(), ah_prime_ii.iter(), al_prime.iter(), al_prime_ii.iter())
+        .for_each(|(vi, vii, ahi, ahii, ali, alii, v_invi, v_invii, ah_prime_i, ah_prime_ii, al_prime_i, al_prime_ii)| {
+            // Compute [a_h * a_l] := [v] + (e * a_h^2) + a_l^2
+            let ah_times_al_i = vi + ahi.square_mul_e() + ali.square();
+            let ah_times_al_ii = vii + ahii.square_mul_e() + alii.square();
+
+            // Store ([ah] + alpha*[al]) * ([al] + alpha*[v_inv]) = [ah * al] + alpha*[ah' + al^2] + alpha^2 * [al' + ah']
+            triple_rec.record_mul_triple(ahi, ahii, ali, alii, ali, alii, v_invi, v_invii, ah_times_al_i, ah_times_al_ii, *ah_prime_i + ali.square(), *ah_prime_ii + alii.square(), *al_prime_i + *ah_prime_i, *al_prime_ii + *ah_prime_ii);
+    });
+    
+    // Step 8 WOL-inv conversion
+    un_wol_bitslice_gf4(&ah_prime, &al_prime, si);
+    un_wol_bitslice_gf4(&ah_prime_ii, &al_prime_ii, sii);
+    Ok(())
+}
+
+pub fn gf8_inv_layer_gf4p4_check_mt(party: &mut MainParty, triple_rec: &mut GF4p4TripleVector, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+    debug_assert_eq!(si.len(), sii.len());
+    debug_assert_eq!(rnd_ohv.len(), si.len());
+    
+    let ranges = party.split_range_equally_even(si.len());
+    let mul_triple_lengths = ranges.iter().map(|(start, end)| (end-start)).collect_vec();
+    let recorders = triple_rec.create_thread_mul_triple_recorders(&mul_triple_lengths);
+    let chunk_size = ranges[0].1 - ranges[0].0;
+    let mut threads = party.create_thread_parties_with_additional_data(ranges, |_, _| None);
+    threads.iter_mut().zip_eq(recorders).for_each(|(tp, rec)| tp.additional_data = Some(rec));
+
+    
+    party.run_in_threadpool(|| {
+        threads.into_par_iter().zip_eq(si.par_chunks_mut(chunk_size)).zip_eq(sii.par_chunks_mut(chunk_size)).zip_eq(rnd_ohv.par_chunks(chunk_size))
+            .map(|(((mut thread_party, si), sii), prep_ohv)| {
+                let mut triple_rec = thread_party.additional_data.take().unwrap();
+                gf8_inv_layer_gf4p4_check(&mut thread_party, &mut triple_rec, si, sii, prep_ohv)
+        }).collect::<MpcResult<()>>()
+    })?;
     Ok(())
 }
 
@@ -307,44 +405,55 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
 
 #[cfg(test)]
 mod test {
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::WL16ASSetup};
+    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::{WL16ASSetup, WL16DefaultParams, WL16GF4p4Check}};
 
 
     #[test]
     fn sub_bytes() {
-        test_sub_bytes::<WL16ASSetup,_>(None)
+        test_sub_bytes::<WL16ASSetup::<WL16DefaultParams>,_>(None)
+    }
+
+    #[test]
+    fn sub_bytes_gf4p4_check() {
+        test_sub_bytes::<WL16ASSetup::<WL16GF4p4Check>,_>(None)
     }
 
     #[test]
     fn sub_bytes_mt() {
         const N_THREADS: usize = 3;
-        test_sub_bytes::<WL16ASSetup,_>(Some(N_THREADS))
+        test_sub_bytes::<WL16ASSetup::<WL16DefaultParams>,_>(Some(N_THREADS))
+    }
+
+    #[test]
+    fn sub_bytes_gf4p4_check_mt() {
+        const N_THREADS: usize = 3;
+        test_sub_bytes::<WL16ASSetup::<WL16GF4p4Check>,_>(Some(N_THREADS))
     }
 
     #[test]
     fn aes128_keyschedule() {
-        test_aes128_keyschedule_gf8::<WL16ASSetup, _>(None)
+        test_aes128_keyschedule_gf8::<WL16ASSetup::<WL16DefaultParams>, _>(None)
     }
 
     #[test]
     fn aes_128_no_keyschedule() {
-        test_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(1, None)
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16DefaultParams>, _>(1, None)
     }
 
     #[test]
     fn aes_128_no_keyschedule_mt() {
         const N_THREADS: usize = 3;
-        test_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(100, Some(N_THREADS))
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16DefaultParams>, _>(100, Some(N_THREADS))
     }
 
     #[test]
     fn inv_aes128_no_keyschedule() {
-        test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(1, None)
+        test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16DefaultParams>, _>(1, None)
     }
 
     #[test]
     fn inv_aes128_no_keyschedule_mt() {
         const N_THREADS: usize = 3;
-        test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup, _>(100, Some(N_THREADS))
+        test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16DefaultParams>, _>(100, Some(N_THREADS))
     }
 }

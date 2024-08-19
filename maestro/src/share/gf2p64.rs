@@ -826,6 +826,42 @@ impl GF2p64Subfield for GF4 {
     }
 }
 
+#[rustfmt::skip]
+const GF4_EXT_EB_TABLE0: [u64; 16] = [0x0000000000000000, 0x0000000000000001, 0xb848d14948d52b97, 0xb848d14948d52b96, 0xa181e7d66f5ff794, 0xa181e7d66f5ff795, 0x19c9369f278adc03, 0x19c9369f278adc02, 0x5db84357ce785d09, 0x5db84357ce785d08, 0xe5f0921e86ad769e, 0xe5f0921e86ad769f, 0xfc39a481a127aa9d, 0xfc39a481a127aa9c, 0x447175c8e9f2810a, 0x447175c8e9f2810b];
+#[rustfmt::skip]
+const GF4_EXT_EB_TABLE1: [u64; 16] = [0x0000000000000000, 0x14f1968d182dd50f, 0xe783b218b4f7828e, 0xf3722495acda5781, 0x425086d25fa48e9a, 0x56a1105f47895b95, 0xa5d334caeb530c14, 0xb122a247f37ed91b, 0x5176233df09ddbe4, 0x4587b5b0e8b00eeb, 0xb6f59125446a596a, 0xa20407a85c478c65, 0x1326a5efaf39557e, 0x07d73362b7148071, 0xf4a517f71bced7f0, 0xe054817a03e302ff];
+#[rustfmt::skip]
+const GF4_EXT_EB_TABLE2: [u64; 16] = [0x0000000000000000, 0x1bf7034c8bcbc73e, 0xbacfec5a0a44ed0d, 0xa138ef16818f2a33, 0x58d19564f7685dd5, 0x432696287ca39aeb, 0xe21e793efd2cb0d8, 0xf9e97a7276e777e6, 0xa6cb12e9ca5a79b5, 0xbd3c11a54191be8b, 0x1c04feb3c01e94b8, 0x07f3fdff4bd55386, 0xfe1a878d3d322460, 0xe5ed84c1b6f9e35e, 0x44d56bd73776c96d, 0x5f22689bbcbd0e53];
+// const GF4_EXT_EB_TABLE3: [u64; 16] = [0x0000000000000000, 0xa5d51fb65fe6c30e, 0xb9ddfd59eb0f5923, 0x1c08e2efb4e99a2d, 0xfaeb4e7aafdb3005, 0x5f3e51ccf03df30b, 0x4336b32344d46926, 0xe6e3ac951b32aa28, 0xf54ee43fdf842e10, 0x509bfb898062ed1e, 0x4c931966348b7733, 0xe94606d06b6db43d, 0x0fa5aa45705f1e15, 0xaa70b5f32fb9dd1b, 0xb678571c9b504736, 0x13ad48aac4b68438];
+
+/// Embeds a0 + a1 * alpha from the degree 4 extension GF(2^4) \[alpha\] / 2*alpha^4 + 2*alpha^2 + 4*alpha + 8
+/// into [GF2p64].
+pub fn embed_gf4p4_deg2(a0: GF4, a1: GF4) -> GF2p64 {
+    // the embedding is done in two steps (pre-computed in lookup tables)
+    // (1) compute the isomorphism from GF(2^4)^4 to GF(2^16)
+    // (2) embed GF(2^16) into a subgroup in GF(2^64) of the same size
+    //
+    // for (1), let x be the generator for GF(2^4), alpha be the generator for GF(2^4)^4 and y be the generator for GF(2^16), then
+    // the isomorphism psi maps x -> 1 + y + y^3 + y^4 and alpha -> 1 + y + y^2.
+    //
+    // the tables Ti are computed as follows: Ti[x0 + x1 * x + x2 * x^2 + x3 * x^3] = (x0 + x1 * psi(x) + x2 * psi(x)^2 + x3 * psi(x)^3) * psi(alpha)**i
+    // thus the isomorphism (a0 + a1 * alpha + a2 * alpha^2 + a3 * alpha^3) -> GF(2^16) can be computed using the tables as 
+    // T0[a0] + T1[a1] + T2[a2] + T3[a3]
+    // we only need at most deg3, so we omit T3
+    //
+    // for (2), the embedding is via u^56 + u^55 + u^54 + u^53 + u^51 + u^50 + u^48 + u^47 + u^46 + u^44 + u^43 + u^39 + u^37 + u^36 + u^34 + u^30 + u^29 + u^28 + u^23
+    // + u^22 + u^21 + u^20 + u^19 + u^18 + u^17 + u^16 + u^13 + u^12 + u^10 + u^9 + u^7 + u^6 + u^5 + u^4 + u^3 + u + 1
+    // where u is the generator of GF(2^64)
+    // each table entry is embedded already
+    GF2p64(GF4_EXT_EB_TABLE0[a0.as_u8() as usize] ^ GF4_EXT_EB_TABLE1[a1.as_u8() as usize])
+}
+
+/// Embeds a0 + a1 * alpha + a2 * alpha^2 from the degree 4 extension GF(2^4) \[alpha\] / 2* alpha^4 + 2*alpha^2 + 4*alpha + 8
+/// into [GF2p64].
+pub fn embed_gf4p4_deg3(a0: GF4, a1: GF4, a2: GF4) -> GF2p64 {
+    GF2p64(GF4_EXT_EB_TABLE0[a0.as_u8() as usize] ^ GF4_EXT_EB_TABLE1[a1.as_u8() as usize] ^ GF4_EXT_EB_TABLE2[a2.as_u8() as usize])
+}
+
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
