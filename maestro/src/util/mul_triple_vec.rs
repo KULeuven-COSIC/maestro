@@ -1,6 +1,6 @@
 use itertools::{izip, Itertools};
 use rep3_core::share::{HasZero, RssShare};
-
+use std::time::Instant;
 use crate::share::{bs_bool16::BsBool16, gf2p64::{embed_gf4p4_deg2, embed_gf4p4_deg3, GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field};
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
@@ -233,6 +233,7 @@ macro_rules! mul_triple_encoder_impl {
                 self.0.len() * $yield_size
             }
             fn add_triples(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], zi: &mut GF2p64InnerProd, zii: &mut GF2p64InnerProd, weight: &mut GF2p64, rand: GF2p64) {
+                let start = Instant::now();
                 let mut local_weight = *weight;
                 let mut encoded_c = [RssShare::from(GF2p64::ZERO, GF2p64::ZERO); $yield_size];
                 izip!(x.chunks_exact_mut($yield_size), y.chunks_exact_mut($yield_size), &self.0.ai, &self.0.aii, &self.0.bi, &self.0.bii, &self.0.ci, &self.0.cii)
@@ -246,6 +247,7 @@ macro_rules! mul_triple_encoder_impl {
                         }
                 });
                 *weight = local_weight;
+                println!("add_triples: {}s", start.elapsed().as_secs_f64());
             }
             fn add_triples_par(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], z: &mut RssShare<GF2p64>, weight: GF2p64, rand: &[GF2p64], chunk_size: usize) {
                 debug_assert_eq!(x.len(), $yield_size * self.0.ai.len(), "ai");

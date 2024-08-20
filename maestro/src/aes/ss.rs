@@ -1,8 +1,11 @@
-use rep3_core::party::{error::MpcResult, MainParty, Party};
+use std::mem;
+
+use itertools::Itertools;
+use rep3_core::{network::task::Direction, party::{error::MpcResult, MainParty, Party}, share::RssShare};
 
 use crate::share::gf8::GF8;
 
-use super::AesKeyState;
+use super::{AesKeyState, VectorAesState};
 
 
 pub trait GF8InvBlackBoxSS {
@@ -10,9 +13,6 @@ pub trait GF8InvBlackBoxSS {
     fn constant(&self, value: GF8) -> GF8;
     /// computes inversion of the (3,3) sharing of s in-place
     fn gf8_inv(&mut self, s: &mut [GF8]) -> MpcResult<()>;
-
-    /// computes inversion of the (3,3) sharing of s in-place and returns a (2,3) sharing of s
-    // fn gf8_inv_and_rss_output(&mut self, s: &mut[GF8]) -> MpcResult<(Vec<GF8>, Vec<GF8>)>;
 
     /// run any required pre-processing phase to prepare for computation of the key schedule with n_keys and n_blocks many AES-128 block calls
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()>;
@@ -22,6 +22,36 @@ pub trait GF8InvBlackBoxSS {
 
     /// Reveals data to all parties
     fn output(&mut self, data: &[GF8]) -> MpcResult<Vec<GF8>>;
+
+    /// Returns a mutable reference to the underlying [MainParty]
+    fn main_party_mut(&mut self) -> &mut MainParty;
+}
+
+/// Maliciously secure implementation of [GF8InvBlackBoxSS].
+pub trait GF8InvBlackBoxSSMal {
+    /// returns a (3,3) sharing of the public constant `value`
+    fn constant(&self, value: GF8) -> GF8;
+
+    /// returns a (2,3) sharing of the public constant `value`
+    fn constant_rss(&self, value: GF8) -> RssShare<GF8>;
+
+    /// run any required pre-processing phase to prepare for computation of the key schedule with n_keys and n_blocks many AES-128 block calls
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()>;
+
+    /// computes inversion of the (2,3) sharing of s returning a (3,3) sharing in out
+    fn gf8_inv_rss_to_ss(&mut self, out: &mut[GF8], si: &[GF8], sii: &[GF8]) -> MpcResult<()>;
+
+    /// computes inversion of the (3,3) sharing of s in-place and returns a (2,3) sharing of s
+    fn gf8_inv_and_rss_output(&mut self, s: &mut[GF8], out_i: &mut[GF8], out_ii: &mut[GF8]) -> MpcResult<()>;
+
+    /// Registers a S-box input/output pair y = Sbox(x) for verification
+    fn register_sbox_pair(&mut self, xi: &[GF8], xii: &[GF8], yi: &[GF8], yii: &[GF8]);
+
+    /// Do any finalize or check protocols
+    fn finalize(&mut self) -> MpcResult<()>;
+
+    /// Reveals data to all parties
+    fn output(&mut self, data_i: &[GF8], data_ii: &[GF8]) -> MpcResult<Vec<GF8>>;
 
     /// Returns a mutable reference to the underlying [MainParty]
     fn main_party_mut(&mut self) -> &mut MainParty;
@@ -60,6 +90,84 @@ pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBoxSS>(
     add_round_key(&mut state, &round_key[10]);
 
     Ok(state)
+}
+
+pub fn aes128_no_keyschedule_mal<Protocol: GF8InvBlackBoxSSMal>(
+    party: &mut Protocol,
+    inputs: VectorAesState,
+    round_key: &[AesKeyState],
+) -> MpcResult<VectorAesState> {
+    debug_assert_eq!(round_key.len(), 11);
+    let mut state_rss = inputs;
+    // AddRoundKey on (2,3) shares
+    super::add_round_key(&mut state_rss, &round_key[0]);
+
+    // First SubBytes uses (2,3) -> (3,3) LUT
+    let mut state_ss = VectorAesStateSS::new(state_rss.n);
+    party.gf8_inv_rss_to_ss(&mut state_ss.s, &state_rss.si, &state_rss.sii)?;
+    
+    
+    // apply affine transform
+    let c = party.constant(GF8(0x63));
+    let c_rss = party.constant_rss(GF8(0x63));
+    // state_ss.s.iter_mut().for_each(|dst| *dst = dst.aes_sbox_affine_transform() + c);
+
+    let mut x_prev = state_rss;
+    let mut y = VectorAesState::new(x_prev.n);
+    let mut x_r = VectorAesState::new(x_prev.n);
+
+    for r in 1..=9 {
+        // apply affine transform
+        state_ss.s.iter_mut().for_each(|dst| *dst = dst.aes_sbox_affine_transform() + c);
+
+        state_ss.shift_rows();
+        state_ss.mix_columns();
+        add_round_key(&mut state_ss, &round_key[r]);
+        
+        party.gf8_inv_and_rss_output(&mut state_ss.s, &mut x_r.si, &mut x_r.sii)?;
+
+        // invert y
+        add_round_key_out(&mut y, &x_r, &round_key[r]);
+        y.inv_mix_columns();
+        y.inv_shift_rows();
+        // undo affine transform
+        y.si.iter_mut().for_each(|si| *si = (*si + c_rss.si).inv_aes_sbox_affine_transform());
+        y.sii.iter_mut().for_each(|sii| *sii = (*sii + c_rss.sii).inv_aes_sbox_affine_transform());
+
+        // register S-box triples to check
+        party.register_sbox_pair(&x_prev.si, &x_prev.sii, &y.si, &y.sii);
+        mem::swap(&mut x_prev, &mut x_r);
+    }
+    
+    // Reshare
+    let l = state_ss.s.len();
+    state_ss.s.iter_mut().zip_eq(party.main_party_mut().generate_alpha(l)).for_each(|(s, alpha)| *s += alpha);
+    let rcv = party.main_party_mut().receive_field_slice(Direction::Next, &mut x_r.sii);
+    party.main_party_mut().send_field::<GF8>(Direction::Previous, state_ss.s.iter(), l);
+    rcv.rcv()?;
+    x_r.si = state_ss.s;
+
+    party.register_sbox_pair(&x_prev.si, &x_prev.sii, &x_r.si, &x_r.sii);
+
+    // afine transform
+    state_rss = x_r;
+    state_rss.si.iter_mut().for_each(|si| *si = si.aes_sbox_affine_transform() + c_rss.si);
+    state_rss.sii.iter_mut().for_each(|sii| *sii = sii.aes_sbox_affine_transform() + c_rss.sii);
+
+    state_rss.shift_rows();
+    super::add_round_key(&mut state_rss, &round_key[10]);
+
+    Ok(state_rss)
+}
+
+fn add_round_key_out(out: &mut VectorAesState, inp: &VectorAesState, round_key: &AesKeyState) {
+    debug_assert_eq!(out.n, inp.n);
+    for j in 0..inp.n {
+        for i in 0..16 {
+            out.si[16 * j + i] = inp.si[16 * j + i] + round_key.si[i];
+            out.sii[16 * j + i] = inp.sii[16 * j + i] + round_key.sii[i];
+        }
+    }
 }
 
 pub fn aes128_inv_no_keyschedule<Protocol: GF8InvBlackBoxSS>(
@@ -278,14 +386,14 @@ pub mod test {
     use rep3_core::test::TestSetup;
 
     use crate::aes::ss::{aes128_inv_no_keyschedule, aes128_no_keyschedule};
-    use crate::aes::test::{secret_share_aes_key_state, AES_SBOX};
+    use crate::aes::test::{secret_share_aes_key_state, AES_SBOX, AES_TEST_EXPECTED_OUTPUT, AES_TEST_INPUT, AES_TEST_ROUNDKEYS};
     use crate::aes::AesKeyState;
     use crate::share::gf8::GF8;
     use crate::share::Field;
 
     use super::{sbox_layer, GF8InvBlackBoxSS, VectorAesStateSS};
 
-    fn secret_share_ss<R: Rng + CryptoRng, F: Field>(rng: &mut R, values: &[F]) -> (Vec<F>, Vec<F>, Vec<F>) {
+    pub fn secret_share_ss<R: Rng + CryptoRng, F: Field>(rng: &mut R, values: &[F]) -> (Vec<F>, Vec<F>, Vec<F>) {
         let s1 = F::generate(rng, values.len());
         let s2 = F::generate(rng, values.len());
         let s3 = values.iter().enumerate().map(|(i, &v)| v - s1[i] - s2[i]).collect();
@@ -343,34 +451,17 @@ pub mod test {
         n_blocks: usize,
         n_worker_threads: Option<usize>,
     ) {
-        // FIPS 197 Appendix B
-        let input: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
-        let input: Vec<_> = repeat_n(input, n_blocks)
+        let input: Vec<_> = repeat_n(AES_TEST_INPUT, n_blocks)
             .flatten()
             .map(|x| GF8(x))
             .collect();
-        let round_keys: [[u8; 16]; 11] = [
-            // already in row-first representation
-            [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
-            [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
-            [0xf2, 0x7a, 0x59, 0x73, 0xc2, 0x96, 0x35, 0x59, 0x95, 0xb9, 0x80, 0xf6, 0xf2, 0x43, 0x7a, 0x7f],
-            [0x3d, 0x47, 0x1e, 0x6d, 0x80, 0x16, 0x23, 0x7a, 0x47, 0xfe, 0x7e, 0x88, 0x7d, 0x3e, 0x44, 0x3b],
-            [0xef, 0xa8, 0xb6, 0xdb, 0x44, 0x52, 0x71, 0x0b, 0xa5, 0x5b, 0x25, 0xad, 0x41, 0x7f, 0x3b, 0x00],
-            [0xd4, 0x7c, 0xca, 0x11, 0xd1, 0x83, 0xf2, 0xf9, 0xc6, 0x9d, 0xb8, 0x15, 0xf8, 0x87, 0xbc, 0xbc],
-            [0x6d, 0x11, 0xdb, 0xca, 0x88, 0x0b, 0xf9, 0x00, 0xa3, 0x3e, 0x86, 0x93, 0x7a, 0xfd, 0x41, 0xfd],
-            [0x4e, 0x5f, 0x84, 0x4e, 0x54, 0x5f, 0xa6, 0xa6, 0xf7, 0xc9, 0x4f, 0xdc, 0x0e, 0xf3, 0xb2, 0x4f],
-            [0xea, 0xb5, 0x31, 0x7f, 0xd2, 0x8d, 0x2b, 0x8d, 0x73, 0xba, 0xf5, 0x29, 0x21, 0xd2, 0x60, 0x2f],
-            [0xac, 0x19, 0x28, 0x57, 0x77, 0xfa, 0xd1, 0x5c, 0x66, 0xdc, 0x29, 0x00, 0xf3, 0x21, 0x41, 0x6e],
-            [0xd0, 0xc9, 0xe1, 0xb6, 0x14, 0xee, 0x3f, 0x63, 0xf9, 0x25, 0x0c, 0x0c, 0xa8, 0x89, 0xc8, 0xa6],
-        ];
-        let expected = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32];
         let mut rng = thread_rng();
         let (in1, in2, in3) = secret_share_vectorstate_ss(&mut rng, &input);
         let mut ks1 = Vec::with_capacity(11);
         let mut ks2 = Vec::with_capacity(11);
         let mut ks3 = Vec::with_capacity(11);
         for i in 0..11 {
-            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &round_keys[i].map(|x| GF8(x)));
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
             ks1.push(s1);
             ks2.push(s2);
             ks3.push(s3);
@@ -409,7 +500,7 @@ pub mod test {
             .collect();
 
         for (i, (s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq!(s1 + s2 + s3, GF8(expected[i % 16]));
+            assert_eq!(s1 + s2 + s3, GF8(AES_TEST_EXPECTED_OUTPUT[i % 16]));
         }
     }
 
@@ -420,34 +511,17 @@ pub mod test {
         n_blocks: usize,
         n_worker_threads: Option<usize>,
     ) {
-        // FIPS 197 Appendix B
-        let input: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32]; //[0x32, 0x88, 0x31, 0xe0, 0x43, 0x5a, 0x31, 0x37, 0xf6, 0x30, 0x98, 0x07, 0xa8, 0x8d, 0xa2, 0x34];
-        let input: Vec<_> = repeat_n(input, n_blocks)
+        let input: Vec<_> = repeat_n(AES_TEST_EXPECTED_OUTPUT, n_blocks)
             .flatten()
             .map(|x| GF8(x))
             .collect();
-        let round_keys: [[u8; 16]; 11] = [
-            // already in row-first representation
-            [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
-            [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
-            [0xf2, 0x7a, 0x59, 0x73, 0xc2, 0x96, 0x35, 0x59, 0x95, 0xb9, 0x80, 0xf6, 0xf2, 0x43, 0x7a, 0x7f],
-            [0x3d, 0x47, 0x1e, 0x6d, 0x80, 0x16, 0x23, 0x7a, 0x47, 0xfe, 0x7e, 0x88, 0x7d, 0x3e, 0x44, 0x3b],
-            [0xef, 0xa8, 0xb6, 0xdb, 0x44, 0x52, 0x71, 0x0b, 0xa5, 0x5b, 0x25, 0xad, 0x41, 0x7f, 0x3b, 0x00],
-            [0xd4, 0x7c, 0xca, 0x11, 0xd1, 0x83, 0xf2, 0xf9, 0xc6, 0x9d, 0xb8, 0x15, 0xf8, 0x87, 0xbc, 0xbc],
-            [0x6d, 0x11, 0xdb, 0xca, 0x88, 0x0b, 0xf9, 0x00, 0xa3, 0x3e, 0x86, 0x93, 0x7a, 0xfd, 0x41, 0xfd],
-            [0x4e, 0x5f, 0x84, 0x4e, 0x54, 0x5f, 0xa6, 0xa6, 0xf7, 0xc9, 0x4f, 0xdc, 0x0e, 0xf3, 0xb2, 0x4f],
-            [0xea, 0xb5, 0x31, 0x7f, 0xd2, 0x8d, 0x2b, 0x8d, 0x73, 0xba, 0xf5, 0x29, 0x21, 0xd2, 0x60, 0x2f],
-            [0xac, 0x19, 0x28, 0x57, 0x77, 0xfa, 0xd1, 0x5c, 0x66, 0xdc, 0x29, 0x00, 0xf3, 0x21, 0x41, 0x6e],
-            [0xd0, 0xc9, 0xe1, 0xb6, 0x14, 0xee, 0x3f, 0x63, 0xf9, 0x25, 0x0c, 0x0c, 0xa8, 0x89, 0xc8, 0xa6],
-        ];
-        let expected = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
         let mut rng = thread_rng();
         let (in1, in2, in3) = secret_share_vectorstate_ss(&mut rng, &input);
         let mut ks1 = Vec::with_capacity(11);
         let mut ks2 = Vec::with_capacity(11);
         let mut ks3 = Vec::with_capacity(11);
         for i in 0..11 {
-            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &round_keys[i].map(|x| GF8(x)));
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
             ks1.push(s1);
             ks2.push(s2);
             ks3.push(s3);
@@ -485,7 +559,7 @@ pub mod test {
             .collect();
 
         for (i, (s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq!(s1 + s2 + s3, GF8(expected[i % 16]));
+            assert_eq!(s1 + s2 + s3, GF8(AES_TEST_INPUT[i % 16]));
         }
     }
 }

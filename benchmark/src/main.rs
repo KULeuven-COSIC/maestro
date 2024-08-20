@@ -4,7 +4,7 @@
 mod utils;
 mod benchmark;
 
-use benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16BitStringBenchmark, MalLUT16GF4P4Benchmark, MalLUT16PrepCheckBenchmark}};
+use benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16BitStringBenchmark, MalLUT16GF4P4Benchmark, MalLUT16PrepCheckBenchmark}};
 use itertools::Itertools;
 use rep3_core::network::{self, ConnectedParty};
 use std::path::PathBuf;
@@ -46,6 +46,7 @@ pub enum ProtocolVariant {
     GF4Circuit,
     Lut256,
     Lut256Ss,
+    MalLut256Ss,
     MalLut16,
     MalLut16PrepCheck,
     MalLut16AllCheck,
@@ -91,6 +92,7 @@ impl ProtocolVariant {
             ProtocolVariant::Lut16 => &LUT16Benchmark,
             ProtocolVariant::Lut256 => &LUT256Benchmark,
             ProtocolVariant::Lut256Ss => &Lut256SSBenchmark,
+            ProtocolVariant::MalLut256Ss => &Lut256SSMalBenchmark,
             ProtocolVariant::MalLut16 => &MalLUT16Benchmark,
             ProtocolVariant::MalLut16Bitstring => &MalLUT16BitStringBenchmark,
             ProtocolVariant::MalLut16GF4p4 => &MalLUT16GF4P4Benchmark,
