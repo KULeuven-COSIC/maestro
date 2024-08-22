@@ -422,7 +422,7 @@ pub mod test {
                 state
             }
         };
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(inputs.0),
@@ -431,9 +431,6 @@ pub mod test {
             ),
             None => S::localhost_setup(program(inputs.0), program(inputs.1), program(inputs.2)),
         };
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
 
         assert_eq!(s1.len(), 256);
         assert_eq!(s2.len(), 256);
@@ -476,7 +473,7 @@ pub mod test {
                 output
             }
         };
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(in1, ks1),
@@ -485,9 +482,6 @@ pub mod test {
             ),
             None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
         };
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.n, n_blocks);
         assert_eq!(s2.n, n_blocks);
         assert_eq!(s3.n, n_blocks);
@@ -535,7 +529,7 @@ pub mod test {
                 output
             }
         };
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(in1, ks1),
@@ -544,9 +538,6 @@ pub mod test {
             ),
             None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
         };
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.n, n_blocks);
         assert_eq!(s2.n, n_blocks);
         assert_eq!(s3.n, n_blocks);

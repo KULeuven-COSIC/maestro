@@ -1,9 +1,6 @@
 use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::RssShare};
 
 use crate::{share::gf8::GF8, util::ArithmeticBlackBox};
-#[cfg(feature = "verbose-timing")]
-use {rep3_core::party::PARTY_TIMER, std::time::Instant};
-
 pub mod ss;
 
 pub trait GF8InvBlackBox {
@@ -261,14 +258,14 @@ pub fn random_keyschedule<Protocol: Party>(
 
 macro_rules! timer {
     ($a:literal, {$b:expr;}) => {
-        #[cfg(feature = "verbose-timing")]
-        let time_start = Instant::now();
+        // #[cfg(feature = "verbose-timing")]
+        // let time_start = Instant::now();
         $b;
-        #[cfg(feature = "verbose-timing")]
-        PARTY_TIMER
-            .lock()
-            .unwrap()
-            .report_time($a, time_start.elapsed());
+        // #[cfg(feature = "verbose-timing")]
+        // PARTY_TIMER
+        //     .lock()
+        //     .unwrap()
+        //     .report_time($a, time_start.elapsed());
     };
 }
 
@@ -598,7 +595,7 @@ pub mod test {
                 state
             }
         };
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(state1),
@@ -607,9 +604,6 @@ pub mod test {
             ),
             None => S::localhost_setup(program(state1), program(state2), program(state3)),
         };
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
 
         // convert to regular rss shares
         assert_eq!(s1.n, 16);
@@ -697,7 +691,7 @@ pub mod test {
                 output
             }
         };
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(in1, ks1),
@@ -706,9 +700,6 @@ pub mod test {
             ),
             None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
         };
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.n, n_blocks);
         assert_eq!(s2.n, n_blocks);
         assert_eq!(s3.n, n_blocks);
@@ -765,7 +756,7 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((ks1, _), (ks2, _), (ks3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(key1),
@@ -774,9 +765,6 @@ pub mod test {
             ),
             None => S::localhost_setup(program(key1), program(key2), program(key3)),
         };
-        let (ks1, _) = h1.join().unwrap();
-        let (ks2, _) = h2.join().unwrap();
-        let (ks3, _) = h3.join().unwrap();
 
         assert_eq!(ks1.len(), 11);
         assert_eq!(ks2.len(), 11);
@@ -851,7 +839,7 @@ pub mod test {
                 output
             }
         };
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(in1, ks1),
@@ -860,9 +848,6 @@ pub mod test {
             ),
             None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
         };
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.n, n_blocks);
         assert_eq!(s2.n, n_blocks);
         assert_eq!(s3.n, n_blocks);

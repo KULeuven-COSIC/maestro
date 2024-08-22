@@ -1042,9 +1042,6 @@ mod test {
 
     fn setup_comm_channels() -> ((CommChannel, CommChannel), (CommChannel, CommChannel)) {
         let (p1, p2, p3) = localhost_connect(|p| p, |p| p, |p| p);
-        let p1 = p1.join().unwrap();
-        let p2 = p2.join().unwrap();
-        let p3 = p3.join().unwrap();
         // we return p1's channels
         let comm_prev = p1.comm_prev;
         let comm_next = p1.comm_next;
@@ -1303,9 +1300,6 @@ mod test {
     #[test]
     fn io_layer() {
         let (p1, p2, p3) = localhost_connect(|p| p, |p| p, |p| p);
-        let p1 = p1.join().unwrap();
-        let p2 = p2.join().unwrap();
-        let p3 = p3.join().unwrap();
 
         let io1 = IoLayerOwned::spawn_io(p1.comm_prev, p1.comm_next).unwrap();
         let io2 = IoLayerOwned::spawn_io(p2.comm_prev, p2.comm_next).unwrap();

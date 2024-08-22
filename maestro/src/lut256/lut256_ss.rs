@@ -390,8 +390,6 @@ impl<'a> MulTripleEncoder for SboxPairEncoder<'a> {
 
 #[cfg(test)]
 mod test {
-    use std::thread::JoinHandle;
-
     use crate::aes::ss::test::{secret_share_ss, test_aes128_no_keyschedule_gf8_ss, test_inv_aes128_no_keyschedule_gf8_ss, test_sub_bytes_ss};
     use crate::aes::ss::{aes128_no_keyschedule_mal, GF8InvBlackBoxSS, GF8InvBlackBoxSSMal};
     use crate::aes::test::{secret_share_aes_key_state, secret_share_vectorstate, AES_TEST_EXPECTED_OUTPUT, AES_TEST_INPUT, AES_TEST_ROUNDKEYS};
@@ -408,21 +406,21 @@ mod test {
     use super::{Lut256SSMalParty, Lut256SSParty};
 
     fn localhost_setup_lut256_ss<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut Lut256SSParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut Lut256SSParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut Lut256SSParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut Lut256SSParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut Lut256SSParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut Lut256SSParty) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
         n_worker_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, Lut256SSParty)>,
-        JoinHandle<(T2, Lut256SSParty)>,
-        JoinHandle<(T3, Lut256SSParty)>,
+        (T1, Lut256SSParty),
+        (T2, Lut256SSParty),
+        (T3, Lut256SSParty),
     ) {
         fn adapter<T, Fx: FnOnce(&mut Lut256SSParty) -> T>(
             conn: ConnectedParty,
@@ -445,39 +443,39 @@ mod test {
     struct Lut256SSSetup;
     impl TestSetup<Lut256SSParty> for Lut256SSSetup {
         fn localhost_setup<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut Lut256SSParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut Lut256SSParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut Lut256SSParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut Lut256SSParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut Lut256SSParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut Lut256SSParty) -> T3,
                 >(
                     f1: F1,
                     f2: F2,
                     f3: F3,
                 ) -> (
-                    std::thread::JoinHandle<(T1, Lut256SSParty)>,
-                    std::thread::JoinHandle<(T2, Lut256SSParty)>,
-                    std::thread::JoinHandle<(T3, Lut256SSParty)>,
+                    (T1, Lut256SSParty),
+                    (T2, Lut256SSParty),
+                    (T3, Lut256SSParty),
                 ) {
             localhost_setup_lut256_ss(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut Lut256SSParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut Lut256SSParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut Lut256SSParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut Lut256SSParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut Lut256SSParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut Lut256SSParty) -> T3,
                 >(
                     n_threads: usize,
                     f1: F1,
                     f2: F2,
                     f3: F3,
                 ) -> (
-                    JoinHandle<(T1, Lut256SSParty)>,
-                    JoinHandle<(T2, Lut256SSParty)>,
-                    JoinHandle<(T3, Lut256SSParty)>,
+                    (T1, Lut256SSParty),
+                    (T2, Lut256SSParty),
+                    (T3, Lut256SSParty),
                 ) {
             localhost_setup_lut256_ss(f1, f2, f3, Some(n_threads))
         }
@@ -486,60 +484,60 @@ mod test {
     struct Lut256SSMalSetup;
     impl TestSetup<Lut256SSMalParty> for Lut256SSMalSetup {
         fn localhost_setup<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3,
                 >(
                     f1: F1,
                     f2: F2,
                     f3: F3,
                 ) -> (
-                    std::thread::JoinHandle<(T1, Lut256SSMalParty)>,
-                    std::thread::JoinHandle<(T2, Lut256SSMalParty)>,
-                    std::thread::JoinHandle<(T3, Lut256SSMalParty)>,
+                    (T1, Lut256SSMalParty),
+                    (T2, Lut256SSMalParty),
+                    (T3, Lut256SSMalParty),
                 ) {
             localhost_setup_lut256_ss_mal(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3,
                 >(
                     n_threads: usize,
                     f1: F1,
                     f2: F2,
                     f3: F3,
                 ) -> (
-                    JoinHandle<(T1, Lut256SSMalParty)>,
-                    JoinHandle<(T2, Lut256SSMalParty)>,
-                    JoinHandle<(T3, Lut256SSMalParty)>,
+                    (T1, Lut256SSMalParty),
+                    (T2, Lut256SSMalParty),
+                    (T3, Lut256SSMalParty),
                 ) {
             localhost_setup_lut256_ss_mal(f1, f2, f3, Some(n_threads))
         }
     }
 
     fn localhost_setup_lut256_ss_mal<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
         n_worker_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, Lut256SSMalParty)>,
-        JoinHandle<(T2, Lut256SSMalParty)>,
-        JoinHandle<(T3, Lut256SSMalParty)>,
+        (T1, Lut256SSMalParty),
+        (T2, Lut256SSMalParty),
+        (T3, Lut256SSMalParty),
     ) {
         fn adapter<T, Fx: FnOnce(&mut Lut256SSMalParty) -> T>(
             conn: ConnectedParty,
@@ -604,10 +602,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), None);
-        let (y1, _) = h1.join().unwrap();
-        let (y2, _) = h2.join().unwrap();
-        let (y3, _) = h3.join().unwrap();
+        let ((y1, _), (y2, _), (y3, _)) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), None);
 
         assert_eq!(y1.len(), inputs.len());
         assert_eq!(y2.len(), y1.len());
@@ -635,10 +630,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), None);
-        let ((y1, input_rss1), _) = h1.join().unwrap();
-        let ((y2, input_rss2), _) = h2.join().unwrap();
-        let ((y3, input_rss3), _) = h3.join().unwrap();
+        let (((y1, input_rss1), _), ((y2, input_rss2), _), ((y3, input_rss3), _)) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), None);
 
         assert_eq!(y1.len(), inputs.len());
         assert_eq!(y2.len(), y1.len());
@@ -684,7 +676,7 @@ mod test {
                 output
             }
         };
-        let (h1, h2, h3) = match n_worker_threads {
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
             Some(n_worker_threads) => S::localhost_setup_multithreads(
                 n_worker_threads,
                 program(in1, ks1),
@@ -693,9 +685,6 @@ mod test {
             ),
             None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
         };
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.n, n_blocks);
         assert_eq!(s2.n, n_blocks);
         assert_eq!(s3.n, n_blocks);

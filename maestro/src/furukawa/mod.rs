@@ -473,8 +473,6 @@ fn gf8_inv_layer_threadparty(
 
 #[cfg(test)]
 pub mod test {
-    use std::thread::JoinHandle;
-
     use crate::aes::test::{
         test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
         test_inv_aes128_no_keyschedule_gf8,
@@ -493,13 +491,13 @@ pub mod test {
     use super::FurukawaParty;
 
     pub fn localhost_setup_furukawa<
-        F: Field + DigestExt + Send + 'static + Sync + GF2p64Subfield,
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+        F: Field + DigestExt + Send + Sync + GF2p64Subfield,
+        T1: Send,
+        F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3,
     >(
         f1: F1,
         f2: F2,
@@ -507,9 +505,9 @@ pub mod test {
         n_worker_threads: Option<usize>,
         use_recursive_check: bool,
     ) -> (
-        JoinHandle<(T1, FurukawaParty<F>)>,
-        JoinHandle<(T2, FurukawaParty<F>)>,
-        JoinHandle<(T3, FurukawaParty<F>)>,
+        (T1, FurukawaParty<F>),
+        (T2, FurukawaParty<F>),
+        (T3, FurukawaParty<F>),
     ) {
         fn adapter<F: Field + DigestExt + Send + Sync + GF2p64Subfield, T, Fx: FnOnce(&mut FurukawaParty<F>) -> T>(
             conn: ConnectedParty,
@@ -531,82 +529,82 @@ pub mod test {
     }
 
     pub struct FurukawaSetup;
-    impl<F: Field + DigestExt + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaSetup {
+    impl<F: Field + DigestExt + Send + Sync + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaSetup {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, FurukawaParty<F>)>,
-            JoinHandle<(T2, FurukawaParty<F>)>,
-            JoinHandle<(T3, FurukawaParty<F>)>,
+            (T1, FurukawaParty<F>),
+            (T2, FurukawaParty<F>),
+            (T3, FurukawaParty<F>),
         ) {
             localhost_setup_furukawa(f1, f2, f3, None, false)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, FurukawaParty<F>)>,
-            JoinHandle<(T2, FurukawaParty<F>)>,
-            JoinHandle<(T3, FurukawaParty<F>)>,
+            (T1, FurukawaParty<F>),
+            (T2, FurukawaParty<F>),
+            (T3, FurukawaParty<F>),
         ) {
             localhost_setup_furukawa(f1, f2, f3, Some(n_threads), false)
         }
     }
 
     struct FurukawaRecursiveCheckSetup;
-    impl<F: Field + DigestExt + Send + Sync + 'static + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaRecursiveCheckSetup {
+    impl<F: Field + DigestExt + Send + Sync + GF2p64Subfield> TestSetup<FurukawaParty<F>> for FurukawaRecursiveCheckSetup {
         fn localhost_setup<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3,
                 >(
                     f1: F1,
                     f2: F2,
                     f3: F3,
                 ) -> (
-                    JoinHandle<(T1, FurukawaParty<F>)>,
-                    JoinHandle<(T2, FurukawaParty<F>)>,
-                    JoinHandle<(T3, FurukawaParty<F>)>,
+                    (T1, FurukawaParty<F>),
+                    (T2, FurukawaParty<F>),
+                    (T3, FurukawaParty<F>),
                 ) {
             localhost_setup_furukawa(f1, f2, f3, None, true)
         }
         fn localhost_setup_multithreads<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut FurukawaParty<F>) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut FurukawaParty<F>) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut FurukawaParty<F>) -> T3,
                 >(
                     n_threads: usize,
                     f1: F1,
                     f2: F2,
                     f3: F3,
                 ) -> (
-                    JoinHandle<(T1, FurukawaParty<F>)>,
-                    JoinHandle<(T2, FurukawaParty<F>)>,
-                    JoinHandle<(T3, FurukawaParty<F>)>,
+                    (T1, FurukawaParty<F>),
+                    (T2, FurukawaParty<F>),
+                    (T3, FurukawaParty<F>),
                 ) {
             localhost_setup_furukawa(f1, f2, f3, Some(n_threads), true)
         }
@@ -622,14 +620,11 @@ pub mod test {
 
         let program = |x: Vec<GF8>| move |p: &mut FurukawaParty<GF8>| p.input_round(&x).unwrap();
 
-        let (h1, h2, h3) = FurukawaSetup::localhost_setup(
+        let (((x11, x21, x31), _), ((x12, x22, x32), _), ((x13, x23, x33), _)) = FurukawaSetup::localhost_setup(
             program(x1.clone()),
             program(x2.clone()),
             program(x3.clone()),
         );
-        let ((x11, x21, x31), _) = h1.join().unwrap();
-        let ((x12, x22, x32), _) = h2.join().unwrap();
-        let ((x13, x23, x33), _) = h3.join().unwrap();
 
         fn check(
             x: Vec<GF8>,

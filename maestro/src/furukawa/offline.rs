@@ -615,11 +615,7 @@ pub mod test {
             bucket_cut_and_choose::<GF8>(p, N).unwrap()
         }
 
-        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(N_THREADS, bcc, bcc, bcc);
-
-        let (triples1, _) = h1.join().unwrap();
-        let (triples2, _) = h2.join().unwrap();
-        let (triples3, _) = h3.join().unwrap();
+        let ((triples1, _), (triples2, _), (triples3, _)) = PartySetup::localhost_setup_multithreads(N_THREADS, bcc, bcc, bcc);
 
         assert_eq!(triples1.len(), N);
         assert_eq!(triples2.len(), N);

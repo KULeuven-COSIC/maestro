@@ -1,9 +1,6 @@
 use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
-#[cfg(feature = "verbose-timing")]
-use {std::time::Instant, rep3_core::party::PARTY_TIMER};
-
 use crate::{
     share::{
         gf4::{BsGF4, GF4},
@@ -276,8 +273,6 @@ fn lut_layer_opt<P: Party>(
     mut v: Vec<BsGF4>,
     rnd_ohv: &[RndOhvOutput],
 ) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
-    #[cfg(feature = "verbose-timing")]
-    let lut_open_time = Instant::now();
 
     let rcv_cii = party.receive_field::<BsGF4>(Direction::Next, v.len());
     let rcv_ciii = party.receive_field::<BsGF4>(Direction::Previous, v.len());
@@ -290,21 +285,8 @@ fn lut_layer_opt<P: Party>(
 
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_open", lut_open_time.elapsed());
 
-    #[cfg(feature = "verbose-timing")]
-    let lut_local_time = Instant::now();
     let res = lut_with_rnd_ohv_bitsliced_opt(rnd_ohv, ci, cii, ciii);
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_local", lut_local_time.elapsed());
 
     // party.inner.io().wait_for_completion();
     Ok(res)

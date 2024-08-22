@@ -416,11 +416,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 2).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 2);
         assert_eq!(ohv2.len(), 2);
         assert_eq!(ohv3.len(), 2);
@@ -449,11 +446,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 4).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 4);
         assert_eq!(ohv2.len(), 4);
         assert_eq!(ohv3.len(), 4);
@@ -510,11 +504,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 8).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 8);
         assert_eq!(ohv2.len(), 8);
         assert_eq!(ohv3.len(), 8);
@@ -559,11 +550,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 16).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 16);
         assert_eq!(ohv2.len(), 16);
         assert_eq!(ohv3.len(), 16);
@@ -589,11 +577,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 32).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 32);
         assert_eq!(ohv2.len(), 32);
         assert_eq!(ohv3.len(), 32);
@@ -619,11 +604,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 64).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 64);
         assert_eq!(ohv2.len(), 64);
         assert_eq!(ohv3.len(), 64);
@@ -649,11 +631,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 128).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 128);
         assert_eq!(ohv2.len(), 128);
         assert_eq!(ohv3.len(), 128);
@@ -679,11 +658,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv(p.as_party_mut(), &mut NoMulTripleRecording, share, 256).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 256);
         assert_eq!(ohv2.len(), 256);
         assert_eq!(ohv3.len(), 256);
@@ -730,11 +706,8 @@ mod test {
         let program = |share: Vec<Vec<RssShare<BsBool16>>>| {
             move |p: &mut ChidaParty| generate_ohv256_output(p.as_party_mut(), &mut NoMulTripleRecording, share).unwrap()
         };
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(shares.0), program(shares.1), program(shares.2));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 256 * 16);
         assert_eq!(ohv2.len(), 256 * 16);
         assert_eq!(ohv3.len(), 256 * 16);
@@ -763,10 +736,7 @@ mod test {
     fn rnd_ohv256() {
         const N: usize = 145;
         let program = || |p: &mut ChidaParty| generate_rndohv256(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap();
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(), program(), program());
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) = ChidaSetup::localhost_setup(program(), program(), program());
         assert_eq!(ohv1.len(), N);
         assert_eq!(ohv2.len(), N);
         assert_eq!(ohv3.len(), N);
@@ -835,11 +805,8 @@ mod test {
         const N: usize = 2367;
         const N_THREADS: usize = 3;
         let program = || |p: &mut ChidaParty| generate_rndohv256_mt::<_, BsBool16>(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap();
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup_multithreads(N_THREADS, program(), program(), program());
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), N);
         assert_eq!(ohv2.len(), N);
         assert_eq!(ohv3.len(), N);
@@ -879,10 +846,7 @@ mod test {
                 rec
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(), program(), program());
-        let (mut rec1, _) = h1.join().unwrap();
-        let (mut rec2, _) = h2.join().unwrap();
-        let (mut rec3, _) = h3.join().unwrap();
+        let ((mut rec1, _), (mut rec2, _), (mut rec3, _)) = ChidaSetup::localhost_setup(program(), program(), program());
         // ohv256 should register 8 GF(2^64) triples per instance (bitsliced in blocks of 16)
         assert_len(&rec1, N.div_ceil(16)*16*8); // N * 8
         assert_len(&rec2, N.div_ceil(16)*16*8);
@@ -917,11 +881,8 @@ mod test {
         let share2 = into_8_array(shares.1);
         let share3 = into_8_array(shares.2);
 
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(share1), program(share2), program(share3));
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), 256*16);
         assert_eq!(ohv2.len(), 256*16);
         assert_eq!(ohv3.len(), 256*16);
@@ -949,11 +910,8 @@ mod test {
             move |p: &mut ChidaParty| generate_rndohv256_ss(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap()
         };
 
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup(program(), program(), program());
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), N);
         assert_eq!(ohv2.len(), N);
         assert_eq!(ohv3.len(), N);
@@ -975,11 +933,8 @@ mod test {
         const N: usize = 2367;
         const N_THREADS: usize = 3;
         let program = || |p: &mut ChidaParty| generate_rndohv256_ss_mt(p.as_party_mut(), &mut NoMulTripleRecording, N).unwrap();
-        let (h1, h2, h3) =
+        let ((ohv1, _), (ohv2, _), (ohv3, _)) =
             ChidaSetup::localhost_setup_multithreads(N_THREADS, program(), program(), program());
-        let (ohv1, _) = h1.join().unwrap();
-        let (ohv2, _) = h2.join().unwrap();
-        let (ohv3, _) = h3.join().unwrap();
         assert_eq!(ohv1.len(), N);
         assert_eq!(ohv2.len(), N);
         assert_eq!(ohv3.len(), N);

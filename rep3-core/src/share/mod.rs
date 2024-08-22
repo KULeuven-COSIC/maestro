@@ -77,3 +77,7 @@ impl<T: AddAssign> AddAssign for RssShare<T> {
 }
 
 impl<T: Copy> Copy for RssShare<T> {}
+
+impl<T: HasZero> HasZero for RssShare<T> {
+    const ZERO: Self = Self {si: T::ZERO, sii: T::ZERO};
+}

@@ -523,8 +523,6 @@ pub fn mul<F: Field>(
 
 #[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
-    use std::thread::JoinHandle;
-
     use crate::aes::test::{
         test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
         test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
@@ -546,21 +544,21 @@ pub mod test {
     use super::square_layer;
 
     pub fn localhost_setup_chida<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut ChidaParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut ChidaParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut ChidaParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut ChidaParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut ChidaParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut ChidaParty) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
         n_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, ChidaParty)>,
-        JoinHandle<(T2, ChidaParty)>,
-        JoinHandle<(T3, ChidaParty)>,
+        (T1, ChidaParty),
+        (T2, ChidaParty),
+        (T3, ChidaParty),
     ) {
         fn adapter<T, Fx: FnOnce(&mut ChidaParty) -> T>(
             conn: ConnectedParty,
@@ -580,12 +578,12 @@ pub mod test {
     }
 
     pub fn localhost_setup_chida_benchmark<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3,
     >(
         f1: F1,
         f2: F2,
@@ -593,9 +591,9 @@ pub mod test {
         variant: ImplVariant,
         n_worker_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, ChidaBenchmarkParty)>,
-        JoinHandle<(T2, ChidaBenchmarkParty)>,
-        JoinHandle<(T3, ChidaBenchmarkParty)>,
+        (T1, ChidaBenchmarkParty),
+        (T2, ChidaBenchmarkParty),
+        (T3, ChidaBenchmarkParty),
     ) {
         fn adapter<T, Fx: FnOnce(&mut ChidaBenchmarkParty) -> T>(
             conn: ConnectedParty,
@@ -618,39 +616,39 @@ pub mod test {
     pub struct ChidaSetup;
     impl TestSetup<ChidaParty> for ChidaSetup {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut ChidaParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut ChidaParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut ChidaParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut ChidaParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut ChidaParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut ChidaParty) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, ChidaParty)>,
-            JoinHandle<(T2, ChidaParty)>,
-            JoinHandle<(T3, ChidaParty)>,
+            (T1, ChidaParty),
+            (T2, ChidaParty),
+            (T3, ChidaParty),
         ) {
             localhost_setup_chida(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut ChidaParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut ChidaParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut ChidaParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut ChidaParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut ChidaParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut ChidaParty) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, ChidaParty)>,
-            JoinHandle<(T2, ChidaParty)>,
-            JoinHandle<(T3, ChidaParty)>,
+            (T1, ChidaParty),
+            (T2, ChidaParty),
+            (T3, ChidaParty),
         ) {
             localhost_setup_chida(f1, f2, f3, Some(n_threads))
         }
@@ -659,39 +657,39 @@ pub mod test {
     pub struct ChidaSetupSimple;
     impl TestSetup<ChidaBenchmarkParty> for ChidaSetupSimple {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, ChidaBenchmarkParty)>,
-            JoinHandle<(T2, ChidaBenchmarkParty)>,
-            JoinHandle<(T3, ChidaBenchmarkParty)>,
+            (T1, ChidaBenchmarkParty),
+            (T2, ChidaBenchmarkParty),
+            (T3, ChidaBenchmarkParty),
         ) {
             localhost_setup_chida_benchmark(f1, f2, f3, ImplVariant::Simple, None)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3,
         >(
             _n_threads: usize,
             _f1: F1,
             _f2: F2,
             _f3: F3,
         ) -> (
-            JoinHandle<(T1, ChidaBenchmarkParty)>,
-            JoinHandle<(T2, ChidaBenchmarkParty)>,
-            JoinHandle<(T3, ChidaBenchmarkParty)>,
+            (T1, ChidaBenchmarkParty),
+            (T2, ChidaBenchmarkParty),
+            (T3, ChidaBenchmarkParty),
         ) {
             unimplemented!()
         }
@@ -700,39 +698,39 @@ pub mod test {
     pub struct ChidaSetupOpt;
     impl TestSetup<ChidaBenchmarkParty> for ChidaSetupOpt {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, ChidaBenchmarkParty)>,
-            JoinHandle<(T2, ChidaBenchmarkParty)>,
-            JoinHandle<(T3, ChidaBenchmarkParty)>,
+            (T1, ChidaBenchmarkParty),
+            (T2, ChidaBenchmarkParty),
+            (T3, ChidaBenchmarkParty),
         ) {
             localhost_setup_chida_benchmark(f1, f2, f3, ImplVariant::Optimized, None)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut ChidaBenchmarkParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut ChidaBenchmarkParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut ChidaBenchmarkParty) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, ChidaBenchmarkParty)>,
-            JoinHandle<(T2, ChidaBenchmarkParty)>,
-            JoinHandle<(T3, ChidaBenchmarkParty)>,
+            (T1, ChidaBenchmarkParty),
+            (T2, ChidaBenchmarkParty),
+            (T3, ChidaBenchmarkParty),
         ) {
             localhost_setup_chida_benchmark(f1, f2, f3, ImplVariant::Optimized, Some(n_threads))
         }
@@ -768,11 +766,8 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) =
+        let ((c1, _), (c2, _), (c3, _)) =
             PartySetup::localhost_setup(program(a1, b1), program(a2, b2), program(a3, b3));
-        let (c1, _) = h1.join().unwrap();
-        let (c2, _) = h2.join().unwrap();
-        let (c3, _) = h3.join().unwrap();
 
         assert_eq!(c1.len(), N);
         assert_eq!(c2.len(), N);
@@ -801,14 +796,11 @@ pub mod test {
             move |p: &mut MainParty| output_round(p, &a, &b, &c).unwrap()
         };
 
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((s1, _), (s2, _), (s3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(o1, s1);
         assert_eq!(o2, s2);
         assert_eq!(o3, s3);
@@ -835,14 +827,11 @@ pub mod test {
                 (a, b, c)
             }
         };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let (((a1, b1, c1), _), ((a2, b2, c2), _), ((a3, b3, c3), _)) = PartySetup::localhost_setup(
             program(in1.clone()),
             program(in2.clone()),
             program(in3.clone()),
         );
-        let ((a1, b1, c1), _) = h1.join().unwrap();
-        let ((a2, b2, c2), _) = h2.join().unwrap();
-        let ((a3, b3, c3), _) = h3.join().unwrap();
 
         fn check(
             expected_input: Vec<GF8>,
@@ -884,14 +873,11 @@ pub mod test {
                 (a, b, c)
             }
         };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let (((a1, b1, c1), _), ((a2, b2, c2), _), ((a3, b3, c3), _)) = PartySetup::localhost_setup(
             program(in1.clone()),
             program(in2.clone()),
             program(in3.clone()),
         );
-        let ((a1, b1, c1), _) = h1.join().unwrap();
-        let ((a2, b2, c2), _) = h2.join().unwrap();
-        let ((a3, b3, c3), _) = h3.join().unwrap();
 
         fn check(
             expected_input: Vec<GF8>,

@@ -580,7 +580,7 @@ impl Timer {
 
 /// Exposes useful testing functionalities
 pub mod test_export {
-    use std::{fs::File, io::BufReader, net::{IpAddr, Ipv4Addr}, path::PathBuf, str::FromStr, thread::{self, JoinHandle}};
+    use std::{fs::File, io::BufReader, net::{IpAddr, Ipv4Addr}, path::PathBuf, str::FromStr, thread};
 
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
@@ -629,52 +629,52 @@ pub mod test_export {
 
     pub trait TestSetup<P> {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut P) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut P) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut P) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut P) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut P) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut P) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, P)>,
-            JoinHandle<(T2, P)>,
-            JoinHandle<(T3, P)>,
+            (T1, P),
+            (T2, P),
+            (T3, P),
         );
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut P) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut P) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut P) -> T3 + 'static,
+            T1: Send ,
+            F1: Send + FnOnce(&mut P) -> T1,
+            T2: Send ,
+            F2: Send + FnOnce(&mut P) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut P) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, P)>,
-            JoinHandle<(T2, P)>,
-            JoinHandle<(T3, P)>,
+            (T1, P),
+            (T2, P),
+            (T3, P),
         );
     }
 
     pub fn localhost_connect<
-        T1: Send + 'static,
-        F1: Send + FnOnce(ConnectedParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(ConnectedParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(ConnectedParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(ConnectedParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(ConnectedParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(ConnectedParty) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
-    ) -> (JoinHandle<T1>, JoinHandle<T2>, JoinHandle<T3>) {
+    ) -> (T1, T2, T3) {
         let addr: Vec<Ipv4Addr> = (0..3)
             .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
             .collect();
@@ -698,73 +698,94 @@ pub mod test_export {
         let ports = vec![port1, port2, port3];
         // println!("Ports: {:?}", ports);
 
-        let party1 = {
-            let config = Config::new(addr, ports.clone(), certificates.clone(), pk1, sk1);
-            thread::Builder::new()
-                .name("party1".to_string())
-                .spawn(move || {
-                    // println!("P1 running");
-                    let party1 = party1.connect(config, None).unwrap();
-                    // println!("P1 connected");
-                    let res = f1(party1);
-                    res
-                })
-                .unwrap()
-        };
+        let (p1_res, p2_res, p3_res) = thread::scope(|scope| {
 
-        let party2 = {
-            let addr: Vec<Ipv4Addr> = (0..3)
-                .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
-                .collect();
-            let config = Config::new(addr, ports.clone(), certificates.clone(), pk2, sk2);
-            thread::Builder::new()
-                .name("party2".to_string())
-                .spawn(move || {
-                    // println!("P2 running");
-                    let party2 = party2.connect(config, None).unwrap();
-                    // println!("P2 connected");
-                    let res = f2(party2);
-                    res
-                })
-                .unwrap()
-        };
+            let party1 = {
+                let config = Config::new(addr, ports.clone(), certificates.clone(), pk1, sk1);
+                thread::Builder::new()
+                    .name("party1".to_string())
+                    .spawn_scoped(scope, move || {
+                        // println!("P1 running");
+                        let party1 = party1.connect(config, None).unwrap();
+                        // println!("P1 connected");
+                        let res = f1(party1);
+                        res
+                    })
+                    .unwrap()
+            };
 
-        let party3 = {
-            let addr: Vec<Ipv4Addr> = (0..3)
-                .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
-                .collect();
-            let config = Config::new(addr, ports, certificates, pk3, sk3);
-            thread::Builder::new()
-                .name("party3".to_string())
-                .spawn(move || {
-                    // println!("P3 running");
-                    let party3 = party3.connect(config, None).unwrap();
-                    // println!("P3 connected");
-                    let res = f3(party3);
-                    res
-                })
-                .unwrap()
-        };
+            let party2 = {
+                let addr: Vec<Ipv4Addr> = (0..3)
+                    .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
+                    .collect();
+                let config = Config::new(addr, ports.clone(), certificates.clone(), pk2, sk2);
+                thread::Builder::new()
+                    .name("party2".to_string())
+                    .spawn_scoped(scope, move || {
+                        // println!("P2 running");
+                        let party2 = party2.connect(config, None).unwrap();
+                        // println!("P2 connected");
+                        let res = f2(party2);
+                        res
+                    })
+                    .unwrap()
+            };
 
-        (party1, party2, party3)
+            let party3 = {
+                let addr: Vec<Ipv4Addr> = (0..3)
+                    .map(|_| Ipv4Addr::from_str("127.0.0.1").unwrap())
+                    .collect();
+                let config = Config::new(addr, ports, certificates, pk3, sk3);
+                thread::Builder::new()
+                    .name("party3".to_string())
+                    .spawn_scoped(scope, move || {
+                        // println!("P3 running");
+                        let party3 = party3.connect(config, None).unwrap();
+                        // println!("P3 connected");
+                        let res = f3(party3);
+                        res
+                    })
+                    .unwrap()
+            };
+
+            // join the party threads
+            let party1_res = party1.join();
+            let party2_res = party2.join();
+            let party3_res = party3.join();
+            (party1_res, party2_res, party3_res)
+        });
+
+        if p1_res.is_err() {
+            println!("Error when joining party 1");
+        }
+        let p1_res = p1_res.unwrap();
+        if p2_res.is_err() {
+            println!("Error when joining party 2");
+        }
+        let p2_res = p2_res.unwrap();
+        if p3_res.is_err() {
+            println!("Error when joining party 3");
+        }
+        let p3_res = p3_res.unwrap();
+        (p1_res, p2_res, p3_res)
     }
 
     pub fn localhost_setup<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut MainParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut MainParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut MainParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut MainParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut MainParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut MainParty) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
         n_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, MainParty)>,
-        JoinHandle<(T2, MainParty)>,
-        JoinHandle<(T3, MainParty)>,
+        (T1, MainParty),
+        (T2, MainParty),
+        (T3, MainParty),
     ) {
         let _f1 = move |p: ConnectedParty| {
             // println!("P1: Before Setup");
@@ -796,54 +817,51 @@ pub mod test_export {
     pub struct PartySetup;
     impl TestSetup<MainParty> for PartySetup {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut MainParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut MainParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut MainParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut MainParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut MainParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut MainParty) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, MainParty)>,
-            JoinHandle<(T2, MainParty)>,
-            JoinHandle<(T3, MainParty)>,
+            (T1, MainParty),
+            (T2, MainParty),
+            (T3, MainParty),
         ) {
             localhost_setup(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut MainParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut MainParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut MainParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut MainParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut MainParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut MainParty) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, MainParty)>,
-            JoinHandle<(T2, MainParty)>,
-            JoinHandle<(T3, MainParty)>,
+            (T1, MainParty),
+            (T2, MainParty),
+            (T3, MainParty),
         ) {
             localhost_setup(f1, f2, f3, Some(n_threads))
         }
     }
 
     pub fn simple_localhost_setup<
-        F: Send + Clone + Fn(&mut MainParty) -> T + 'static,
-        T: Send + 'static,
+        F: Send + Clone + Fn(&mut MainParty) -> T,
+        T: Send,
     >(
         f: F,
     ) -> ((T, T, T), (MainParty, MainParty, MainParty)) {
-        let (h1, h2, h3) = localhost_setup(f.clone(), f.clone(), f, None);
-        let (t1, p1) = h1.join().unwrap();
-        let (t2, p2) = h2.join().unwrap();
-        let (t3, p3) = h3.join().unwrap();
+        let ((t1, p1), (t2, p2), (t3, p3)) = localhost_setup(f.clone(), f.clone(), f, None);
         ((t1, t2, t3), (p1, p2, p3))
     }
 
@@ -960,10 +978,7 @@ pub mod test {
             p.comm_prev.read(&mut buf).unwrap();
             assert_eq!(&buf, "P23".as_bytes());
         };
-        let (p1, p2, p3) = localhost_connect(f1, f2, f3);
-        p1.join().unwrap();
-        p2.join().unwrap();
-        p3.join().unwrap();
+        localhost_connect(f1, f2, f3);
     }
 
     #[test]
@@ -1007,15 +1022,12 @@ pub mod test {
             rcv_buf.rcv().unwrap();
             // localhost_setup calls teardown
         }
-        let (p1, p2, p3) = localhost_setup(
+        localhost_setup(
             send_receive_teardown,
             send_receive_teardown,
             send_receive_teardown,
             None,
         );
-        p1.join().unwrap();
-        p2.join().unwrap();
-        p3.join().unwrap();
     }
 
     #[test]
@@ -1028,15 +1040,12 @@ pub mod test {
             let range = p.split_range_equally(100);
             assert_eq!(vec![(0, 100)], range);
         }
-        let (p1, p2, p3) = localhost_setup(
+        localhost_setup(
             split_range_single_test,
             split_range_single_test,
             split_range_single_test,
             None,
         );
-        p1.join().unwrap();
-        p2.join().unwrap();
-        p3.join().unwrap();
     }
 
     #[test]
@@ -1050,15 +1059,12 @@ pub mod test {
             let range = p.split_range_equally(100);
             assert_eq!(vec![(0, 34), (34, 68), (68, 100)], range);
         }
-        let (p1, p2, p3) = localhost_setup(
+        localhost_setup(
             split_range_test,
             split_range_test,
             split_range_test,
             Some(THREADS),
         );
-        p1.join().unwrap();
-        p2.join().unwrap();
-        p3.join().unwrap();
     }
 
     #[test]
@@ -1074,15 +1080,12 @@ pub mod test {
             let range = p.split_range_equally_even(4);
             assert_eq!(vec![(0, 2), (2, 4), (4, 4)], range);
         }
-        let (p1, p2, p3) = localhost_setup(
+        localhost_setup(
             split_range_even_test,
             split_range_even_test,
             split_range_even_test,
             Some(THREADS),
         );
-        p1.join().unwrap();
-        p2.join().unwrap();
-        p3.join().unwrap();
     }
 
     #[test]

@@ -106,10 +106,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(), program(), program(), None);
-        let (triples1, _) = h1.join().unwrap();
-        let (triples2, _) = h2.join().unwrap();
-        let (triples3, _) = h3.join().unwrap();
+        let ((triples1, _), (triples2, _), (triples3, _)) = localhost_setup(program(), program(), program(), None);
 
         assert_eq!(triples1.len(), N);
         assert_eq!(triples2.len(), N);
@@ -130,10 +127,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(), program(), program(), Some(N_THREADS));
-        let (triples1, _) = h1.join().unwrap();
-        let (triples2, _) = h2.join().unwrap();
-        let (triples3, _) = h3.join().unwrap();
+        let ((triples1, _), (triples2, _), (triples3, _)) = localhost_setup(program(), program(), program(), Some(N_THREADS));
 
         assert_eq!(triples1.len(), N);
         assert_eq!(triples2.len(), N);
@@ -156,10 +150,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(), program(), program(), None);
-        let (triples1, _) = h1.join().unwrap();
-        let (triples2, _) = h2.join().unwrap();
-        let (triples3, _) = h3.join().unwrap();
+        let ((triples1, _), (triples2, _), (triples3, _)) = localhost_setup(program(), program(), program(), None);
 
         assert_eq!(triples1.len(), N);
         assert_eq!(triples2.len(), N);
@@ -183,10 +174,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(), program(), program(), Some(N_THREADS));
-        let (triples1, _) = h1.join().unwrap();
-        let (triples2, _) = h2.join().unwrap();
-        let (triples3, _) = h3.join().unwrap();
+        let ((triples1, _), (triples2, _), (triples3, _)) = localhost_setup(program(), program(), program(), Some(N_THREADS));
 
         assert_eq!(triples1.len(), N);
         assert_eq!(triples2.len(), N);

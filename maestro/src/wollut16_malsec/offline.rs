@@ -40,10 +40,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::<WL16DefaultParams>::localhost_setup(program(), program(), program());
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
+        let ((o1, _), (o2, _), (o3, _)) = WL16ASSetup::<WL16DefaultParams>::localhost_setup(program(), program(), program());
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);
@@ -64,10 +61,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::<WL16DefaultParams>::localhost_setup_multithreads(N_THREADS, program(), program(), program());
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
+        let ((o1, _), (o2, _), (o3, _)) = WL16ASSetup::<WL16DefaultParams>::localhost_setup_multithreads(N_THREADS, program(), program(), program());
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);
@@ -86,10 +80,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::<WL16BitString>::localhost_setup(program(), program(), program());
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
+        let ((o1, _), (o2, _), (o3, _)) = WL16ASSetup::<WL16BitString>::localhost_setup(program(), program(), program());
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);
@@ -110,10 +101,7 @@ mod test {
             }
         };
 
-        let (h1,h2,h3) = WL16ASSetup::<WL16BitString>::localhost_setup_multithreads(N_THREADS, program(), program(), program());
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
+        let ((o1, _), (o2, _), (o3, _)) = WL16ASSetup::<WL16BitString>::localhost_setup_multithreads(N_THREADS, program(), program(), program());
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);

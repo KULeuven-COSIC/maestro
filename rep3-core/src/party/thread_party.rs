@@ -153,11 +153,8 @@ mod test {
                 .collect_vec()
         };
 
-        let (h1, h2, h3) =
+        let ((o1, _), (o2, _), (o3, _)) =
             PartySetup::localhost_setup_multithreads(THREADS, program, program, program);
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
         assert_eq!(o1.len(), THREADS);
         assert_eq!(o2.len(), THREADS);
         assert_eq!(o3.len(), THREADS);
@@ -210,11 +207,8 @@ mod test {
                 .collect_vec()
         };
 
-        let (h1, h2, h3) =
+        let ((o1, _), (o2, _), (o3, _)) =
             PartySetup::localhost_setup_multithreads(THREADS, program, program, program);
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
         assert_eq!(o1.len(), THREADS);
         assert_eq!(o2.len(), THREADS);
         assert_eq!(o3.len(), THREADS);

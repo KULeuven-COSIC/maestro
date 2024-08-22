@@ -18,9 +18,6 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
-#[cfg(feature = "verbose-timing")]
-use {rep3_core::party::PARTY_TIMER, std::time::Instant};
-
 use super::{RndOhv16, RndOhvOutput, WL16Party};
 
 /// Computes `<<x * y>>` for `[[x]]` and `[[y]]` over GF4.
@@ -77,8 +74,6 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
     if party.prep_ohv.len() < v.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
     }
-    #[cfg(feature = "verbose-timing")]
-    let lut_open_time = Instant::now();
 
     let rnd_ohv = &party.prep_ohv[party.prep_ohv.len() - v.len()..];
     let rcv_cii = party.io().receive_field(Direction::Next, v.len());
@@ -93,23 +88,10 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
 
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_open", lut_open_time.elapsed());
 
-    #[cfg(feature = "verbose-timing")]
-    let lut_local_time = Instant::now();
     let res = lut_with_rnd_ohv_bitsliced(rnd_ohv, ci, cii, ciii);
     // remove used pre-processing material
     party.prep_ohv.truncate(party.prep_ohv.len() - v.len());
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_local", lut_local_time.elapsed());
 
     party.io().wait_for_completion();
     Ok(res)
@@ -176,8 +158,6 @@ fn ss_to_rss_layer(
 ///
 /// The output, the share [[x^-1]]_i, is written into `(s_i,s_ii)`.
 pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-    #[cfg(feature = "verbose-timing")]
-    let total = Instant::now();
 
     let n = si.len();
     // Step 1: WOL-conversion
@@ -191,23 +171,8 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
     // Step 4: Compute additive sharing of v
     let v = compute_v(&ah_i_sq, &al_i_sq, &ah_mul_al);
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local1", total.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let lut_layer_time = Instant::now();
-
     // Step 5: Compute replicated sharing of v inverse
     let (v_inv_i, v_inv_ii) = lut_layer(party, &v)?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut", lut_layer_time.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local2 = Instant::now();
 
     // Step 6: Locally compute additive sharing of a_h' and a_l'
     let ah_plus_al_i: Vec<_> = ah_i
@@ -223,14 +188,6 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
     let a_h_prime_ss = local_multiplication(&ah_i, &ah_ii, &v_inv_i, &v_inv_ii);
     let a_l_prime_ss = local_multiplication(&ah_plus_al_i, &ah_plus_al_ii, &v_inv_i, &v_inv_ii);
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local2", local2.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let ss_rss_timer = Instant::now();
-
     // Step 7: Generate replicated sharing of a_h' and a_l'
     let mut a_h_a_l_i = vec![GF4::ZERO; 2 * n];
     let mut a_h_a_l_ii = vec![GF4::ZERO; 2 * n];
@@ -241,14 +198,6 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
         &mut a_h_a_l_ii,
     )?;
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_ss_to_rss", ss_rss_timer.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local3 = Instant::now();
-
     // Step 8: WOL-back-conversion
     si.iter_mut()
         .enumerate()
@@ -256,17 +205,6 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
     sii.iter_mut()
         .enumerate()
         .for_each(|(j, s_i)| *s_i = wol_inv_map(&a_h_a_l_ii[j], &a_h_a_l_ii[j + n]));
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local3", local3.elapsed());
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer", total.elapsed());
     Ok(())
 }
 
@@ -349,8 +287,6 @@ fn gf8_inv_layer_opt_party<P: Party>(
 ) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     debug_assert_eq!(si.len(), prep_ohv.len());
-    #[cfg(feature = "verbose-timing")]
-    let total = Instant::now();
 
     let (mut ah_i, mut al_i) = wol_bitslice_gf4(si);
     let (ah_ii, mut al_ii) = wol_bitslice_gf4(sii);
@@ -363,23 +299,7 @@ fn gf8_inv_layer_opt_party<P: Party>(
         })
         .collect();
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local1", total.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local_time = Instant::now();
-
     let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v, prep_ohv)?;
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_total", local_time.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local_time = Instant::now();
 
     // local mult
     al_i.iter_mut().zip(ah_i.iter()).for_each(|(l, h)| *l += *h);
@@ -416,13 +336,6 @@ fn gf8_inv_layer_opt_party<P: Party>(
     // re-share
     let mut ah_prime_ii = ah_ii;
     let mut al_prime_ii = ah_plus_al_ii;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local2", local_time.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local_time = Instant::now();
     ss_to_rss_layer_opt(
         party,
         &mut ah_prime_ss,
@@ -430,30 +343,12 @@ fn gf8_inv_layer_opt_party<P: Party>(
         &mut ah_prime_ii,
         &mut al_prime_ii,
     )?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_ss_rss_total", local_time.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local_time = Instant::now();
     let ah_prime_i = ah_prime_ss;
     let al_prime_i = al_prime_ss;
 
     // un-bitslice
     un_wol_bitslice_gf4(&ah_prime_i, &al_prime_i, si);
     un_wol_bitslice_gf4(&ah_prime_ii, &al_prime_ii, sii);
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local3", local_time.elapsed());
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_total", total.elapsed());
     Ok(())
 }
 
@@ -520,8 +415,6 @@ pub fn lut_layer_opt<P: Party>(
     rnd_ohv: &[RndOhvOutput],
 ) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
     debug_assert_eq!(rnd_ohv.len(), 2 * v.len());
-    #[cfg(feature = "verbose-timing")]
-    let lut_open_time = Instant::now();
 
     let rcv_cii = party.receive_field::<BsGF4>(Direction::Next, v.len());
     let rcv_ciii = party.receive_field::<BsGF4>(Direction::Previous, v.len());
@@ -540,50 +433,15 @@ pub fn lut_layer_opt<P: Party>(
             *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
         });
     }
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_bs", lut_open_time.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let send_time = Instant::now();
 
     let ci = v;
     party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
     party.send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_send", send_time.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let rcv_time = Instant::now();
-
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_rcv", rcv_time.elapsed());
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_open", lut_open_time.elapsed());
-
-    #[cfg(feature = "verbose-timing")]
-    let lut_local_time = Instant::now();
     let res = lut_with_rnd_ohv_bitsliced_opt(rnd_ohv, ci, cii, ciii);
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_local", lut_local_time.elapsed());
-
     Ok(res)
 }
 
@@ -779,10 +637,7 @@ mod test {
                     .collect_vec()
             }
         };
-        let (h1, h2, h3) = WL16Setup::localhost_setup(program(in1), program(in2), program(in3));
-        let (s1, p1) = h1.join().unwrap();
-        let (s2, p2) = h2.join().unwrap();
-        let (s3, p3) = h3.join().unwrap();
+        let ((s1, p1), (s2, p2), (s3, p3)) = WL16Setup::localhost_setup(program(in1), program(in2), program(in3));
 
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
@@ -838,10 +693,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());
@@ -869,10 +721,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());
@@ -901,15 +750,12 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup_multithreads(
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup_multithreads(
             N_THREADS,
             program(s1),
             program(s2),
             program(s3),
         );
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());
@@ -940,15 +786,12 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup_multithreads(
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup_multithreads(
             N_THREADS,
             program(s1),
             program(s2),
             program(s3),
         );
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());

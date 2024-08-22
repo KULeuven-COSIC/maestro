@@ -455,11 +455,8 @@ mod test {
                 c
             }
         };
-        let (h1, h2, h3) =
+        let ((c1, _), (c2, _), (c3, _)) =
             PartySetup::localhost_setup(program(a1, b1), program(a2, b2), program(a3, b3));
-        let (c1, _) = h1.join().unwrap();
-        let (c2, _) = h2.join().unwrap();
-        let (c3, _) = h3.join().unwrap();
         consistent(&c1, &c2, &c3);
         assert_eq(c1, c2, c3, c)
     }
@@ -482,11 +479,8 @@ mod test {
                 ss_to_rss_shares(p, &[c]).unwrap()[0]
             }
         };
-        let (h1, h2, h3) =
+        let ((c1, _), (c2, _), (c3, _)) =
             PartySetup::localhost_setup(program(a1, b1), program(a2, b2), program(a3, b3));
-        let (c1, _) = h1.join().unwrap();
-        let (c2, _) = h2.join().unwrap();
-        let (c3, _) = h3.join().unwrap();
         consistent(&c1, &c2, &c3);
         assert_eq(c1, c2, c3, c)
     }
@@ -507,15 +501,12 @@ mod test {
             |h0: RssShare<GF2p64>, h1: RssShare<GF2p64>, h2: RssShare<GF2p64>, x: GF2p64| {
                 move |_p: &mut WL16ASParty| lagrange_deg2(&h0, &h1, &h2, x)
             };
-        let (h1, h2, h3) = localhost_setup_wl16as::<WL16DefaultParams, _, _, _, _, _, _>(
+        let ((r1, _), (r2, _), (r3, _)) = localhost_setup_wl16as::<WL16DefaultParams, _, _, _, _, _, _>(
             program(h01, h11, h21, x),
             program(h02, h12, h22, x),
             program(h03, h13, h23, x),
             None,
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         consistent(&r1, &r2, &r3);
         assert_eq(r1, r2, r3, y)
     }
@@ -540,14 +531,11 @@ mod test {
                 res
             }
         };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -575,15 +563,12 @@ mod test {
                 res
             }
         };
-        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup_multithreads(
             N_THREADS,
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -610,14 +595,11 @@ mod test {
         let program = |a: Vec<RssShare<GF2p64>>, b: Vec<RssShare<GF2p64>>, c: RssShare<GF2p64>| {
             move |p: &mut MainParty| verify_dot_product(p, &mut BroadcastContext::new(), a, b, c).unwrap()
         };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, false);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -649,14 +631,11 @@ mod test {
                     res
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -688,14 +667,11 @@ mod test {
                     res
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -727,14 +703,11 @@ mod test {
                     res
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -766,14 +739,11 @@ mod test {
                     verify_multiplication_triples(p, &mut BroadcastContext::new(), &mut [&mut BsGF4Encoder(&mut triples)], false).unwrap()
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, false);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -806,14 +776,11 @@ mod test {
                     verify_multiplication_triples(p, &mut context, &mut [&mut BsBool16Encoder(&mut triples)], false).unwrap()
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, false);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -846,14 +813,11 @@ mod test {
                     verify_multiplication_triples(p, &mut context, &mut [&mut GF2p64Encoder(&mut triples)], false).unwrap()
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, false);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -912,14 +876,11 @@ mod test {
                     res
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1, x1, y1, z1, u1, v1, w1),
             program(a2, b2, c2, x2, y2, z2, u2, v2, w2),
             program(a3, b3, c3, x3, y3, z3, u3, v3, w3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -980,15 +941,12 @@ mod test {
                     res
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup_multithreads(
             N_THREADS,
             program(a1, b1, c1, x1, y1, z1, u1, v1, w1),
             program(a2, b2, c2, x2, y2, z2, u2, v2, w2),
             program(a3, b3, c3, x3, y3, z3, u3, v3, w3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -1020,14 +978,11 @@ mod test {
                     res
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -1060,14 +1015,11 @@ mod test {
                     verify_multiplication_triples(p, &mut context, &mut [&mut GF2p64SubfieldEncoder(&mut triples)], false).unwrap()
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup(
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, false);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -1100,15 +1052,12 @@ mod test {
                     res
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup_multithreads(
             N_THREADS,
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, true);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -1142,15 +1091,12 @@ mod test {
                     verify_multiplication_triples_mt(p, &mut context, &mut [&mut GF2p64SubfieldEncoder(&mut triples)], false).unwrap()
                 }
             };
-        let (h1, h2, h3) = PartySetup::localhost_setup_multithreads(
+        let ((r1, _), (r2, _), (r3, _)) = PartySetup::localhost_setup_multithreads(
             N_THREADS,
             program(a1, b1, c1),
             program(a2, b2, c2),
             program(a3, b3, c3),
         );
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
         assert_eq!(r1, false);
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);

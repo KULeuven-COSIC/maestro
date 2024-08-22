@@ -294,14 +294,11 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        let (((c1, x13, x12), _), ((c2, x21, x23), _), ((c3, x32, x31), _)) = PartySetup::localhost_setup(
             program(x1.clone()),
             program(x2.clone()),
             program(x3.clone()),
         );
-        let ((c1, x13, x12), _) = h1.join().unwrap();
-        let ((c2, x21, x23), _) = h2.join().unwrap();
-        let ((c3, x32, x31), _) = h3.join().unwrap();
 
         assert_eq!(&x3, &x13);
         assert_eq!(&x2, &x12);
@@ -345,14 +342,11 @@ mod test {
                 p.compare_view(context).unwrap();
             }
         };
-        let (h1, h2, h3) = PartySetup::localhost_setup(
+        PartySetup::localhost_setup(
             program(x1.clone()),
             program(x2.clone()),
             program(x3.clone()),
         );
-        h1.join().unwrap();
-        h2.join().unwrap();
-        h3.join().unwrap();
     }
 
     #[test]
@@ -400,14 +394,11 @@ mod test {
                     }
                 }
             };
-            let (h1, h2, h3) = PartySetup::localhost_setup(
+            PartySetup::localhost_setup(
                 program(x1.clone()),
                 program(x2.clone()),
                 program(x3.clone()),
             );
-            h1.join().unwrap();
-            h2.join().unwrap();
-            h3.join().unwrap();
         }
 
         cheating_setup(0);
@@ -441,10 +432,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = PartySetup::localhost_setup(compute(x1), compute(x2), compute(x3));
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
+        let ((o1, _), (o2, _), (o3, _)) = PartySetup::localhost_setup(compute(x1), compute(x2), compute(x3));
 
         assert_eq!(&o1, &x);
         assert_eq!(&o2, &x);
@@ -494,10 +482,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = PartySetup::localhost_setup(program(x1), program(x2), program(x3));
-        let (open1, _) = h1.join().unwrap();
-        let (open2, _) = h2.join().unwrap();
-        let (open3, _) = h3.join().unwrap();
+        let ((open1, _), (open2, _), (open3, _)) = PartySetup::localhost_setup(program(x1), program(x2), program(x3));
 
         let open1 = open1.unwrap();
         let open2 = open2.unwrap();

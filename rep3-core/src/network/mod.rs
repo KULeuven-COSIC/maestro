@@ -652,9 +652,6 @@ mod tests {
     fn channel_close_properly() {
         const WRITE_SIZE: usize = 1_000_000;
         let (p1, p2, p3) = localhost_connect(|p| p, |p| p, |p| p);
-        let p1 = p1.join().unwrap();
-        let p2 = p2.join().unwrap();
-        let p3 = p3.join().unwrap();
         // we return channel p1 to p2
         let mut comm_next = NonBlockingCommChannel::from_channel(p1.comm_next).unwrap();
         let mut comm_next_receiver = NonBlockingCommChannel::from_channel(p2.comm_prev).unwrap();

@@ -340,8 +340,6 @@ fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
 
 #[cfg(test)]
 mod test {
-    use std::thread::JoinHandle;
-
     use rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
 
     use crate::aes::test::{
@@ -352,21 +350,21 @@ mod test {
     use super::GF4CircuitSemihonestParty;
 
     pub fn localhost_setup_gf4_circuit_semi_honest<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
         n_worker_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, GF4CircuitSemihonestParty)>,
-        JoinHandle<(T2, GF4CircuitSemihonestParty)>,
-        JoinHandle<(T3, GF4CircuitSemihonestParty)>,
+        (T1, GF4CircuitSemihonestParty),
+        (T2, GF4CircuitSemihonestParty),
+        (T3, GF4CircuitSemihonestParty),
     ) {
         fn adapter<T, Fx: FnOnce(&mut GF4CircuitSemihonestParty) -> T>(
             conn: ConnectedParty,
@@ -388,39 +386,39 @@ mod test {
     pub struct GF4SemihonestSetup;
     impl TestSetup<GF4CircuitSemihonestParty> for GF4SemihonestSetup {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            std::thread::JoinHandle<(T1, GF4CircuitSemihonestParty)>,
-            std::thread::JoinHandle<(T2, GF4CircuitSemihonestParty)>,
-            std::thread::JoinHandle<(T3, GF4CircuitSemihonestParty)>,
+            (T1, GF4CircuitSemihonestParty),
+            (T2, GF4CircuitSemihonestParty),
+            (T3, GF4CircuitSemihonestParty),
         ) {
             localhost_setup_gf4_circuit_semi_honest(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, GF4CircuitSemihonestParty)>,
-            JoinHandle<(T2, GF4CircuitSemihonestParty)>,
-            JoinHandle<(T3, GF4CircuitSemihonestParty)>,
+            (T1, GF4CircuitSemihonestParty),
+            (T2, GF4CircuitSemihonestParty),
+            (T3, GF4CircuitSemihonestParty),
         ) {
             localhost_setup_gf4_circuit_semi_honest(f1, f2, f3, Some(n_threads))
         }

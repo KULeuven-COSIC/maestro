@@ -153,15 +153,13 @@ impl GF8InvBlackBox for GF4CircuitASParty {
 
 #[cfg(test)]
 mod test {
-    use std::thread::JoinHandle;
-
     use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes};
     use rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
 
     use super::{GF4CircuitASParty, MultCheckType};
 
 
-    fn localhost_setup_gf4_circuit_as<T1: Send + 'static, F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static, T2: Send + 'static, F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static, T3: Send + 'static, F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>, check_type: MultCheckType) -> (JoinHandle<(T1,GF4CircuitASParty)>, JoinHandle<(T2,GF4CircuitASParty)>, JoinHandle<(T3,GF4CircuitASParty)>) {
+    fn localhost_setup_gf4_circuit_as<T1: Send, F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1, T2: Send, F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2, T3: Send, F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>, check_type: MultCheckType) -> ((T1,GF4CircuitASParty), (T2,GF4CircuitASParty), (T3,GF4CircuitASParty)) {
         fn adapter<T, Fx: FnOnce(&mut GF4CircuitASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>, check_type: MultCheckType) -> (T,GF4CircuitASParty) {
             let mut party = GF4CircuitASParty::setup(conn, n_worker_threads, check_type).unwrap();
             let t = f(&mut party);
@@ -175,31 +173,31 @@ mod test {
     pub struct GF4CircuitAsSetup;
     impl TestSetup<GF4CircuitASParty> for GF4CircuitAsSetup {
         fn localhost_setup<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3,
                 >(f1: F1, f2: F2, f3: F3) -> (
-                    JoinHandle<(T1, GF4CircuitASParty)>,
-                    JoinHandle<(T2, GF4CircuitASParty)>,
-                    JoinHandle<(T3, GF4CircuitASParty)>,
+                    (T1, GF4CircuitASParty),
+                    (T2, GF4CircuitASParty),
+                    (T3, GF4CircuitASParty),
                 ) {
             localhost_setup_gf4_circuit_as(f1, f2, f3, None, MultCheckType::Recursive { check_after_sbox: false })
         }
 
         fn localhost_setup_multithreads<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3,
                 >(n_worker_threads: usize, f1: F1, f2: F2, f3: F3) -> (
-                    JoinHandle<(T1, GF4CircuitASParty)>,
-                    JoinHandle<(T2, GF4CircuitASParty)>,
-                    JoinHandle<(T3, GF4CircuitASParty)>,
+                    (T1, GF4CircuitASParty),
+                    (T2, GF4CircuitASParty),
+                    (T3, GF4CircuitASParty),
                 ) {
             localhost_setup_gf4_circuit_as(f1, f2, f3, Some(n_worker_threads), MultCheckType::Recursive { check_after_sbox: false })
         }
@@ -252,31 +250,31 @@ mod test {
     pub struct GF4CircuitAsBucketBeaverSetup;
     impl TestSetup<GF4CircuitASParty> for GF4CircuitAsBucketBeaverSetup {
         fn localhost_setup<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3,
                 >(f1: F1, f2: F2, f3: F3) -> (
-                    JoinHandle<(T1, GF4CircuitASParty)>,
-                    JoinHandle<(T2, GF4CircuitASParty)>,
-                    JoinHandle<(T3, GF4CircuitASParty)>,
+                    (T1, GF4CircuitASParty),
+                    (T2, GF4CircuitASParty),
+                    (T3, GF4CircuitASParty),
                 ) {
             localhost_setup_gf4_circuit_as(f1, f2, f3, None, MultCheckType::BucketBeaver)
         }
 
         fn localhost_setup_multithreads<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3,
                 >(n_worker_threads: usize, f1: F1, f2: F2, f3: F3) -> (
-                    JoinHandle<(T1, GF4CircuitASParty)>,
-                    JoinHandle<(T2, GF4CircuitASParty)>,
-                    JoinHandle<(T3, GF4CircuitASParty)>,
+                    (T1, GF4CircuitASParty),
+                    (T2, GF4CircuitASParty),
+                    (T3, GF4CircuitASParty),
                 ) {
             localhost_setup_gf4_circuit_as(f1, f2, f3, Some(n_worker_threads), MultCheckType::BucketBeaver)
         }
@@ -329,31 +327,31 @@ mod test {
     pub struct GF4CircuitAsRecBeaverSetup;
     impl TestSetup<GF4CircuitASParty> for GF4CircuitAsRecBeaverSetup {
         fn localhost_setup<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3,
                 >(f1: F1, f2: F2, f3: F3) -> (
-                    JoinHandle<(T1, GF4CircuitASParty)>,
-                    JoinHandle<(T2, GF4CircuitASParty)>,
-                    JoinHandle<(T3, GF4CircuitASParty)>,
+                    (T1, GF4CircuitASParty),
+                    (T2, GF4CircuitASParty),
+                    (T3, GF4CircuitASParty),
                 ) {
             localhost_setup_gf4_circuit_as(f1, f2, f3, None, MultCheckType::RecursiveBeaver)
         }
 
         fn localhost_setup_multithreads<
-                    T1: Send + 'static,
-                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1 + 'static,
-                    T2: Send + 'static,
-                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2 + 'static,
-                    T3: Send + 'static,
-                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3 + 'static,
+                    T1: Send,
+                    F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3,
                 >(n_worker_threads: usize, f1: F1, f2: F2, f3: F3) -> (
-                    JoinHandle<(T1, GF4CircuitASParty)>,
-                    JoinHandle<(T2, GF4CircuitASParty)>,
-                    JoinHandle<(T3, GF4CircuitASParty)>,
+                    (T1, GF4CircuitASParty),
+                    (T2, GF4CircuitASParty),
+                    (T3, GF4CircuitASParty),
                 ) {
             localhost_setup_gf4_circuit_as(f1, f2, f3, Some(n_worker_threads), MultCheckType::RecursiveBeaver)
         }
