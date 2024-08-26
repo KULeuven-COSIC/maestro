@@ -5,12 +5,9 @@ use itertools::izip;
 use rayon::prelude::*;
 
 use crate::{
-    chida, lut256, share::{bs_bool16::BsBool16, gf4::GF4, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder}, wollut16::{RndOhv16, RndOhvOutput}
+    chida, lut256, share::{bs_bool16::BsBool16, gf4::GF4, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder, Ohv16TripleRecorder}, wollut16::{RndOhv16, RndOhvOutput}
 };
 use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
-
-#[cfg(feature = "verbose-timing")]
-use {rep3_core::party::PARTY_TIMER, std::time::Instant};
 
 fn map_si(rss: &RssShare<BsBool16>) -> &BsBool16 {
     &rss.si
@@ -155,9 +152,6 @@ pub fn generate_ohv16_bitslice<P: Party, Rec: MulTripleRecorder<BsBool16>>(party
    debug_assert_eq!(n16, r2.len());
    debug_assert_eq!(n16, r3.len());
 
-    #[cfg(feature = "verbose-timing")]
-    let mul_phase = Instant::now();
-
     // Round 1: compute r_i * r_j for i=0,1,2,3 and j > i
     // fill a with r0|r0|r0|r1|r1|r2
     // fill b with r1|r2|r3|r2|r3|r3
@@ -282,44 +276,19 @@ pub fn generate_ohv16_bitslice<P: Party, Rec: MulTripleRecorder<BsBool16>>(party
     let ohv_14 = inner_product(&elements, n16, zero, &SELECTOR_IDX_14);
     let ohv_15 = inner_product(&elements, n16, zero, &SELECTOR_IDX_15);
 
-    #[cfg(feature = "verbose-timing")]
-    {
-        let mul_phase = mul_phase.elapsed();
-        PARTY_TIMER
-            .lock()
-            .unwrap()
-            .report_time("prep_mul", mul_phase);
-    }
-    // #[cfg(feature = "verbose-timing")]
-
     return Ok([ohv_0, ohv_1, ohv_2, ohv_3, ohv_4, ohv_5, ohv_6, ohv_7, ohv_8, ohv_9, ohv_10, ohv_11, ohv_12, ohv_13, ohv_14, ohv_15]);
 }
 
 fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize, r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>) -> MpcResult<Vec<RndOhvOutput>> {
-    #[cfg(feature = "verbose-timing")]
-    let total = Instant::now();
-
     let sliced_bits = generate_ohv16_bitslice(party, triple_rec, &r0, &r1, &r2, &r3)?;
-    #[cfg(feature = "verbose-timing")]
-    let transpose_ohv = Instant::now();
-    let ohv_transposed = un_bitslice(sliced_bits);
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("prep_transpose_ohv", transpose_ohv.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let transpose_rand = Instant::now();
+    let res = ohv16_unbitslice_and_pack(sliced_bits, r0, r1, r2, r3, n);
+    Ok(res)
+}
 
+fn ohv16_unbitslice_and_pack(sliced_ohv_bits: [Vec<RssShare<BsBool16>>; 16], r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>, n: usize) -> Vec<RndOhvOutput> {
     let rand_transposed = un_bitslice4(&[r0, r1, r2, r3]);
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("prep_transpose_rand", transpose_rand.elapsed());
-
-    let res = izip!(
+    let ohv_transposed = un_bitslice(sliced_ohv_bits);
+    izip!(
         ohv_transposed.into_iter().take(n),
         rand_transposed.into_iter().take(n)
     )
@@ -328,15 +297,7 @@ fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, tri
         sii: ohv_sii,
         random: rand.si,
     })
-    .collect();
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("prep_total", total.elapsed());
-
-    Ok(res)
+    .collect()
 }
 
 
@@ -403,6 +364,154 @@ fn generate_ohv16_with_bitstring_recording<P: Party, Rec: BitStringMulTripleReco
         .collect())
 }
 
+// implements Protocol 7 with fixed inputs
+#[inline]
+pub fn generate_ohv16_bitslice_opt_check<P: Party, Rec: Ohv16TripleRecorder>(party: &mut P, triple_rec: &mut Rec, r0: &Vec<RssShare<BsBool16>>, r1: &Vec<RssShare<BsBool16>>, r2: &Vec<RssShare<BsBool16>>, r3: &Vec<RssShare<BsBool16>>) -> MpcResult<[Vec<RssShare<BsBool16>>; 16]> {
+   let n16 = r0.len();
+   debug_assert_eq!(n16, r1.len());
+   debug_assert_eq!(n16, r2.len());
+   debug_assert_eq!(n16, r3.len());
+
+    // Round 1: compute r_i * r_j for i=0,1,2,3 and j > i
+    // fill a with r0|r0|r0|r1|r1|r2
+    // fill b with r1|r2|r3|r2|r3|r3
+
+    let mut ai = vec![BsBool16::default(); 6 * n16];
+    fill(&mut ai[..n16], r0.iter().map(map_si));
+    ai.copy_within(0..n16, n16);
+    ai.copy_within(0..n16, 2 * n16);
+    fill(&mut ai[3 * n16..4 * n16], r1.iter().map(map_si));
+    ai.copy_within(3 * n16..4 * n16, 4 * n16);
+    fill(&mut ai[5 * n16..], r2.iter().map(map_si));
+
+    let mut aii = vec![BsBool16::default(); 6 * n16];
+    fill(&mut aii[..n16], r0.iter().map(map_sii));
+    aii.copy_within(0..n16, n16);
+    aii.copy_within(0..n16, 2 * n16);
+    fill(&mut aii[3 * n16..4 * n16], r1.iter().map(map_sii));
+    aii.copy_within(3 * n16..4 * n16, 4 * n16);
+    fill(&mut aii[5 * n16..], r2.iter().map(map_sii));
+
+    triple_rec.record_gf2p9_triple_a(&ai[..n16], &aii[..n16], &ai[3*n16..4*n16], &aii[3*n16..4*n16], &ai[5*n16..], &aii[5*n16..]);
+
+    let mut bi = vec![BsBool16::default(); 6 * n16];
+    fill(&mut bi[..n16], r1.iter().map(map_si));
+    fill(&mut bi[n16..2 * n16], r2.iter().map(map_si));
+    fill(&mut bi[2 * n16..3 * n16], r3.iter().map(map_si));
+    bi.copy_within(n16..2 * n16, 3 * n16);
+    bi.copy_within(2 * n16..3 * n16, 4 * n16);
+    bi.copy_within(2 * n16..3 * n16, 5 * n16);
+
+    let mut bii = vec![BsBool16::default(); 6 * n16];
+    fill(&mut bii[..n16], r1.iter().map(map_sii));
+    fill(&mut bii[n16..2 * n16], r2.iter().map(map_sii));
+    fill(&mut bii[2 * n16..3 * n16], r3.iter().map(map_sii));
+    bii.copy_within(n16..2 * n16, 3 * n16);
+    bii.copy_within(2 * n16..3 * n16, 4 * n16);
+    bii.copy_within(2 * n16..3 * n16, 5 * n16);
+
+    triple_rec.record_gf2p9_triple_b(&bi[2*n16..3*n16], &bii[2*n16..3*n16], &ai[..n16], &aii[..n16], &bi[..n16], &bii[..n16]);
+
+    let mut ci = vec![BsBool16::default(); 6 * n16];
+    let mut cii = vec![BsBool16::default(); 6 * n16];
+    chida::online::mul_no_sync(party, &mut ci, &mut cii, &ai, &aii, &bi, &bii)?;
+    triple_rec.record_gf2p9_triple_c(
+        [&ci[2*n16..3*n16], &ci[4*n16..5*n16], &ci[5*n16..], &ai[..n16], &ci[..n16], &ci[n16..2*n16], &ci[..n16], &ai[3*n16..4*n16], &ci[3*n16..4*n16]],
+        [&cii[2*n16..3*n16], &cii[4*n16..5*n16], &cii[5*n16..], &aii[..n16], &cii[..n16], &cii[n16..2*n16], &cii[..n16], &aii[3*n16..4*n16], &cii[3*n16..4*n16]]
+    );
+
+    triple_rec.record_gf2p9_triple_a(&ci[..n16], &cii[..n16], &ci[2*n16..3*n16], &cii[2*n16..3*n16], &ci[4*n16..5*n16], &cii[4*n16..5*n16]);
+    triple_rec.record_gf2p9_triple_b(&ai[5*n16..], &aii[5*n16..], &bi[2*n16..3*n16], &bii[2*n16..3*n16], &ci[5*n16..], &cii[5*n16..]);
+
+    // Round 2: compute (r_i * r_j) * r_k for k > j and r0r1 * r2r3
+    // fill a2 with r01|r01|r02|r12|r01
+    // fill b2 with  r2| r3| r3| r3|r23
+
+    let mut a2i = vec![BsBool16::default(); 5 * n16];
+    a2i[..n16].copy_from_slice(&ci[..n16]);
+    a2i.copy_within(..n16, n16);
+    a2i[2 * n16..3 * n16].copy_from_slice(&ci[n16..2 * n16]);
+    a2i[3 * n16..4 * n16].copy_from_slice(&ci[3 * n16..4 * n16]);
+    a2i.copy_within(..n16, 4 * n16);
+
+    let mut a2ii = vec![BsBool16::default(); 5 * n16];
+    a2ii[..n16].copy_from_slice(&cii[..n16]);
+    a2ii.copy_within(..n16, n16);
+    a2ii[2 * n16..3 * n16].copy_from_slice(&cii[n16..2 * n16]);
+    a2ii[3 * n16..4 * n16].copy_from_slice(&cii[3 * n16..4 * n16]);
+    a2ii.copy_within(..n16, 4 * n16);
+
+    let mut b2i = vec![BsBool16::default(); 5 * n16];
+    b2i[..n16].copy_from_slice(&ai[5 * n16..]);
+    b2i[n16..2 * n16].copy_from_slice(&bi[2 * n16..3 * n16]);
+    b2i.copy_within(n16..2 * n16, 2 * n16);
+    b2i.copy_within(n16..2 * n16, 3 * n16);
+    b2i[4 * n16..].copy_from_slice(&ci[5 * n16..]);
+
+    let mut b2ii = vec![BsBool16::default(); 5 * n16];
+    b2ii[..n16].copy_from_slice(&aii[5 * n16..]);
+    b2ii[n16..2 * n16].copy_from_slice(&bii[2 * n16..3 * n16]);
+    b2ii.copy_within(n16..2 * n16, 2 * n16);
+    b2ii.copy_within(n16..2 * n16, 3 * n16);
+    b2ii[4 * n16..].copy_from_slice(&cii[5 * n16..]);
+
+    let mut c2i = vec![BsBool16::default(); 5 * n16];
+    let mut c2ii = vec![BsBool16::default(); 5 * n16];
+    chida::online::mul_no_sync(party, &mut c2i, &mut c2ii, &a2i, &a2ii, &b2i, &b2ii)?;
+    triple_rec.record_gf2p9_triple_c(
+        [&c2i[..n16], &c2i[2*n16..3*n16], &c2i[3*n16..4*n16], &c2i[n16..2*n16], &ci[2*n16..3*n16], &ci[4*n16..5*n16], &c2i[4*n16..], &c2i[2*n16..3*n16], &c2i[3*n16..4*n16]],
+        [&c2ii[..n16], &c2ii[2*n16..3*n16], &c2ii[3*n16..4*n16], &c2ii[n16..2*n16], &cii[2*n16..3*n16], &cii[4*n16..5*n16], &c2ii[4*n16..], &c2ii[2*n16..3*n16], &c2ii[3*n16..4*n16]]
+    );
+
+    let pairs: Vec<_> = ci
+        .into_iter()
+        .zip(cii)
+        .map(|(si, sii)| RssShare::from(si, sii))
+        .collect();
+    let r01 = &pairs[..n16];
+    let r02 = &pairs[n16..2 * n16];
+    let r03 = &pairs[2 * n16..3 * n16];
+    let r12 = &pairs[3 * n16..4 * n16];
+    let r13 = &pairs[4 * n16..5 * n16];
+    let r23 = &pairs[5 * n16..];
+
+    let triples: Vec<_> = c2i
+        .into_iter()
+        .zip(c2ii)
+        .map(|(si, sii)| RssShare::from(si, sii))
+        .collect();
+    let r012 = &triples[..n16];
+    let r013 = &triples[n16..2 * n16];
+    let r023 = &triples[2 * n16..3 * n16];
+    let r123 = &triples[3 * n16..4 * n16];
+    let r0123 = &triples[4 * n16..];
+
+    let elements = [
+        &r0, &r1, r01, &r2, r02, r12, r012, &r3, r03, r13, r013, r23, r023, r123, r0123,
+    ];
+
+    let zero = party.constant(BsBool16::ZERO);
+    let one = party.constant(BsBool16::ONE);
+    let ohv_0 = inner_product(&elements, n16, one, &SELECTOR_IDX_0);
+    let ohv_1 = inner_product(&elements, n16, zero, &SELECTOR_IDX_1);
+    let ohv_2 = inner_product(&elements, n16, zero, &SELECTOR_IDX_2);
+    let ohv_3 = inner_product(&elements, n16, zero, &SELECTOR_IDX_3);
+    let ohv_4 = inner_product(&elements, n16, zero, &SELECTOR_IDX_4);
+    let ohv_5 = inner_product(&elements, n16, zero, &SELECTOR_IDX_5);
+    let ohv_6 = inner_product(&elements, n16, zero, &SELECTOR_IDX_6);
+    let ohv_7 = inner_product(&elements, n16, zero, &SELECTOR_IDX_7);
+    let ohv_8 = inner_product(&elements, n16, zero, &SELECTOR_IDX_8);
+    let ohv_9 = inner_product(&elements, n16, zero, &SELECTOR_IDX_9);
+    let ohv_10 = inner_product(&elements, n16, zero, &SELECTOR_IDX_10);
+    let ohv_11 = inner_product(&elements, n16, zero, &SELECTOR_IDX_11);
+    let ohv_12 = inner_product(&elements, n16, zero, &SELECTOR_IDX_12);
+    let ohv_13 = inner_product(&elements, n16, zero, &SELECTOR_IDX_13);
+    let ohv_14 = inner_product(&elements, n16, zero, &SELECTOR_IDX_14);
+    let ohv_15 = inner_product(&elements, n16, zero, &SELECTOR_IDX_15);
+
+    return Ok([ohv_0, ohv_1, ohv_2, ohv_3, ohv_4, ohv_5, ohv_6, ohv_7, ohv_8, ohv_9, ohv_10, ohv_11, ohv_12, ohv_13, ohv_14, ohv_15]);
+}
+
 #[inline]
 pub fn into_16_tuple<T>(vec: Vec<T>) -> [T; 16] {
     debug_assert_eq!(vec.len(), 16);
@@ -455,12 +564,12 @@ pub mod test {
     use crate::{
         chida::{online::test::ChidaSetup, ChidaParty}, share::{
             bs_bool16::BsBool16, gf2p64::GF2p64, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}
-        }, util::mul_triple_vec::{MulTripleVector, NoMulTripleRecording}, wollut16::{
-            offline::{generate_ohv16_with_bitstring_recording, generate_random_ohv16, generate_random_ohv16_bitstring, generate_random_ohv16_bitstring_mt, generate_random_ohv16_mt},
+        }, util::mul_triple_vec::{test::check_correct_encoding, MulTripleVector, NoMulTripleRecording, Ohv16TripleEncoder, Ohv16TripleVector}, wollut16::{
+            offline::{generate_ohv16_bitslice_opt_check, generate_ohv16_with_bitstring_recording, generate_random_ohv16, generate_random_ohv16_bitstring, generate_random_ohv16_bitstring_mt, generate_random_ohv16_mt, un_bitslice},
             RndOhvOutput,
         }
     };
-    use rep3_core::{test::TestSetup, share::RssShare};
+    use rep3_core::{share::RssShare, test::TestSetup};
 
     use super::{generate_ohv16, un_bitslice4};
 
@@ -525,14 +634,11 @@ pub mod test {
                        b3: Vec<RssShare<BsBool16>>| {
             move |p: &mut ChidaParty| generate_ohv16(p.as_party_mut(), &mut NoMulTripleRecording, 16, b0, b1, b2, b3).unwrap()
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(
+        let ((o1, _), (o2, _), (o3, _)) = ChidaSetup::localhost_setup(
             program(bit0.0, bit1.0, bit2.0, bit3.0),
             program(bit0.1, bit1.1, bit2.1, bit3.1),
             program(bit0.2, bit1.2, bit2.2, bit3.2),
         );
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
 
         assert_eq!(o1.len(), 16);
         assert_eq!(o2.len(), 16);
@@ -582,10 +688,7 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(), program(), program());
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
+        let ((o1, _), (o2, _), (o3, _)) = ChidaSetup::localhost_setup(program(), program(), program());
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);
@@ -602,11 +705,8 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) =
+        let ((o1, _), (o2, _), (o3, _)) =
             ChidaSetup::localhost_setup_multithreads(THREADS, program(), program(), program());
-        let (o1, _) = h1.join().unwrap();
-        let (o2, _) = h2.join().unwrap();
-        let (o3, _) = h3.join().unwrap();
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);
@@ -649,14 +749,11 @@ pub mod test {
                 (ohv, triples)
             }
         };
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(
+        let (((o1, triples1), _), ((o2, triples2), _), ((o3, triples3), _)) = ChidaSetup::localhost_setup(
             program(bit0.0, bit1.0, bit2.0, bit3.0),
             program(bit0.1, bit1.1, bit2.1, bit3.1),
             program(bit0.2, bit1.2, bit2.2, bit3.2),
         );
-        let ((o1, triples1), _) = h1.join().unwrap();
-        let ((o2, triples2), _) = h2.join().unwrap();
-        let ((o3, triples3), _): ((Vec<RndOhvOutput>, MulTripleVector<GF2p64>), ChidaParty) = h3.join().unwrap();
 
         assert_eq!(o1.len(), 16);
         assert_eq!(o2.len(), 16);
@@ -695,10 +792,7 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) = ChidaSetup::localhost_setup(program(), program(), program());
-        let ((o1, triples1), _) = h1.join().unwrap();
-        let ((o2, triples2), _) = h2.join().unwrap();
-        let ((o3, triples3), _) = h3.join().unwrap();
+        let (((o1, triples1), _), ((o2, triples2), _), ((o3, triples3), _)) = ChidaSetup::localhost_setup(program(), program(), program());
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);
@@ -723,11 +817,8 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) =
+        let (((o1, triples1), _), ((o2, triples2), _), ((o3, triples3), _)) =
             ChidaSetup::localhost_setup_multithreads(THREADS, program(), program(), program());
-        let ((o1, triples1), _) = h1.join().unwrap();
-        let ((o2, triples2), _) = h2.join().unwrap();
-        let ((o3, triples3), _) = h3.join().unwrap();
         assert_eq!(o1.len(), N);
         assert_eq!(o2.len(), N);
         assert_eq!(o3.len(), N);
@@ -738,5 +829,64 @@ pub mod test {
         assert_eq!(triples1.len(), triples3.len());
 
         check_correct_triples(triples1, triples2, triples3);
+    }
+
+    #[test]
+    fn generate_ohv16_bitslice_opt_check_correct() {
+        let inputs = [
+            vec![BsBool16::new(0b0101010101010101)],
+            vec![BsBool16::new(0b0011001100110011)],
+            vec![BsBool16::new(0b0000111100001111)],
+            vec![BsBool16::new(0b0000000011111111)],
+        ];
+        let mut rng = thread_rng();
+        let bit0 = secret_share_vector::<BsBool16, _>(&mut rng, &inputs[0]);
+        let bit1 = secret_share_vector::<BsBool16, _>(&mut rng, &inputs[1]);
+        let bit2 = secret_share_vector::<BsBool16, _>(&mut rng, &inputs[2]);
+        let bit3 = secret_share_vector::<BsBool16, _>(&mut rng, &inputs[3]);
+
+        let program = |b0: Vec<RssShare<BsBool16>>,
+                       b1: Vec<RssShare<BsBool16>>,
+                       b2: Vec<RssShare<BsBool16>>,
+                       b3: Vec<RssShare<BsBool16>>| {
+            move |p: &mut ChidaParty| {
+                let mut triples = Ohv16TripleVector::new();
+                let ohv = generate_ohv16_bitslice_opt_check(p.as_party_mut(), &mut triples, &b0, &b1, &b2, &b3).unwrap();
+                let res = un_bitslice(ohv);
+                let rand = un_bitslice4(&[b0, b1, b2, b3]);
+                (res, rand, triples)
+            }
+        };
+        let (((o1, rand1, mut triples1), _), ((o2, rand2, mut triples2), _), ((o3, rand3, mut triples3), _)) = ChidaSetup::localhost_setup(
+            program(bit0.0, bit1.0, bit2.0, bit3.0),
+            program(bit0.1, bit1.1, bit2.1, bit3.1),
+            program(bit0.2, bit1.2, bit2.2, bit3.2),
+        );
+
+        assert_eq!(o1.len(), 16);
+        assert_eq!(o2.len(), 16);
+        assert_eq!(o3.len(), 16);
+        for (i, (o1, o2, o3, r1, r2, r3)) in izip!(o1, o2, o3, rand1, rand2, rand3).enumerate() {
+            consistent(&r1, &r2, &r3);
+            let rand = r1.si + r2.si + r3.si;
+            // rand should be 15-i (per construction of inputs)
+            assert_eq!(rand.as_u8(), (15 - i) as u8);
+
+            // check consistent
+            assert_eq!(o1.1, o2.0);
+            assert_eq!(o2.1, o3.0);
+            assert_eq!(o3.1, o1.0);
+            // check correct
+            let ohv = o1.0.0 ^ o2.0.0 ^ o3.0.0;
+            let index = rand.as_u8() as usize;
+            assert!(index < 16);
+            assert_eq!(1 << index, ohv);
+        }
+
+        assert_eq!(triples1.len(), 2);
+        assert_eq!(triples1.len(), triples2.len());
+        assert_eq!(triples1.len(), triples3.len());
+
+        check_correct_encoding(Ohv16TripleEncoder(&mut triples1), Ohv16TripleEncoder(&mut triples2), Ohv16TripleEncoder(&mut triples3), 2*16);
     }
 }

@@ -11,6 +11,7 @@ use crate::network::task::{Direction, IoLayerOwned};
 use crate::network::{self, ConnectedParty, NetSerializable};
 use crate::party::correlated_randomness::SharedRng;
 use crate::share::{HasZero, RssShare, RssShareVec};
+use itertools::{repeat_n, Itertools};
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -419,24 +420,15 @@ impl MainParty {
         Self::split_range_helper(n_parts, length, end_exclusive)
     }
 
-    pub fn create_thread_parties(&mut self, ranges: Vec<(usize, usize)>) -> Vec<ThreadParty<()>> {
-        self.create_thread_parties_with_additional_data(ranges, |_, _| ())
-    }
-
-    pub fn create_thread_parties_with_additional_data<T, F: FnMut(usize, usize) -> T>(
-        &mut self,
-        ranges: Vec<(usize, usize)>,
-        mut data: F,
-    ) -> Vec<ThreadParty<T>> {
+    fn create_thread_parties_internal<T>(&mut self, ranges: Vec<(usize, usize)>, data: impl Iterator<Item=T>) -> Vec<ThreadParty<T>> {
         assert!(self.io.is_some(), "I/O closed");
-        let mut vec = Vec::with_capacity(ranges.len());
-        for (start, end) in ranges {
+        ranges.into_iter().zip_eq(data).map(|((start, end), d)| {
             let random_local = ChaCha20Rng::from_rng(&mut self.random_local).unwrap();
             let random_next = SharedRng::seeded_from(&mut self.random_next);
             let random_prev = SharedRng::seeded_from(&mut self.random_prev);
             let io = self.io().clone_io_layer();
             let i = self.i;
-            vec.push(ThreadParty::new(
+            ThreadParty::new(
                 i,
                 start,
                 end,
@@ -444,10 +436,27 @@ impl MainParty {
                 random_prev,
                 random_local,
                 io,
-                data(start, end),
-            ))
-        }
-        vec
+                d,
+            )
+        })
+        .collect()
+    }
+
+    pub fn create_thread_parties(&mut self, ranges: Vec<(usize, usize)>) -> Vec<ThreadParty<()>> {
+        let l = ranges.len();
+        self.create_thread_parties_internal(ranges, repeat_n((), l))
+    }
+
+    pub fn create_thread_parties_with_additional_data<T, F: FnMut(usize, usize) -> T>(
+        &mut self,
+        ranges: Vec<(usize, usize)>,
+        mut data: F,
+    ) -> Vec<ThreadParty<T>> {
+        self.create_thread_parties_internal(ranges.clone(), ranges.into_iter().map(|(start, end)| data(start, end)))
+    }
+
+    pub fn create_thread_parties_with_additiona_data_vec<T>(&mut self, ranges: Vec<(usize, usize)>, data: Vec<T>) -> Vec<ThreadParty<T>> {
+        self.create_thread_parties_internal(ranges, data.into_iter())
     }
 
     pub fn run_in_threadpool<T: Send, F: FnOnce() -> MpcResult<T> + Send>(

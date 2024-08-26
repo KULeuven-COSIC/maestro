@@ -1,21 +1,17 @@
-use std::{iter, time::Instant};
+use std::iter;
 
 use itertools::{izip, repeat_n, Itertools};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
-    chida, share::{bs_bool16::BsBool16, gf8::GF8, Field}, util::{self, mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder}}, wollut16
+    chida, share::{bs_bool16::BsBool16, gf8::GF8, Field}, util::{self, mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder, Ohv16TripleRecorder}}, wollut16
 };
 use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
 
 use super::{RndOhv256Output, RndOhv256OutputSS};
 
 pub fn generate_rndohv256<Rec: BitStringMulTripleRecorder>(party: &mut MainParty, mul_triple_recorder: &mut Rec, amount: usize) -> MpcResult<Vec<RndOhv256Output>> {
-    let n_blocks = if amount % 16 == 0 {
-        amount / 16
-    } else {
-        amount / 16 + 1
-    };
+    let n_blocks = amount.div_ceil(16);
     let bits = (0..8)
         .map(|_| party.generate_random(n_blocks))
         .collect_vec();
@@ -71,6 +67,28 @@ pub fn generate_rndohv256_ss<Rec: MulTripleRecorder<BsBool16>>(party: &mut MainP
     Ok(res)
 }
 
+pub fn generate_rndohv256_ss_ohv_check<Rec: Ohv16TripleRecorder>(party: &mut MainParty, mul_triple_recorder: &mut Rec, amount: usize) -> MpcResult<Vec<RndOhv256OutputSS>> {
+    let n_blocks = amount.div_ceil(16);
+    let bits = random_8_bits(party, n_blocks);
+    let res = generate_rndohv256_ss_ohv_check_output(party, mul_triple_recorder, amount, bits)?;
+    party.wait_for_completion();
+    Ok(res)
+}
+
+fn generate_rndohv256_ss_ohv_check_output<P: Party, Rec: Ohv16TripleRecorder>(party: &mut P, triple_rec: &mut Rec, n: usize, random_bits: [Vec<RssShare<BsBool16>>; 8]) -> MpcResult<Vec<RndOhv256OutputSS>> {
+    let n16 = random_bits[0].len();
+    debug_assert!(random_bits.iter().all(|v| v.len() == n16));
+    debug_assert_eq!(n16, n.div_ceil(16)); // otherwise we produce too many random_bits than actually needed
+
+    let [r0, r1, r2, r3, r4, r5, r6, r7] = random_bits;
+    // these two can also be realized in one call to generate_ohv_16_bitslice with double the size
+    let lower = wollut16::offline::generate_ohv16_bitslice_opt_check(party, triple_rec, &r0, &r1, &r2, &r3)?;
+    let upper = wollut16::offline::generate_ohv16_bitslice_opt_check(party, triple_rec, &r4, &r5, &r6, &r7)?;
+
+    // let ohv16_time = ohv16_time.elapsed();
+    Ok(tensor_two_ohv16(party, lower, upper, [r0, r1, r2, r3, r4, r5, r6, r7], n))
+}
+
 pub fn generate_rndohv256_ss_mt<Rec: MulTripleRecorder<BsBool16>>(party: &mut MainParty, mul_triple_recorder: &mut Rec, amount: usize) -> MpcResult<Vec<RndOhv256OutputSS>> {
     let n_blocks = amount.div_ceil(16);
     let ranges = party.split_range_equally(n_blocks);
@@ -80,10 +98,10 @@ pub fn generate_rndohv256_ss_mt<Rec: MulTripleRecorder<BsBool16>>(party: &mut Ma
         thread_parties
             .into_par_iter()
             .map(|mut thread_party| {
-                let bits = random_8_bits(&mut thread_party, n_blocks);
+                let n_blocks_per_thread = thread_party.task_size();
+                let bits = random_8_bits(&mut thread_party, n_blocks_per_thread);
                 let mut recorder = thread_party.additional_data.take().unwrap();
-                let amount = 16*thread_party.task_size();
-                let out = generate_ohv256_ss_output(&mut thread_party, &mut recorder, amount, bits).unwrap();
+                let out = generate_ohv256_ss_output(&mut thread_party, &mut recorder, 16*n_blocks_per_thread, bits).unwrap();
                 (out, recorder)
             })
             .collect_into_vec(&mut res);
@@ -97,6 +115,31 @@ pub fn generate_rndohv256_ss_mt<Rec: MulTripleRecorder<BsBool16>>(party: &mut Ma
     Ok(res)
 }
 
+pub fn generate_rndohv256_ss_ohv_check_mt<Rec: Ohv16TripleRecorder>(party: &mut MainParty, mul_triple_recorder: &mut Rec, amount: usize) -> MpcResult<Vec<RndOhv256OutputSS>> {
+    let n_blocks = amount.div_ceil(16);
+    let ranges = party.split_range_equally(n_blocks);
+    let task_sizes = ranges.iter().map(|(start, end)| 4*(end - start)).collect_vec();
+    let slices = mul_triple_recorder.create_thread_mul_triple_recorders(&task_sizes).into_iter().map(|sl| Some(sl)).collect();
+    let thread_parties = party.create_thread_parties_with_additiona_data_vec(ranges, slices);
+    let mut res = Vec::with_capacity(thread_parties.len());
+    party.run_in_threadpool(|| {
+        thread_parties
+            .into_par_iter()
+            .map(|mut thread_party| {
+                let n_blocks_per_thread = thread_party.task_size();
+                let bits = random_8_bits(&mut thread_party, n_blocks_per_thread);
+                let mut rec = thread_party.additional_data.take().unwrap();
+                generate_rndohv256_ss_ohv_check_output(&mut thread_party, &mut rec, 16*n_blocks_per_thread, bits).unwrap()
+            })
+            .collect_into_vec(&mut res);
+        Ok(())
+    })?;
+
+    let res = res.into_iter().flatten().take(amount).collect();
+    party.wait_for_completion();
+    Ok(res)
+}
+
 fn random_8_bits<P: Party>(party: &mut P, n_blocks: usize) -> [Vec<RssShare<BsBool16>>; 8] {
     [
         party.generate_random(n_blocks), party.generate_random(n_blocks), party.generate_random(n_blocks), party.generate_random(n_blocks),
@@ -104,21 +147,7 @@ fn random_8_bits<P: Party>(party: &mut P, n_blocks: usize) -> [Vec<RssShare<BsBo
     ]
 }
 
-fn generate_ohv256_ss_output<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize, random_bits: [Vec<RssShare<BsBool16>>; 8]) -> MpcResult<Vec<RndOhv256OutputSS>> {
-    let n16 = random_bits[0].len();
-    debug_assert!(random_bits.iter().all(|v| v.len() == n16));
-
-    let [r0, r1, r2, r3, r4, r5, r6, r7] = random_bits;
-
-    let ohv16_time = Instant::now();
-    
-    // these two can also be realized in one call to generate_ohv_16_bitslice with double the size
-    let lower = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r0, &r1, &r2, &r3)?;
-    let upper = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r4, &r5, &r6, &r7)?;
-
-    let ohv16_time = ohv16_time.elapsed();
-    let tensor_time = Instant::now();
-
+fn tensor_two_ohv16<P: Party>(party: &mut P, lower: [Vec<RssShare<BsBool16>>; 16], upper: [Vec<RssShare<BsBool16>>; 16], random_bits: [Vec<RssShare<BsBool16>>; 8], n: usize) -> Vec<RndOhv256OutputSS> {
     // tensor prod
     let mut bits = Vec::with_capacity(256);
     for upper_bit in upper {
@@ -130,22 +159,30 @@ fn generate_ohv256_ss_output<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: 
         }));
     }
 
-    let tensor_time = tensor_time.elapsed();
-    let unpack_time1 = Instant::now();
-
     let ohvs = util::un_bitslice::un_bitslice_ss(&bits);
-    let unpack_time1 = unpack_time1.elapsed();
-    let unpack_time2 = Instant::now();
-    let rand = un_bitslice8(&[r0, r1, r2, r3, r4, r5, r6, r7]);
-    let unpack_time2 = unpack_time2.elapsed();
-    println!("Ohv16 time: {}s, tensor time: {}s, unpack time1: {}s, unpack time2: {}s", ohv16_time.as_secs_f32(), tensor_time.as_secs_f32(), unpack_time1.as_secs_f32(), unpack_time2.as_secs_f32());
-    Ok(ohvs.into_iter().zip(rand).map(|(ohv, rand)| RndOhv256OutputSS {
+    let rand = un_bitslice8(&random_bits);
+    ohvs.into_iter().zip(rand).map(|(ohv, rand)| RndOhv256OutputSS {
         ohv,
         random_si: rand.si,
         random_sii: rand.sii,
     })
     .take(n)
-    .collect())
+    .collect()
+}
+
+fn generate_ohv256_ss_output<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize, random_bits: [Vec<RssShare<BsBool16>>; 8]) -> MpcResult<Vec<RndOhv256OutputSS>> {
+    let n16 = random_bits[0].len();
+    debug_assert!(random_bits.iter().all(|v| v.len() == n16));
+    debug_assert_eq!(n16, n.div_ceil(16));
+
+    let [r0, r1, r2, r3, r4, r5, r6, r7] = random_bits;
+    
+    // these two can also be realized in one call to generate_ohv_16_bitslice with double the size
+    let lower = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r0, &r1, &r2, &r3)?;
+    let upper = wollut16::offline::generate_ohv16_bitslice(party, triple_rec, &r4, &r5, &r6, &r7)?;
+
+    // let ohv16_time = ohv16_time.elapsed();
+    Ok(tensor_two_ohv16(party, lower, upper, [r0, r1, r2, r3, r4, r5, r6, r7], n))
 }
 
 /// bits are in lsb-first order

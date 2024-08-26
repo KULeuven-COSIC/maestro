@@ -4,7 +4,7 @@ use std::mem;
 use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
-use crate::{aes::ss::{GF8InvBlackBoxSS, GF8InvBlackBoxSSMal}, share::{bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf8::GF8}, util::mul_triple_vec::{BsBool16Encoder, MulTripleEncoder, MulTripleRecorder, MulTripleVector, NoMulTripleRecording}, wollut16_malsec::mult_verification};
+use crate::{aes::ss::{GF8InvBlackBoxSS, GF8InvBlackBoxSSMal}, share::{bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf8::GF8}, util::mul_triple_vec::{BsBool16Encoder, MulTripleEncoder, MulTripleRecorder, MulTripleVector, NoMulTripleRecording, Ohv16TripleEncoder, Ohv16TripleVector}, wollut16_malsec::mult_verification};
 use rep3_core::{network::{task::Direction, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare}};
 
 use super::{lut256_tables, offline, RndOhv256OutputSS};
@@ -121,11 +121,25 @@ impl GF8InvBlackBoxSS for Lut256SSParty {
 
 }
 
+enum PrepTriples {
+    GF2(MulTripleVector<BsBool16>),
+    Ohv(Ohv16TripleVector)
+}
+
+impl PrepTriples {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::GF2(v) => v.len(),
+            Self::Ohv(v) => v.len(),
+        }
+    }
+}
+
 pub struct Lut256SSMalParty {
     inner: MainParty,
     prep_ohv: Vec<RndOhv256OutputSS>,
     context: BroadcastContext,
-    bsbool16_triples: MulTripleVector<BsBool16>,
+    prep_triples: PrepTriples,
     // to collect S-box input/output pairs to verify
     x_i: Vec<GF8>,
     x_ii: Vec<GF8>,
@@ -134,12 +148,16 @@ pub struct Lut256SSMalParty {
 }
 
 impl Lut256SSMalParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, use_ohv_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|inner| Self {
             inner,
             prep_ohv: Vec::new(),
             context: BroadcastContext::new(),
-            bsbool16_triples: MulTripleVector::new(),
+            prep_triples: if use_ohv_check {
+                PrepTriples::Ohv(Ohv16TripleVector::new())
+            }else{
+                PrepTriples::GF2(MulTripleVector::new())
+            },
             x_i: Vec::new(),
             x_ii: Vec::new(),
             y_i: Vec::new(),
@@ -167,13 +185,22 @@ impl GF8InvBlackBoxSSMal for Lut256SSMalParty {
         let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
         let n_prep = n_rnd_ohv + n_rnd_ohv_ks;
 
-        self.bsbool16_triples.reserve_for_more_triples((n_prep * 22)/16); // 22 multiplications per S-box packed in 16
+        match &mut self.prep_triples {
+            PrepTriples::GF2(gf2_triples) => gf2_triples.reserve_for_more_triples((n_prep*22)/16),  // 22 multiplications per S-box packed in 16
+            PrepTriples::Ohv(ohv_triples) => ohv_triples.reserve_for_more_triples((n_prep*4)/16), // 4 multiplications per S-box packed in 16
+        }
 
         let mut prep =
             if self.inner.has_multi_threading() && 2 * n_prep > self.inner.num_worker_threads() {
-                offline::generate_rndohv256_ss_mt(&mut self.inner, &mut self.bsbool16_triples,  n_prep)?
+                match &mut self.prep_triples {
+                    PrepTriples::GF2(gf2_triples) => offline::generate_rndohv256_ss_mt(&mut self.inner, gf2_triples,  n_prep)?,
+                    PrepTriples::Ohv(ohv_tripes) => offline::generate_rndohv256_ss_ohv_check_mt(&mut self.inner, ohv_tripes, n_prep)?,
+                }
             } else {
-                offline::generate_rndohv256_ss(&mut self.inner, &mut self.bsbool16_triples, n_prep)?
+                match &mut self.prep_triples {
+                    PrepTriples::GF2(gf2_triples) => offline::generate_rndohv256_ss(&mut self.inner, gf2_triples, n_prep)?,
+                    PrepTriples::Ohv(ohv_triples) => offline::generate_rndohv256_ss_ohv_check(&mut self.inner, ohv_triples, n_prep)?,
+                }
             };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = prep;
@@ -281,12 +308,21 @@ impl GF8InvBlackBoxSSMal for Lut256SSMalParty {
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        println!("Verifying {} gf2 and {} S-box pairs", self.bsbool16_triples.len(), self.x_i.len());
+        if (self.x_i.len() + self.prep_triples.len()) == 0 {
+            // nothing to check
+            return Ok(())
+        }
         let mut sbox_pairs_encoder = SboxPairEncoder::new(&mut self.x_i, &mut self.x_ii, &mut self.y_i, &mut self.y_ii);
         let res = if self.inner.has_multi_threading() {
-            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.context, &mut [&mut BsBool16Encoder(&mut self.bsbool16_triples), &mut sbox_pairs_encoder], false)
+            match &mut self.prep_triples {
+                PrepTriples::GF2(gf2_triples) => mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.context, &mut [&mut BsBool16Encoder(gf2_triples), &mut sbox_pairs_encoder], false),
+                PrepTriples::Ohv(ohv_triples) => mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.context, &mut [&mut Ohv16TripleEncoder(ohv_triples), &mut sbox_pairs_encoder], false),
+            }
         }else{
-            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.context, &mut [&mut BsBool16Encoder(&mut self.bsbool16_triples), &mut sbox_pairs_encoder], false)
+            match &mut self.prep_triples {
+                PrepTriples::GF2(gf2_triples) => mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.context, &mut [&mut BsBool16Encoder(gf2_triples), &mut sbox_pairs_encoder], false),
+                PrepTriples::Ohv(ref mut ohv_triples) => mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.context, &mut [&mut Ohv16TripleEncoder(ohv_triples), &mut sbox_pairs_encoder], false),
+            }
         };
         match res {
             Ok(true) => Ok(()),
@@ -304,6 +340,7 @@ impl GF8InvBlackBoxSSMal for Lut256SSMalParty {
     }
 
 }
+
 struct SboxPairEncoder<'a>{
     x_i: &'a mut Vec<GF8>,
     x_ii: &'a mut Vec<GF8>,
@@ -499,7 +536,7 @@ mod test {
                     (T2, Lut256SSMalParty),
                     (T3, Lut256SSMalParty),
                 ) {
-            localhost_setup_lut256_ss_mal(f1, f2, f3, None)
+            localhost_setup_lut256_ss_mal(f1, f2, f3, false, None)
         }
         fn localhost_setup_multithreads<
                     T1: Send,
@@ -518,7 +555,48 @@ mod test {
                     (T2, Lut256SSMalParty),
                     (T3, Lut256SSMalParty),
                 ) {
-            localhost_setup_lut256_ss_mal(f1, f2, f3, Some(n_threads))
+            localhost_setup_lut256_ss_mal(f1, f2, f3, false, Some(n_threads))
+        }
+    }
+
+    struct Lut256SSMalOhvCheckSetup;
+    impl TestSetup<Lut256SSMalParty> for Lut256SSMalOhvCheckSetup {
+        fn localhost_setup<
+                    T1: Send,
+                    F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3,
+                >(
+                    f1: F1,
+                    f2: F2,
+                    f3: F3,
+                ) -> (
+                    (T1, Lut256SSMalParty),
+                    (T2, Lut256SSMalParty),
+                    (T3, Lut256SSMalParty),
+                ) {
+            localhost_setup_lut256_ss_mal(f1, f2, f3, true, None)
+        }
+        fn localhost_setup_multithreads<
+                    T1: Send,
+                    F1: Send + FnOnce(&mut Lut256SSMalParty) -> T1,
+                    T2: Send,
+                    F2: Send + FnOnce(&mut Lut256SSMalParty) -> T2,
+                    T3: Send,
+                    F3: Send + FnOnce(&mut Lut256SSMalParty) -> T3,
+                >(
+                    n_threads: usize,
+                    f1: F1,
+                    f2: F2,
+                    f3: F3,
+                ) -> (
+                    (T1, Lut256SSMalParty),
+                    (T2, Lut256SSMalParty),
+                    (T3, Lut256SSMalParty),
+                ) {
+            localhost_setup_lut256_ss_mal(f1, f2, f3, true, Some(n_threads))
         }
     }
 
@@ -533,6 +611,7 @@ mod test {
         f1: F1,
         f2: F2,
         f3: F3,
+        use_ohv_check: bool,
         n_worker_threads: Option<usize>,
     ) -> (
         (T1, Lut256SSMalParty),
@@ -542,18 +621,19 @@ mod test {
         fn adapter<T, Fx: FnOnce(&mut Lut256SSMalParty) -> T>(
             conn: ConnectedParty,
             f: Fx,
+            use_ohv_check: bool,
             n_worker_threads: Option<usize>,
         ) -> (T, Lut256SSMalParty) {
-            let mut party = Lut256SSMalParty::setup(conn, n_worker_threads).unwrap();
+            let mut party = Lut256SSMalParty::setup(conn, use_ohv_check, n_worker_threads).unwrap();
             let t = f(&mut party);
             party.finalize().unwrap();
             party.inner.teardown().unwrap();
             (t, party)
         }
         localhost_connect(
-            move |conn_party| adapter(conn_party, f1, n_worker_threads),
-            move |conn_party| adapter(conn_party, f2, n_worker_threads),
-            move |conn_party| adapter(conn_party, f3, n_worker_threads),
+            move |conn_party| adapter(conn_party, f1, use_ohv_check, n_worker_threads),
+            move |conn_party| adapter(conn_party, f2, use_ohv_check, n_worker_threads),
+            move |conn_party| adapter(conn_party, f3, use_ohv_check, n_worker_threads),
         )
     }
 
@@ -602,7 +682,7 @@ mod test {
             }
         };
 
-        let ((y1, _), (y2, _), (y3, _)) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), None);
+        let ((y1, _), (y2, _), (y3, _)) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), false, None);
 
         assert_eq!(y1.len(), inputs.len());
         assert_eq!(y2.len(), y1.len());
@@ -630,7 +710,7 @@ mod test {
             }
         };
 
-        let (((y1, input_rss1), _), ((y2, input_rss2), _), ((y3, input_rss3), _)) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), None);
+        let (((y1, input_rss1), _), ((y2, input_rss2), _), ((y3, input_rss3), _)) = localhost_setup_lut256_ss_mal(program(in0), program(in1), program(in2), false, None);
 
         assert_eq!(y1.len(), inputs.len());
         assert_eq!(y2.len(), y1.len());
@@ -713,5 +793,15 @@ mod test {
     #[test]
     fn aes_128_no_keyschedule_lut256_ss_mal_mt() {
         test_aes128_no_keyschedule_gf8_malss::<Lut256SSMalSetup, _>(100, Some(3))
+    }
+
+    #[test]
+    fn aes_128_no_keyschedule_lut256_ss_mal_ohv_check() {
+        test_aes128_no_keyschedule_gf8_malss::<Lut256SSMalOhvCheckSetup, _>(1, None)
+    }
+
+    #[test]
+    fn aes_128_no_keyschedule_lut256_ss_mal_ohv_check_mt() {
+        test_aes128_no_keyschedule_gf8_malss::<Lut256SSMalOhvCheckSetup, _>(100, Some(3))
     }
 }

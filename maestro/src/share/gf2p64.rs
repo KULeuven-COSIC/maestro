@@ -862,6 +862,39 @@ pub fn embed_gf4p4_deg3(a0: GF4, a1: GF4, a2: GF4) -> GF2p64 {
     GF2p64(GF4_EXT_EB_TABLE0[a0.as_u8() as usize] ^ GF4_EXT_EB_TABLE1[a1.as_u8() as usize] ^ GF4_EXT_EB_TABLE2[a2.as_u8() as usize])
 }
 
+/// Embeds b0 + b1 * u + b2 * u^2 into [GF2p64]. This is bitsliced by 16.
+pub fn embed_gf2_deg012(dst: &mut[GF2p64], b0: BsBool16, b1: BsBool16, b2: BsBool16) {
+    debug_assert_eq!(dst.len(), 16);
+    for i in 0..16 {
+        let b = ((b0.as_u16() >> i) & 0b1) | ((b1.as_u16() >> i) & 0b1) << 1 | ((b2.as_u16() >> i) & 0b1) << 2;
+        dst[i] = GF2p64(b as u64);
+    }
+}
+
+/// Embeds b0 + b3 * u^3 + b6 * u^6 into [GF2p64]. This is bitsliced by 16.
+pub fn embed_gf2_deg036(dst: &mut [GF2p64], b0: BsBool16, b3: BsBool16, b6: BsBool16) {
+    debug_assert_eq!(dst.len(), 16);
+    for i in 0..16 {
+        let b = ((b0.as_u16() >> i) & 0b1) | ((b3.as_u16() >> i) & 0b1) << 3 | ((b6.as_u16() >> i) & 0b1) << 6;
+        dst[i] = GF2p64(b as u64);
+    }
+}
+
+/// Embeds sum_{i=0}^8 bi * u^i into [GF2p64]. This is bitsliced by 16.
+pub fn embed_gf2_deg8(dst: &mut [GF2p64], b0: BsBool16, b1: BsBool16, b2: BsBool16, b3: BsBool16, b4: BsBool16, b5: BsBool16, b6: BsBool16, b7: BsBool16, b8: BsBool16) {
+    debug_assert_eq!(dst.len(), 16);
+    for i in 0..16 {
+        let b = ((b0.as_u16() >> i) & 0b1) | ((b1.as_u16() >> i) & 0b1) << 1 | ((b2.as_u16() >> i) & 0b1) << 2
+        | ((b3.as_u16() >> i) & 0b1) << 3
+        | ((b4.as_u16() >> i) & 0b1) << 4
+        | ((b5.as_u16() >> i) & 0b1) << 5
+        | ((b6.as_u16() >> i) & 0b1) << 6
+        | ((b7.as_u16() >> i) & 0b1) << 7
+        | ((b8.as_u16() >> i) & 0b1) << 8;
+        dst[i] = GF2p64(b as u64);
+    }
+}
+
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
