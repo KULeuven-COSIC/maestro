@@ -12,9 +12,13 @@ use crate::{share::{
 
 /// Protocol `8` to verify the multiplication triples at the end of the protocol.
 pub fn verify_multiplication_triples(party: &mut MainParty, context: &mut BroadcastContext, triples: &mut [&mut (dyn MulTripleEncoder + Send + Sync)], dont_clear: bool) -> MpcResult<bool> {
-    let r: GF2p64 = coin_flip(party, context)?;
     let lengths: usize = triples.iter().map(|enc| enc.len_triples_out()).sum();
+    if lengths == 0 {
+        return Ok(true);
+    }
     let n = lengths.checked_next_power_of_two().expect("n too large");
+
+    let r: GF2p64 = coin_flip(party, context)?;
 
     let mut x_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];
     let mut y_vec = vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); n];

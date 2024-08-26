@@ -557,7 +557,6 @@ macro_rules! mul_triple_encoder_impl {
                 self.0.len() * $yield_size
             }
             fn add_triples(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], zi: &mut GF2p64InnerProd, zii: &mut GF2p64InnerProd, weight: &mut GF2p64, rand: GF2p64) {
-                let start = std::time::Instant::now();
                 let mut local_weight = *weight;
                 let mut encoded_c = [RssShare::from(GF2p64::ZERO, GF2p64::ZERO); $yield_size];
                 izip!(x.chunks_exact_mut($yield_size), y.chunks_exact_mut($yield_size), &self.0.ai, &self.0.aii, &self.0.bi, &self.0.bii, &self.0.ci, &self.0.cii)
@@ -571,7 +570,6 @@ macro_rules! mul_triple_encoder_impl {
                         }
                 });
                 *weight = local_weight;
-                println!("add_triples: {}s", start.elapsed().as_secs_f64());
             }
             fn add_triples_par(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], z: &mut RssShare<GF2p64>, weight: GF2p64, rand: &[GF2p64], chunk_size: usize) {
                 debug_assert_eq!(x.len(), $yield_size * self.0.ai.len(), "ai");
@@ -872,8 +870,8 @@ impl<'a> MulTripleEncoder for GF4p4TripleEncoder<'a> {
     fn add_triples_par(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], z: &mut RssShare<GF2p64>, weight: GF2p64, rand: &[GF2p64], chunk_size: usize) {
         x.copy_from_slice(&self.0.a);
         y.copy_from_slice(&self.0.b);
-        let zvec: Vec<RssShare<GF2p64>> = x.par_chunks_exact_mut(chunk_size)
-            .zip_eq(self.0.c.par_chunks_exact_mut(chunk_size))
+        let zvec: Vec<RssShare<GF2p64>> = x.par_chunks_mut(chunk_size)
+            .zip_eq(self.0.c.par_chunks_mut(chunk_size))
             .zip_eq(rand)
             .map(|((x_chunk, c_chunk), r)| {
                 let mut local_weight = weight;

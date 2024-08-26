@@ -438,4 +438,15 @@ mod test {
         const N_THREADS: usize = 3;
         test_inv_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16DefaultParams>, _>(100, Some(N_THREADS))
     }
+
+    #[test]
+    fn aes_128_no_keyschedule_gf4p4() {
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16GF4p4Check>, _>(1, None)
+    }
+
+    #[test]
+    fn aes_128_no_keyschedule_gf4p4_mt() {
+        const N_THREADS: usize = 3;
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16GF4p4Check>, _>(100, Some(N_THREADS))
+    }
 }

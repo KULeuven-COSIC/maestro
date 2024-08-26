@@ -33,6 +33,9 @@ struct Cli {
     #[arg(long, help = "Path to write benchmark result data as CSV. Default: result.csv", default_value = "result.csv")]
     csv: PathBuf,
     
+    #[arg(long, help="If set, benchmark all protocol variants and ignore specified targets.", default_value_t = false)]
+    all: bool,
+
     #[arg(value_enum)]
     target: Vec<ProtocolVariant>,
 }
@@ -64,21 +67,30 @@ fn main() -> Result<(), String> {
 
     let (party_index, config) = network::Config::from_file(&cli.config).unwrap();
 
-    // check non-empty and distinct targets
-    if cli.target.is_empty() {
-        let all_targets: Vec<_> = ProtocolVariant::value_variants()
-            .iter()
-            .map(|prot| prot.to_possible_value().unwrap().get_name().to_string())
-            .collect();
-        return Err(format!("List of targets is empty: choose any number of targets: {:?}", all_targets));
-    }
-    if !cli.target.iter().all_unique() {
-        return Err(format!("Duplicate targets in argument {:?}", cli.target));
-    }
     let mut boxed: Vec<Box<dyn BenchmarkProtocol>> = Vec::new();
-    for v in cli.target {
-        boxed.push(Box::new(v));
+    if !cli.all {
+        // check non-empty and distinct targets
+        if cli.target.is_empty() {
+            let all_targets: Vec<_> = ProtocolVariant::value_variants()
+                .iter()
+                .map(|prot| prot.to_possible_value().unwrap().get_name().to_string())
+                .collect();
+            return Err(format!("List of targets is empty: choose any number of targets: {:?}", all_targets));
+        }
+        if !cli.target.iter().all_unique() {
+            return Err(format!("Duplicate targets in argument {:?}", cli.target));
+        }
+        
+        for v in cli.target {
+            boxed.push(Box::new(v));
+        }
+    }else{
+        // add all protocols to boxed
+        for v in ProtocolVariant::value_variants() {
+            boxed.push(Box::new(v.clone()));
+        }
     }
+    
     utils::benchmark_protocols(party_index, &config, cli.rep, cli.simd, cli.threads, boxed, cli.csv).unwrap();
     Ok(())
 }

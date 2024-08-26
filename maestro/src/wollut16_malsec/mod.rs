@@ -13,9 +13,6 @@
 //!   - [WL16ASParty] the party wrapper for the protocol.
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
-
-use std::time::Instant;
-
 use crate::{
     aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16::RndOhvOutput
 };
@@ -78,7 +75,7 @@ impl WL16ASParty {
     }
 
     fn verify_multiplications(&mut self) -> MpcResult<()> {
-        let t = Instant::now();
+        // let t = Instant::now();
         let res = if self.inner.has_multi_threading() {
             mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check), &mut GF4p4TripleEncoder(&mut self.gf4p4_triples_to_check)], false)
         }else{
@@ -86,7 +83,7 @@ impl WL16ASParty {
         };
         match res {
             Ok(true) => {
-                println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
+                // println!("verify_multiplications: {}s", t.elapsed().as_secs_f64());
                 Ok(())
             },
             Ok(false) => Err(MpcError::MultCheck),
