@@ -682,6 +682,10 @@ impl IoLayerOwned {
             .send_field(direction, elements, len)
     }
 
+    pub fn send_field_slice<F: NetSerializable>(&self, direction: Direction, elements: &[F]) {
+        self.task_layer.get().unwrap().send_field_slice(direction, elements)
+    }
+
     pub fn receive(&self, direction: Direction, length: usize) -> receiver::VecReceiver {
         self.task_layer.get().unwrap().receive(direction, length)
     }
@@ -961,6 +965,22 @@ impl IoLayer {
         self.send(direction, as_bytes)
     }
 
+    pub fn send_field_slice<F: NetSerializable>(
+        &self,
+        direction: Direction,
+        elements: &[F],
+    ) {
+        #[cfg(feature = "verbose-timing")]
+        let start = Instant::now();
+        let as_bytes = F::as_byte_vec_slice(elements);
+        #[cfg(feature = "verbose-timing")]
+        {
+            let end = start.elapsed();
+            IO_TIMER.lock().unwrap().report_time("ser", end);
+        }
+        self.send(direction, as_bytes)
+    }
+
     pub fn send_field_thread<'a, F: NetSerializable + 'a>(
         &self,
         direction: Direction,
@@ -971,6 +991,23 @@ impl IoLayer {
         #[cfg(feature = "verbose-timing")]
         let start = Instant::now();
         let as_bytes = F::as_byte_vec(elements, len);
+        #[cfg(feature = "verbose-timing")]
+        {
+            let end = start.elapsed();
+            IO_TIMER.lock().unwrap().report_time("ser", end);
+        }
+        self.send_helper(direction, Some(thread_id), as_bytes)
+    }
+
+    pub fn send_field_slice_thread<F: NetSerializable>(
+        &self,
+        direction: Direction,
+        thread_id: usize,
+        elements: &[F],
+    ) {
+        #[cfg(feature = "verbose-timing")]
+        let start = Instant::now();
+        let as_bytes = F::as_byte_vec_slice(elements);
         #[cfg(feature = "verbose-timing")]
         {
             let end = start.elapsed();

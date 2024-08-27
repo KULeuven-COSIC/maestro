@@ -236,7 +236,7 @@ fn gf8_inv_layer_opt_party<P: Party>(
         .map(|(i, alpha)| alpha + si[i].cube() + (si[i] + sii[i]).cube())
         .collect();
     // send to P+1
-    party.send_field::<GF8>(Direction::Next, &x3ii, n);
+    party.send_field_slice(Direction::Next, &x3ii);
 
     // MULT(x^12, x^2) and MULT(x^12, x^3)
     // receive from P-1
@@ -251,7 +251,7 @@ fn gf8_inv_layer_opt_party<P: Party>(
         x14x15ii[n + i] += GF8::x4y(tmp, tmp) + GF8::x4y(x3i[i], x3i[i]);
     }
     // send to P+1
-    party.send_field::<GF8>(Direction::Next, &x14x15ii, 2 * n);
+    party.send_field_slice(Direction::Next, &x14x15ii);
 
     // MULT(x^240, x^14)
     let x14x15i = rcv_x14x15i.rcv()?;
@@ -269,7 +269,7 @@ fn gf8_inv_layer_opt_party<P: Party>(
     // receive from P-1
     let rcv_si = party.receive_field_slice(Direction::Previous, si);
     // send to P+1
-    party.send_field::<GF8>(Direction::Next, sii.iter(), n);
+    party.send_field_slice(Direction::Next, sii);
 
     rcv_si.rcv()?;
     Ok(())
@@ -502,7 +502,7 @@ pub fn mul_no_sync<P: Party, F: Field>(
     for (i, alpha_i) in alphas.into_iter().enumerate() {
         ci[i] = ai[i] * bi[i] + ai[i] * bii[i] + aii[i] * bi[i] + alpha_i;
     }
-    party.send_field::<F>(Direction::Previous, ci.iter(), ci.len());
+    party.send_field_slice(Direction::Previous, ci);
     party.receive_field_slice(Direction::Next, cii).rcv()?;
     Ok(())
 }

@@ -435,8 +435,9 @@ pub fn lut_layer_opt<P: Party>(
     }
 
     let ci = v;
-    party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
-    party.send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
+    // TODO party_send_all
+    party.send_field_slice(Direction::Next, &ci);
+    party.send_field_slice(Direction::  Previous, &ci);
 
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
@@ -463,6 +464,7 @@ fn ss_to_rss_layer_opt<P: Party>(
     izip!(ss2.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
+    // TODO party_send_chunks
     party.send_field::<BsGF4>(Direction::Previous, ss1.iter().chain(ss2.iter()), 2 * n);
     let res = rcv_ii.rcv()?;
     ss1_ii.copy_from_slice(&res[..n]);

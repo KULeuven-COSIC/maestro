@@ -153,6 +153,11 @@ pub trait Party {
         elements: impl IntoIterator<Item = impl Borrow<T>>,
         len: usize,
     );
+    fn send_field_slice<T: NetSerializable>(
+        &self,
+        direction: Direction,
+        elements: &[T],
+    );
     fn receive_field<T: NetSerializable>(
         &self,
         direction: Direction,
@@ -540,6 +545,14 @@ impl Party for MainParty {
         len: usize,
     ) {
         self.io().send_field(direction, elements, len)
+    }
+
+    fn send_field_slice<T: NetSerializable>(
+            &self,
+            direction: Direction,
+            elements: &[T],
+        ) {
+        self.io().send_field_slice(direction, elements)
     }
 
     fn receive_field<T: NetSerializable>(
@@ -939,6 +952,10 @@ pub mod test {
 
         fn as_byte_vec(it: impl IntoIterator<Item = impl std::borrow::Borrow<Self>>, _len: usize) -> Vec<u8> {
             it.into_iter().map(|x| x.borrow().0).collect()
+        }
+
+        fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+            elements.iter().map(|x| x.0).collect()
         }
         
         fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {

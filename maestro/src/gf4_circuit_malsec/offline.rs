@@ -72,7 +72,7 @@ pub fn optimistic_mul<F: Field, P: Party, Rec: MulTripleRecorder<F>>(party: &mut
     // receive cii from P+1
     let rcv_cii = party.receive_field(Direction::Next, n);
     // send ci to P-1
-    party.send_field::<F>(Direction::Previous, &ci, n);
+    party.send_field_slice(Direction::Previous, &ci);
 
     let (ai, aii): (Vec<_>, Vec<_>) = a.into_iter().map(|rss| (rss.si, rss.sii)).unzip();
     let (bi, bii): (Vec<_>, Vec<_>) = b.into_iter().map(|rss| (rss.si, rss.sii)).unzip();

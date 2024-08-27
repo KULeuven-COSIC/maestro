@@ -143,7 +143,7 @@ pub fn aes128_no_keyschedule_mal<Protocol: GF8InvBlackBoxSSMal>(
     let l = state_ss.s.len();
     state_ss.s.iter_mut().zip_eq(party.main_party_mut().generate_alpha(l)).for_each(|(s, alpha)| *s += alpha);
     let rcv = party.main_party_mut().receive_field_slice(Direction::Next, &mut x_r.sii);
-    party.main_party_mut().send_field::<GF8>(Direction::Previous, state_ss.s.iter(), l);
+    party.main_party_mut().send_field_slice(Direction::Previous, &state_ss.s);
     rcv.rcv()?;
     x_r.si = state_ss.s;
 

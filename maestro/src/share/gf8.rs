@@ -86,6 +86,10 @@ impl NetSerializable for GF8 {
         it.into_iter().map(|gf| gf.borrow().0).collect()
     }
 
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        elements.iter().map(|x| x.0).collect()
+    }
+
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         v.into_iter().map(GF8).collect()
     }

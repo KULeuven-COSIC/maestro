@@ -394,7 +394,7 @@ fn ss_to_rss_shares<F: Field + Copy + Sized>(
     let alphas = party.generate_alpha(n);
     let s_i: Vec<F> = sum_shares.iter().zip(alphas).map(|(s, a)| *s + a).collect();
     let mut s_ii = vec![F::ZERO; n];
-    party.send_field::<F>(Direction::Previous, &s_i, n);
+    party.send_field_slice(Direction::Previous, &s_i);
     party.receive_field_slice(Direction::Next, &mut s_ii)
         .rcv()?;
     party.wait_for_completion();
@@ -415,7 +415,7 @@ fn single_ss_to_rss_shares<F: Field + Copy + Sized>(
     // Convert zs to RSS sharing
     let s_i = [sum_share + party.generate_alpha(1).next().unwrap()];
     let mut s_ii = [F::ZERO; 1];
-    party.send_field::<F>(Direction::Previous, s_i, 1);
+    party.send_field_slice(Direction::Previous, &s_i);
     party.receive_field_slice(Direction::Next, &mut s_ii)
         .rcv()?;
     party.io().wait_for_completion();

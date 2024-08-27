@@ -438,6 +438,15 @@ impl NetSerializable for GF2p64 {
             .collect()
     }
 
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        // Using big-endian encoding
+        let mut res = vec![0u8; Self::serialized_size(elements.len())];
+        res.chunks_exact_mut(8).zip_eq(elements).for_each(|(chunk, el)| {
+            chunk.copy_from_slice(&el.0.to_be_bytes());
+        });
+        res
+    }
+
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         debug_assert!(v.len() % Self::NBYTES == 0);
         v.into_iter()

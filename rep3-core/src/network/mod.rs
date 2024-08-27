@@ -39,6 +39,9 @@ pub trait NetSerializable: Sized {
     /// Serializes the elements
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, len: usize) -> Vec<u8>;
 
+    /// Serializes the elements
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8>;
+
     /// Deserializes elements from a byte vector
     fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
 

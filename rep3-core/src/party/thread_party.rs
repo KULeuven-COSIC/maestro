@@ -85,6 +85,17 @@ impl<T> Party for ThreadParty<T> {
             .send_field_thread(direction, self.range_start, elements, len)
     }
 
+    fn send_field_slice<N: NetSerializable>(
+            &self,
+            direction: Direction,
+            elements: &[N],
+        ) {
+            self.io_layer
+            .get()
+            .unwrap()
+            .send_field_slice_thread(direction, self.range_start, elements)
+    }
+
     fn receive_field<N: NetSerializable>(
         &self,
         direction: Direction,

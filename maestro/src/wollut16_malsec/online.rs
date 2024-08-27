@@ -45,7 +45,8 @@ pub fn gf8_inv_layer<P: Party, Rec: MulTripleRecorder<BsGF4>>(party: &mut P, tri
         })
         .collect();
     // Step 4 LUT Layer
-    let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v.clone(), rnd_ohv)?;
+    let mut v_ii = vec![BsGF4::ZERO; v.len()];
+    let (v_inv_i, v_inv_ii) = lut_layer_opt(party, &mut v, &mut v_ii, rnd_ohv)?;
     // Step 5 local multiplication
     let mut ah_prime: Vec<_> = izip!(ah_i.iter(), ah_ii.iter(), v_inv_i.iter(), v_inv_ii.iter())
         .map(|(ahi, ahii, vinvi, vinvii)| (*ahi * *vinvi) + (*ahi + *ahii) * (*vinvi + *vinvii))
@@ -65,13 +66,11 @@ pub fn gf8_inv_layer<P: Party, Rec: MulTripleRecorder<BsGF4>>(party: &mut P, tri
     })
     .collect();
     // Step 6 Resharing
-    let mut v_ii = vec![BsGF4::ZERO; v.len()];
+    
     let mut ah_prime_ii = vec![BsGF4::ZERO; v.len()];
     let mut al_prime_ii = vec![BsGF4::ZERO; v.len()];
     ss_to_rss_layer(
         party,
-        &mut v,
-        &mut v_ii,
         &mut ah_prime,
         &mut ah_prime_ii,
         &mut al_prime,
@@ -151,7 +150,8 @@ pub fn gf8_inv_layer_gf4p4_check<P: Party, Rec: GF4p4TripleRecorder>(party: &mut
         })
         .collect();
     // Step 4 LUT Layer
-    let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v.clone(), rnd_ohv)?;
+    let mut v_ii = vec![BsGF4::ZERO; v.len()];
+    let (v_inv_i, v_inv_ii) = lut_layer_opt(party, &mut v, &mut v_ii, rnd_ohv)?;
     // Step 5 local multiplication
     let mut ah_prime: Vec<_> = izip!(ah_i.iter(), ah_ii.iter(), v_inv_i.iter(), v_inv_ii.iter())
         .map(|(ahi, ahii, vinvi, vinvii)| (*ahi * *vinvi) + (*ahi + *ahii) * (*vinvi + *vinvii))
@@ -171,13 +171,10 @@ pub fn gf8_inv_layer_gf4p4_check<P: Party, Rec: GF4p4TripleRecorder>(party: &mut
     })
     .collect();
     // Step 6 Resharing
-    let mut v_ii = vec![BsGF4::ZERO; v.len()];
     let mut ah_prime_ii = vec![BsGF4::ZERO; v.len()];
     let mut al_prime_ii = vec![BsGF4::ZERO; v.len()];
     ss_to_rss_layer(
         party,
-        &mut v,
-        &mut v_ii,
         &mut ah_prime,
         &mut ah_prime_ii,
         &mut al_prime,
@@ -280,14 +277,20 @@ fn lut_layer_opt<P: Party>(
     v.iter_mut().enumerate().for_each(|(i, dst)| {
         *dst += BsGF4::new(rnd_ohv[2 * i].random_si, rnd_ohv[2 * i + 1].random_si);
     });
-    let ci = v;
-    party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
-    party.send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
+    // TODO party_send_all
+    party.send_field_slice(Direction::Next, v);
+    party.send_field_slice(Direction::Previous, v);
 
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
 
-    let res = lut_with_rnd_ohv_bitsliced_opt(rnd_ohv, ci, cii, ciii);
+    let res = lut_with_rnd_ohv_bitsliced_opt(rnd_ohv, v, cii, ciii);
+    for i in 0..v.len() {
+        let rand_si = BsGF4::new(rnd_ohv[2*i].random_si, rnd_ohv[2*i+1].random_si);
+        let rand_sii = BsGF4::new(rnd_ohv[2*i].random_sii, rnd_ohv[2*i+1].random_sii);
+        v_ii[i] = v[i] + rand_sii;
+        v[i] += rand_si;
+    }
 
     // party.inner.io().wait_for_completion();
     Ok(res)
@@ -312,15 +315,18 @@ const GF4_BITSLICED_LUT: [[u16; 4]; 16] = [
     [28306, 6090, 7092, 15529],
 ];
 
+/// Performs the table lookup at (ci + cii + ciii) and returns the results as (2,3) sharing in (cii, ciii).
+/// Returns the offset (ci + cii + ciii) in ci
 #[inline]
 pub fn lut_with_rnd_ohv_bitsliced_opt(
     rnd_ohv: &[RndOhv16Output],
-    ci: Vec<BsGF4>,
+    ci: &mut [BsGF4],
     mut cii: Vec<BsGF4>,
     mut ciii: Vec<BsGF4>,
 ) -> (Vec<BsGF4>, Vec<BsGF4>) {
     for i in 0..ci.len() {
-        let (c1, c2) = (ci[i] + cii[i] + ciii[i]).unpack();
+        ci[i] += cii[i] + ciii[i];
+        let (c1, c2) = ci[i].unpack();
         let ohv1 = &rnd_ohv[2 * i];
         let (lut1_i, lut1_ii) =
             RndOhv16::lut_rss(c1.as_u8() as usize, &ohv1.si, &ohv1.sii, &GF4_BITSLICED_LUT);
@@ -340,34 +346,27 @@ fn ss_to_rss_layer<P: Party>(
     a_ii: &mut [BsGF4],
     b_i: &mut [BsGF4],
     b_ii: &mut [BsGF4],
-    c_i: &mut [BsGF4],
-    c_ii: &mut [BsGF4],
 ) -> MpcResult<()> {
     debug_assert_eq!(a_i.len(), a_ii.len());
-    debug_assert_eq!(a_i.len(), c_ii.len());
     debug_assert_eq!(a_i.len(), b_ii.len());
     debug_assert_eq!(b_i.len(), b_ii.len());
-    debug_assert_eq!(c_i.len(), c_ii.len());
     let n = a_i.len();
-    let rcv_ii = party.receive_field::<BsGF4>(Direction::Next, 3 * n);
+    let rcv_ii = party.receive_field::<BsGF4>(Direction::Next, 2 * n);
     izip!(a_i.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
     izip!(b_i.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
-    izip!(c_i.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
-        *si += alpha;
-    });
+    // TODO party_send_chunks
     party.send_field::<BsGF4>(
         Direction::Previous,
-        a_i.iter().chain(b_i.iter()).chain(c_i.iter()),
-        3 * n,
+        a_i.iter().chain(b_i.iter()),
+        2 * n,
     );
     let res = rcv_ii.rcv()?;
     a_ii.copy_from_slice(&res[..n]);
-    b_ii.copy_from_slice(&res[n..2 * n]);
-    c_ii.copy_from_slice(&res[2 * n..]);
+    b_ii.copy_from_slice(&res[n..]);
     // party.inner.io().wait_for_completion();
     Ok(())
 }

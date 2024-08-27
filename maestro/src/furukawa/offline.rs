@@ -187,7 +187,7 @@ pub fn optimistic_mul<F: Field, P: Party>(party: &mut P, M: usize) -> MpcResult<
     // receive cii from P+1
     let rcv_cii = party.receive_field(Direction::Next, M);
     // send ci to P-1
-    party.send_field::<F>(Direction::Previous, &ci, M);
+    party.send_field_slice(Direction::Previous, &ci);
     let cii = rcv_cii.rcv()?;
     Ok((a, b, ci, cii))
 }
@@ -488,6 +488,7 @@ fn sacrifice_party<P: Party, F: Field + DigestExt + Copy + AddAssign>(
         bii_to_sacrifice
     };
 
+    // TODO party_send_chunks
     party.send_field::<F>(
         Direction::Previous,
         rho_ii.as_ref().iter().chain(sigma_ii.as_ref().iter()),

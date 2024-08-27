@@ -57,6 +57,15 @@ impl NetSerializable for BsBool16 {
             .collect()
     }
 
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        let mut res = vec![0u8; Self::serialized_size(elements.len())];
+        for i in 0..elements.len() {
+            res[2*i] = elements[i].0 as u8;
+            res[2*i+1] = (elements[i].0 >> 8) as u8;
+        }
+        res
+    }
+
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         debug_assert!(v.len() % 2 == 0);
         v.into_iter()

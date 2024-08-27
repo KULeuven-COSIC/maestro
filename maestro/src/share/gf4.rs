@@ -139,6 +139,22 @@ impl NetSerializable for GF4 {
             .collect()
     }
 
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        let mut res = vec![0u8; Self::serialized_size(elements.len())];
+        let mut i = 0;
+        let mut res_i = 0;
+        let end = (elements.len()/2)*2;
+        while i < end {
+            res[res_i] = Self::pack(elements[i], elements[i+1]);
+            i += 2;
+            res_i += 1;
+        }
+        if i != elements.len() {
+            res[res_i] = Self::pack(elements[i], GF4::ZERO);
+        }
+        res
+    }
+
     fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self> {
         let mut res = Vec::with_capacity(len);
         let full = len / 2;
@@ -295,6 +311,9 @@ impl NetSerializable for BsGF4 {
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         it.into_iter().map(|el| el.borrow().0).collect()
     }
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        elements.iter().map(|x| x.0).collect()
+    }
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
         v.into_iter().map(Self).collect()
     }
@@ -427,12 +446,12 @@ mod test {
         let mut slice_odd = [GF4::ZERO; 45];
 
         GF4::from_byte_slice(
-            GF4::as_byte_vec(&list_even, list_even.len()),
+            GF4::as_byte_vec_slice(&list_even),
             &mut slice_even,
         );
         assert_eq!(&list_even, &slice_even);
 
-        GF4::from_byte_slice(GF4::as_byte_vec(&list_odd, list_odd.len()), &mut slice_odd);
+        GF4::from_byte_slice(GF4::as_byte_vec_slice(&list_odd), &mut slice_odd);
         assert_eq!(&list_odd, &slice_odd);
     }
 }
