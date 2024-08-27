@@ -4,7 +4,7 @@
 mod utils;
 mod benchmark;
 
-use benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16AllCheckBenchmark, MalLUT16Benchmark, MalLUT16BitStringBenchmark, MalLUT16GF4P4Benchmark, MalLUT16PrepCheckBenchmark}};
+use benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16BitStringBenchmark, MalLUT16OhvBenchmark}};
 use itertools::Itertools;
 use rep3_core::network::{self, ConnectedParty};
 use std::path::PathBuf;
@@ -51,11 +51,11 @@ pub enum ProtocolVariant {
     Lut256Ss,
     MalLut256Ss,
     MalLut256SsOpt,
-    MalLut16,
-    MalLut16PrepCheck,
-    MalLut16AllCheck,
+    // MalLut16,
+    // MalLut16PrepCheck,
+    // MalLut16AllCheck,
     MalLut16Bitstring,
-    MalLut16GF4p4,
+    MalLut16Ohv,
     MalGF4Circuit,
     MalGF4CircuitAllCheck,
     MalGF4CircuitBucketBeaverCheck,
@@ -107,12 +107,12 @@ impl ProtocolVariant {
             ProtocolVariant::Lut256Ss => &Lut256SSBenchmark,
             ProtocolVariant::MalLut256Ss => &Lut256SSMalBenchmark,
             ProtocolVariant::MalLut256SsOpt => &Lut256SSMalOhvCheckBenchmark,
-            ProtocolVariant::MalLut16 => &MalLUT16Benchmark,
+            // ProtocolVariant::MalLut16 => &MalLUT16Benchmark,
             ProtocolVariant::MalLut16Bitstring => &MalLUT16BitStringBenchmark,
-            ProtocolVariant::MalLut16GF4p4 => &MalLUT16GF4P4Benchmark,
+            ProtocolVariant::MalLut16Ohv => &MalLUT16OhvBenchmark,
             ProtocolVariant::MalGF4Circuit => &GF4CircuitASBenchmark,
-            ProtocolVariant::MalLut16PrepCheck => &MalLUT16PrepCheckBenchmark,
-            ProtocolVariant::MalLut16AllCheck => &MalLUT16AllCheckBenchmark,
+            // ProtocolVariant::MalLut16PrepCheck => &MalLUT16PrepCheckBenchmark,
+            // ProtocolVariant::MalLut16AllCheck => &MalLUT16AllCheckBenchmark,
             ProtocolVariant::MalGF4CircuitAllCheck => &GF4CircuitAllCheckASBenchmark,
             ProtocolVariant::MalGF4CircuitBucketBeaverCheck => &GF4CircuitASBucketBeaverBenchmark,
             ProtocolVariant::MalGF4CircuitRecBeaverCheck => &GF4CircuitASRecBeaverBenchmark,

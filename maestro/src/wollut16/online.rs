@@ -18,7 +18,7 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
-use super::{RndOhv16, RndOhvOutput, WL16Party};
+use super::{RndOhv16, RndOhv16Output, WL16Party};
 
 /// Computes `<<x * y>>` for `[[x]]` and `[[y]]` over GF4.
 ///
@@ -79,7 +79,7 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
     let rcv_cii = party.io().receive_field(Direction::Next, v.len());
     let rcv_ciii = party.io().receive_field(Direction::Previous, v.len());
     let ci: Vec<_> = izip!(v.iter(), rnd_ohv, party.inner.generate_alpha(v.len()))
-        .map(|(v, r, alpha)| *v + r.random + alpha)
+        .map(|(v, r, alpha)| *v + r.random_si + alpha)
         .collect();
     party.io().send_field::<GF4>(Direction::Next, &ci, ci.len());
     party
@@ -99,7 +99,7 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
 
 #[inline]
 pub fn lut_with_rnd_ohv_bitsliced(
-    rnd_ohv: &[RndOhvOutput],
+    rnd_ohv: &[RndOhv16Output],
     ci: Vec<GF4>,
     cii: Vec<GF4>,
     ciii: Vec<GF4>,
@@ -283,7 +283,7 @@ fn gf8_inv_layer_opt_party<P: Party>(
     party: &mut P,
     si: &mut [GF8],
     sii: &mut [GF8],
-    prep_ohv: &[RndOhvOutput],
+    prep_ohv: &[RndOhv16Output],
 ) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     debug_assert_eq!(si.len(), prep_ohv.len());
@@ -412,7 +412,7 @@ pub fn gf8_inv_layer_opt_mt(
 pub fn lut_layer_opt<P: Party>(
     party: &mut P,
     mut v: Vec<BsGF4>,
-    rnd_ohv: &[RndOhvOutput],
+    rnd_ohv: &[RndOhv16Output],
 ) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
     debug_assert_eq!(rnd_ohv.len(), 2 * v.len());
 
@@ -424,13 +424,13 @@ pub fn lut_layer_opt<P: Party>(
             .take(2 * rnd_ohv.len())
             .enumerate()
             .for_each(|(i, dst)| {
-                *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
+                *dst += BsGF4::new(rnd_ohv[2 * i].random_si, rnd_ohv[2 * i + 1].random_si);
             });
         let empty_v = v[vlen].unpack().1;
-        v[vlen] += BsGF4::new(rnd_ohv[rnd_ohv.len() - 1].random, empty_v);
+        v[vlen] += BsGF4::new(rnd_ohv[rnd_ohv.len() - 1].random_si, empty_v);
     } else {
         v.iter_mut().enumerate().for_each(|(i, dst)| {
-            *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
+            *dst += BsGF4::new(rnd_ohv[2 * i].random_si, rnd_ohv[2 * i + 1].random_si);
         });
     }
 
@@ -472,7 +472,7 @@ fn ss_to_rss_layer_opt<P: Party>(
 
 #[inline]
 pub fn lut_with_rnd_ohv_bitsliced_opt(
-    rnd_ohv: &[RndOhvOutput],
+    rnd_ohv: &[RndOhv16Output],
     ci: Vec<BsGF4>,
     mut cii: Vec<BsGF4>,
     mut ciii: Vec<BsGF4>,

@@ -14,7 +14,7 @@
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 use crate::{
-    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16::RndOhvOutput
+    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector, Ohv16TripleEncoder, Ohv16TripleVector}, ArithmeticBlackBox}, wollut16::{self, RndOhv16Output}
 };
 use rep3_core::{
     network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare
@@ -24,44 +24,64 @@ pub mod mult_verification;
 mod offline;
 pub mod online;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PrepCheckType {
+    /// Checks 11 GF(2) multiplications separately
+    Simple,
+    /// Checks GF(2) * GF(2^k) multiplications
+    BitString,
+    /// Checks 11 GF(2) multiplications via 2 GF(2^l) triples
+    OhvCheck,
+}
+
 /// Party for WOLLUT16 with active security
 pub struct WL16ASParty{
     inner: MainParty,
-    prep_ohv: Vec<RndOhvOutput>,
+    prep_ohv: Vec<RndOhv16Output>,
     check_after_prep: bool,
     check_after_sbox: bool,
-    use_bitstring_check: bool,
+    prep_check: PrepCheckType,
     use_gf4p4_check: bool, // whether to use the trick to check 3 multiplications at once during the online phase
     // Multiplication triples that need checking at the end
     gf4_triples_to_check: MulTripleVector<BsGF4>,
-    gf2_triples_to_check: MulTripleVector<BsBool16>,
-    gf64_triples_to_check: MulTripleVector<GF2p64>,
+    gf2_triples_to_check: MulTripleVector<BsBool16>,  // used in PrepCheckType::Simple
+    gf64_triples_to_check: MulTripleVector<GF2p64>, // used in PrepCheckType::BitString
     gf4p4_triples_to_check: GF4p4TripleVector,
+    ohv_triples_to_check: Ohv16TripleVector, // used in PrepCheckType::OhvCheck
     broadcast_context: BroadcastContext,
 }
 
 impl WL16ASParty {
-    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, use_bitstring_check: bool, use_gf4p4_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, prep_check: PrepCheckType, use_gf4p4_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             check_after_prep,
             check_after_sbox,
-            use_bitstring_check,
+            prep_check,
             use_gf4p4_check,
             gf4_triples_to_check: MulTripleVector::new(),
             gf2_triples_to_check: MulTripleVector::new(),
             gf64_triples_to_check: MulTripleVector::new(),
             gf4p4_triples_to_check: GF4p4TripleVector::new(),
+            ohv_triples_to_check: Ohv16TripleVector::new(),
             broadcast_context: BroadcastContext::new(),
         })
     }
 
     fn prepare_rand_ohv(&mut self, n: usize) -> MpcResult<()> {
         let mut new = if self.inner.has_multi_threading() && self.inner.num_worker_threads() <= n {
-            offline::generate_random_ohv16_mt(self, n, self.use_bitstring_check)?
+            match &self.prep_check {
+                PrepCheckType::Simple => offline::generate_random_ohv16_mt(self, n, false)?,
+                PrepCheckType::BitString => offline::generate_random_ohv16_mt(self, n, true)?,
+                PrepCheckType::OhvCheck => wollut16::offline::generate_ohv16_opt_check_mt(&mut self.inner, &mut self.ohv_triples_to_check, n)?,
+            }
         }else{
-            offline::generate_random_ohv16(self, n, self.use_bitstring_check)?
+            match &self.prep_check {
+                PrepCheckType::Simple => offline::generate_random_ohv16(self, n, false)?,
+                PrepCheckType::BitString => offline::generate_random_ohv16(self, n, true)?,
+                PrepCheckType::OhvCheck => wollut16::offline::generate_ohv16_opt_check(&mut self.inner, &mut self.ohv_triples_to_check, n)?,
+            }
         };
         if self.check_after_prep {
             self.verify_multiplications()?;
@@ -77,9 +97,9 @@ impl WL16ASParty {
     fn verify_multiplications(&mut self) -> MpcResult<()> {
         // let t = Instant::now();
         let res = if self.inner.has_multi_threading() {
-            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check), &mut GF4p4TripleEncoder(&mut self.gf4p4_triples_to_check)], false)
+            mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check), &mut Ohv16TripleEncoder(&mut self.ohv_triples_to_check), &mut GF4p4TripleEncoder(&mut self.gf4p4_triples_to_check)], false)
         }else{
-            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check), &mut GF4p4TripleEncoder(&mut self.gf4p4_triples_to_check)], false)
+            mult_verification::verify_multiplication_triples(&mut self.inner, &mut self.broadcast_context, &mut [&mut BsGF4Encoder(&mut self.gf4_triples_to_check), &mut BsBool16Encoder(&mut self.gf2_triples_to_check), &mut GF2p64Encoder(&mut self.gf64_triples_to_check), &mut Ohv16TripleEncoder(&mut self.ohv_triples_to_check), &mut GF4p4TripleEncoder(&mut self.gf4p4_triples_to_check)], false)
         };
         match res {
             Ok(true) => {
@@ -154,10 +174,10 @@ impl GF8InvBlackBox for WL16ASParty {
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
         let n_rnd_ohv_ks = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
         let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
-        if self.use_bitstring_check {
-            self.gf64_triples_to_check.reserve_for_more_triples(div16_ceil(n_rnd_ohv_ks+n_rnd_ohv)*16*3);
-        }else{
-            self.gf2_triples_to_check.reserve_for_more_triples(10 * n_blocks + div16_ceil(n_rnd_ohv_ks));
+        match &self.prep_check {
+            PrepCheckType::Simple => self.gf2_triples_to_check.reserve_for_more_triples(10 * n_blocks + div16_ceil(n_rnd_ohv_ks)),
+            PrepCheckType::BitString => self.gf64_triples_to_check.reserve_for_more_triples(div16_ceil(n_rnd_ohv_ks+n_rnd_ohv)*16*3),
+            PrepCheckType::OhvCheck => self.ohv_triples_to_check.reserve_for_more_triples(div16_ceil(n_rnd_ohv + n_rnd_ohv_ks)),
         }
         
         self.prepare_rand_ohv(n_rnd_ohv + n_rnd_ohv_ks)?;
@@ -219,12 +239,12 @@ mod test {
         test::{localhost_connect, TestSetup},
     };
 
-    use super::WL16ASParty;
+    use super::{PrepCheckType, WL16ASParty};
 
     pub trait WL16Params {
         const CHECK_AFTER_PREP: bool;
         const CHECK_AFTER_SBOX: bool;
-        const BIT_STRING_CHECK: bool;
+        const PREP_CHECK: PrepCheckType;
         const GF4P4_CHECK: bool;
     }
 
@@ -232,7 +252,7 @@ mod test {
     impl WL16Params for WL16DefaultParams {
         const CHECK_AFTER_PREP: bool = false;
         const CHECK_AFTER_SBOX: bool = false;
-        const BIT_STRING_CHECK: bool = false;
+        const PREP_CHECK: PrepCheckType = PrepCheckType::Simple;
         const GF4P4_CHECK: bool = false;
     }
 
@@ -240,21 +260,21 @@ mod test {
     impl WL16Params for WL16BitString {
         const CHECK_AFTER_PREP: bool = false;
         const CHECK_AFTER_SBOX: bool = false;
-        const BIT_STRING_CHECK: bool = true;
-        const GF4P4_CHECK: bool = false;
+        const PREP_CHECK: PrepCheckType = PrepCheckType::BitString;
+        const GF4P4_CHECK: bool = true;
     }
 
-    pub struct WL16GF4p4Check;
-    impl WL16Params for WL16GF4p4Check {
+    pub struct WL16OhvCheck;
+    impl WL16Params for WL16OhvCheck {
         const CHECK_AFTER_PREP: bool = false;
         const CHECK_AFTER_SBOX: bool = false;
-        const BIT_STRING_CHECK: bool = false;
+        const PREP_CHECK: PrepCheckType = PrepCheckType::OhvCheck;
         const GF4P4_CHECK: bool = true;
     }
 
     pub fn localhost_setup_wl16as<P: WL16Params, T1: Send, F1: Send + FnOnce(&mut WL16ASParty) -> T1, T2: Send, F2: Send + FnOnce(&mut WL16ASParty) -> T2, T3: Send, F3: Send + FnOnce(&mut WL16ASParty) -> T3>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> ((T1,WL16ASParty), (T2,WL16ASParty), (T3,WL16ASParty)) {
         fn adapter<P: WL16Params, T, Fx: FnOnce(&mut WL16ASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16ASParty) {
-            let mut party = WL16ASParty::setup(conn, P::CHECK_AFTER_PREP, P::CHECK_AFTER_SBOX, P::BIT_STRING_CHECK, P::GF4P4_CHECK, n_worker_threads).unwrap();
+            let mut party = WL16ASParty::setup(conn, P::CHECK_AFTER_PREP, P::CHECK_AFTER_SBOX, P::PREP_CHECK, P::GF4P4_CHECK, n_worker_threads).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

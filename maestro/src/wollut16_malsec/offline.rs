@@ -1,11 +1,11 @@
 use rep3_core::party::error::MpcResult;
 
-use crate::wollut16::{self, RndOhvOutput};
+use crate::wollut16::{self, RndOhv16Output};
 
 use super::WL16ASParty;
 
 
-pub fn generate_random_ohv16(party: &mut WL16ASParty, n: usize, use_bitstring_check: bool) -> MpcResult<Vec<RndOhvOutput>> {
+pub fn generate_random_ohv16(party: &mut WL16ASParty, n: usize, use_bitstring_check: bool) -> MpcResult<Vec<RndOhv16Output>> {
     if use_bitstring_check {
         wollut16::offline::generate_random_ohv16_bitstring(&mut party.inner, &mut party.gf64_triples_to_check, n)
     }else{
@@ -13,7 +13,7 @@ pub fn generate_random_ohv16(party: &mut WL16ASParty, n: usize, use_bitstring_ch
     }
 }
 
-pub fn generate_random_ohv16_mt(party: &mut WL16ASParty, n: usize, use_bitstring_check: bool) -> MpcResult<Vec<RndOhvOutput>> {
+pub fn generate_random_ohv16_mt(party: &mut WL16ASParty, n: usize, use_bitstring_check: bool) -> MpcResult<Vec<RndOhv16Output>> {
     if use_bitstring_check {
         wollut16::offline::generate_random_ohv16_bitstring_mt(&mut party.inner, &mut party.gf64_triples_to_check, n)
     }else{

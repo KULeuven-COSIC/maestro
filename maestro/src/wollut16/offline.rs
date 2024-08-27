@@ -1,11 +1,11 @@
 //! This module contains the offline phase components.
 //!
 //! This is primarily the preprocessing protocol for the one-hot vector encoding.
-use itertools::izip;
+use itertools::{izip, Itertools};
 use rayon::prelude::*;
 
 use crate::{
-    chida, lut256, share::{bs_bool16::BsBool16, gf4::GF4, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder, Ohv16TripleRecorder}, wollut16::{RndOhv16, RndOhvOutput}
+    chida, lut256, share::{bs_bool16::BsBool16, gf4::GF4, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder, Ohv16TripleRecorder}, wollut16::{RndOhv16, RndOhv16Output}
 };
 use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
 
@@ -100,7 +100,7 @@ const SELECTOR_IDX_15: [bool; 15] = [
 ];
 
 /// This function implements the random one-hot vector generation as in `Protocol 6`.
-pub fn generate_random_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
+pub fn generate_random_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhv16Output>> {
     let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1 };
     // generate 4 random bits
     let r0 = party.generate_random(n16);
@@ -111,7 +111,7 @@ pub fn generate_random_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: 
 }
 
 /// This function is a multi-threaded version of the random one-hot vector generation as in `Protocol 6`.
-pub fn generate_random_ohv16_mt<'a, Rec: MulTripleRecorder<BsBool16>>(party: &'a mut MainParty, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
+pub fn generate_random_ohv16_mt<'a, Rec: MulTripleRecorder<BsBool16>>(party: &'a mut MainParty, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhv16Output>> {
     let n16 = if n % 16 == 0 { n / 16 } else { n / 16 + 1};
     let ranges = party.split_range_equally(n16);
     let threads = party.create_thread_parties_with_additional_data(ranges, |start, end| Some(triple_rec.create_thread_mul_triple_recorder(start, end)));
@@ -279,29 +279,30 @@ pub fn generate_ohv16_bitslice<P: Party, Rec: MulTripleRecorder<BsBool16>>(party
     return Ok([ohv_0, ohv_1, ohv_2, ohv_3, ohv_4, ohv_5, ohv_6, ohv_7, ohv_8, ohv_9, ohv_10, ohv_11, ohv_12, ohv_13, ohv_14, ohv_15]);
 }
 
-fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize, r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>) -> MpcResult<Vec<RndOhvOutput>> {
+fn generate_ohv16<P: Party, Rec: MulTripleRecorder<BsBool16>>(party: &mut P, triple_rec: &mut Rec, n: usize, r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>) -> MpcResult<Vec<RndOhv16Output>> {
     let sliced_bits = generate_ohv16_bitslice(party, triple_rec, &r0, &r1, &r2, &r3)?;
     let res = ohv16_unbitslice_and_pack(sliced_bits, r0, r1, r2, r3, n);
     Ok(res)
 }
 
-fn ohv16_unbitslice_and_pack(sliced_ohv_bits: [Vec<RssShare<BsBool16>>; 16], r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>, n: usize) -> Vec<RndOhvOutput> {
+fn ohv16_unbitslice_and_pack(sliced_ohv_bits: [Vec<RssShare<BsBool16>>; 16], r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>, n: usize) -> Vec<RndOhv16Output> {
     let rand_transposed = un_bitslice4(&[r0, r1, r2, r3]);
     let ohv_transposed = un_bitslice(sliced_ohv_bits);
     izip!(
         ohv_transposed.into_iter().take(n),
         rand_transposed.into_iter().take(n)
     )
-    .map(|((ohv_si, ohv_sii), rand)| RndOhvOutput {
+    .map(|((ohv_si, ohv_sii), rand)| RndOhv16Output {
         si: ohv_si,
         sii: ohv_sii,
-        random: rand.si,
+        random_si: rand.si,
+        random_sii: rand.sii
     })
     .collect()
 }
 
 
-pub fn generate_random_ohv16_bitstring<P: Party, Rec: BitStringMulTripleRecorder>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> {
+pub fn generate_random_ohv16_bitstring<P: Party, Rec: BitStringMulTripleRecorder>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhv16Output>> {
     let n16 = n.div_ceil(16);
     // generate 4 random bits
     let r0 = party.generate_random(n16);
@@ -311,7 +312,7 @@ pub fn generate_random_ohv16_bitstring<P: Party, Rec: BitStringMulTripleRecorder
     generate_ohv16_with_bitstring_recording(party, triple_rec, n, r0, r1, r2, r3)
 }
 
-pub fn generate_random_ohv16_bitstring_mt<'a, Rec: BitStringMulTripleRecorder + MulTripleRecorder<F>, F: Field>(party: &'a mut MainParty, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhvOutput>> 
+pub fn generate_random_ohv16_bitstring_mt<'a, Rec: BitStringMulTripleRecorder + MulTripleRecorder<F>, F: Field>(party: &'a mut MainParty, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhv16Output>> 
 where Rec::ThreadMulTripleRecorder: BitStringMulTripleRecorder
 {
     let n16 = n.div_ceil(16);
@@ -348,20 +349,47 @@ fn generate_ohv16_with_bitstring_recording<P: Party, Rec: BitStringMulTripleReco
     mul_triple_recorder: &mut Rec,
     n: usize,
     r0: Vec<RssShare<BsBool16>>, r1: Vec<RssShare<BsBool16>>, r2: Vec<RssShare<BsBool16>>, r3: Vec<RssShare<BsBool16>>
-) -> MpcResult<Vec<RndOhvOutput>> {
-    let bits = vec![r0,r1,r2,r3];
-    let rand = un_bitslice4(&bits);
+) -> MpcResult<Vec<RndOhv16Output>> {
+    let bits = vec![r0.clone(), r1.clone(), r2.clone(), r3.clone()];
     let ohv16 = lut256::offline::generate_ohv(party, mul_triple_recorder, bits, 16)?;
-    let output = un_bitslice(into_16_tuple(ohv16));
-    Ok(rand
-        .into_iter().take(n)
-        .zip(output.into_iter().take(n))
-        .map(|(rand_rss, (ohv_si, ohv_sii))| RndOhvOutput {
-            si: ohv_si,
-            sii: ohv_sii,
-            random: rand_rss.si,
-        })
-        .collect())
+    let ohv16 = into_16_tuple(ohv16);
+    Ok(ohv16_unbitslice_and_pack(ohv16, r0, r1, r2, r3, n))
+}
+
+pub fn generate_ohv16_opt_check<P: Party, Rec: Ohv16TripleRecorder>(party: &mut P, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhv16Output>> {
+    let n16 = n.div_ceil(16);
+    // generate 4 random bits
+    let r0 = party.generate_random(n16);
+    let r1 = party.generate_random(n16);
+    let r2 = party.generate_random(n16);
+    let r3 = party.generate_random(n16);
+    let ohv = generate_ohv16_bitslice_opt_check(party, triple_rec, &r0, &r1, &r2, &r3)?;
+    Ok(ohv16_unbitslice_and_pack(ohv, r0, r1, r2, r3, n))
+}
+
+pub fn generate_ohv16_opt_check_mt<Rec: Ohv16TripleRecorder>(party: &mut MainParty, triple_rec: &mut Rec, n: usize) -> MpcResult<Vec<RndOhv16Output>> {
+    let n_blocks = n.div_ceil(16);
+    let ranges = party.split_range_equally(n_blocks);
+    let task_sizes = ranges.iter().map(|(start, end)| 2*(end - start)).collect_vec();
+    let slices = triple_rec.create_thread_mul_triple_recorders(&task_sizes).into_iter().map(|sl| Some(sl)).collect();
+    let thread_parties = party.create_thread_parties_with_additiona_data_vec(ranges, slices);
+    let mut res = Vec::with_capacity(thread_parties.len());
+
+    party.run_in_threadpool(|| {
+        thread_parties
+            .into_par_iter()
+            .map(|mut thread_party| {
+                let n_blocks_per_thread = thread_party.task_size();
+                let mut rec = thread_party.additional_data.take().unwrap();
+                generate_ohv16_opt_check(&mut thread_party, &mut rec, 16*n_blocks_per_thread).unwrap()
+            })
+            .collect_into_vec(&mut res);
+        Ok(())
+    })?;
+
+    let res = res.into_iter().flatten().take(n).collect();
+    party.wait_for_completion();
+    Ok(res)
 }
 
 // implements Protocol 7 with fixed inputs
@@ -566,7 +594,7 @@ pub mod test {
             bs_bool16::BsBool16, gf2p64::GF2p64, gf4::GF4, test::{assert_eq, consistent, secret_share_vector}
         }, util::mul_triple_vec::{test::check_correct_encoding, MulTripleVector, NoMulTripleRecording, Ohv16TripleEncoder, Ohv16TripleVector}, wollut16::{
             offline::{generate_ohv16_bitslice_opt_check, generate_ohv16_with_bitstring_recording, generate_random_ohv16, generate_random_ohv16_bitstring, generate_random_ohv16_bitstring_mt, generate_random_ohv16_mt, un_bitslice},
-            RndOhvOutput,
+            RndOhv16Output,
         }
     };
     use rep3_core::{share::RssShare, test::TestSetup};
@@ -644,7 +672,12 @@ pub mod test {
         assert_eq!(o2.len(), 16);
         assert_eq!(o3.len(), 16);
         for (i, (o1, o2, o3)) in izip!(o1, o2, o3).enumerate() {
-            let rand = o1.random + o2.random + o3.random;
+            // check consistent
+            assert_eq!(o1.random_sii, o2.random_si);
+            assert_eq!(o2.random_sii, o3.random_si);
+            assert_eq!(o3.random_sii, o1.random_si);
+
+            let rand = o1.random_si + o2.random_si + o3.random_si;
             // rand should be 15-i (per construction of inputs)
             assert_eq!(rand.as_u8(), (15 - i) as u8);
 
@@ -661,12 +694,18 @@ pub mod test {
     }
 
     pub fn check_correct_rnd_ohv16(
-        o1: Vec<RndOhvOutput>,
-        o2: Vec<RndOhvOutput>,
-        o3: Vec<RndOhvOutput>,
+        o1: Vec<RndOhv16Output>,
+        o2: Vec<RndOhv16Output>,
+        o3: Vec<RndOhv16Output>,
     ) {
         for (o1, o2, o3) in izip!(o1, o2, o3) {
-            let rand = o1.random + o2.random + o3.random;
+            // check consistent
+            assert_eq!(o1.random_sii, o2.random_si);
+            assert_eq!(o2.random_sii, o3.random_si);
+            assert_eq!(o3.random_sii, o1.random_si);
+
+            let rand = o1.random_si + o2.random_si + o3.random_si;
+
             // check consistent
             assert_eq!(o1.sii, o2.si);
             assert_eq!(o2.sii, o3.si);
@@ -759,7 +798,12 @@ pub mod test {
         assert_eq!(o2.len(), 16);
         assert_eq!(o3.len(), 16);
         for (i, (o1, o2, o3)) in izip!(o1, o2, o3).enumerate() {
-            let rand = o1.random + o2.random + o3.random;
+            // check consistent
+            assert_eq!(o1.random_sii, o2.random_si);
+            assert_eq!(o2.random_sii, o3.random_si);
+            assert_eq!(o3.random_sii, o1.random_si);
+
+            let rand = o1.random_si + o2.random_si + o3.random_si;
             // rand should be 15-i (per construction of inputs)
             assert_eq!(rand.as_u8(), (15 - i) as u8);
 

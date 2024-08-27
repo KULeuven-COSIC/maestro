@@ -6,7 +6,7 @@ use crate::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-    }, util::mul_triple_vec::{GF4p4TripleRecorder, GF4p4TripleVector, MulTripleRecorder}, wollut16::{RndOhv16, RndOhvOutput}
+    }, util::mul_triple_vec::{GF4p4TripleRecorder, GF4p4TripleVector, MulTripleRecorder}, wollut16::{RndOhv16, RndOhv16Output}
 };
 
 use rep3_core::{
@@ -25,7 +25,7 @@ use rep3_core::{
 /// - `sii` - the second component of `[[x]]_i`
 ///
 /// The output, the share `[[x^-1]]_i`, is written into `(s_i,s_ii)`.
-pub fn gf8_inv_layer<P: Party, Rec: MulTripleRecorder<BsGF4>>(party: &mut P, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+pub fn gf8_inv_layer<P: Party, Rec: MulTripleRecorder<BsGF4>>(party: &mut P, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhv16Output]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     // Step 1 WOL conversion
     let (ah_i, al_i) = wol_bitslice_gf4(si);
@@ -104,7 +104,7 @@ pub fn gf8_inv_layer<P: Party, Rec: MulTripleRecorder<BsGF4>>(party: &mut P, tri
     Ok(())
 }
 
-pub fn gf8_inv_layer_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+pub fn gf8_inv_layer_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhv16Output]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     debug_assert_eq!(rnd_ohv.len(), si.len());
     
@@ -136,7 +136,7 @@ pub fn gf8_inv_layer_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, tr
 /// - `sii` - the second component of `[[x]]_i`
 ///
 /// The output, the share `[[x^-1]]_i`, is written into `(s_i,s_ii)`.
-pub fn gf8_inv_layer_gf4p4_check<P: Party, Rec: GF4p4TripleRecorder>(party: &mut P, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+pub fn gf8_inv_layer_gf4p4_check<P: Party, Rec: GF4p4TripleRecorder>(party: &mut P, triple_rec: &mut Rec, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhv16Output]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     // Step 1 WOL conversion
     let (ah_i, al_i) = wol_bitslice_gf4(si);
@@ -201,7 +201,7 @@ pub fn gf8_inv_layer_gf4p4_check<P: Party, Rec: GF4p4TripleRecorder>(party: &mut
     Ok(())
 }
 
-pub fn gf8_inv_layer_gf4p4_check_mt(party: &mut MainParty, triple_rec: &mut GF4p4TripleVector, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhvOutput]) -> MpcResult<()> {
+pub fn gf8_inv_layer_gf4p4_check_mt(party: &mut MainParty, triple_rec: &mut GF4p4TripleVector, si: &mut [GF8], sii: &mut [GF8], rnd_ohv: &[RndOhv16Output]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     debug_assert_eq!(rnd_ohv.len(), si.len());
     
@@ -267,17 +267,18 @@ fn square_and_e_layer(v: &[BsGF4]) -> Vec<BsGF4> {
     v.iter().map(|x| x.square_mul_e()).collect()
 }
 
-/// This protocol implements the preprocessed table lookup to compute v^-1 from v
+/// This protocol implements the preprocessed table lookup to compute [[v^-1]] from <<v>> and also returns [[v]]
 fn lut_layer_opt<P: Party>(
     party: &mut P,
-    mut v: Vec<BsGF4>,
-    rnd_ohv: &[RndOhvOutput],
+    v: &mut [BsGF4],
+    v_ii: &mut [BsGF4],
+    rnd_ohv: &[RndOhv16Output],
 ) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
 
     let rcv_cii = party.receive_field::<BsGF4>(Direction::Next, v.len());
     let rcv_ciii = party.receive_field::<BsGF4>(Direction::Previous, v.len());
     v.iter_mut().enumerate().for_each(|(i, dst)| {
-        *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
+        *dst += BsGF4::new(rnd_ohv[2 * i].random_si, rnd_ohv[2 * i + 1].random_si);
     });
     let ci = v;
     party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
@@ -313,7 +314,7 @@ const GF4_BITSLICED_LUT: [[u16; 4]; 16] = [
 
 #[inline]
 pub fn lut_with_rnd_ohv_bitsliced_opt(
-    rnd_ohv: &[RndOhvOutput],
+    rnd_ohv: &[RndOhv16Output],
     ci: Vec<BsGF4>,
     mut cii: Vec<BsGF4>,
     mut ciii: Vec<BsGF4>,
@@ -387,7 +388,7 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
 
 #[cfg(test)]
 mod test {
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::{WL16ASSetup, WL16DefaultParams, WL16GF4p4Check}};
+    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::{WL16ASSetup, WL16BitString, WL16DefaultParams, WL16OhvCheck}};
 
 
     #[test]
@@ -397,7 +398,7 @@ mod test {
 
     #[test]
     fn sub_bytes_gf4p4_check() {
-        test_sub_bytes::<WL16ASSetup::<WL16GF4p4Check>,_>(None)
+        test_sub_bytes::<WL16ASSetup::<WL16OhvCheck>,_>(None)
     }
 
     #[test]
@@ -409,7 +410,7 @@ mod test {
     #[test]
     fn sub_bytes_gf4p4_check_mt() {
         const N_THREADS: usize = 3;
-        test_sub_bytes::<WL16ASSetup::<WL16GF4p4Check>,_>(Some(N_THREADS))
+        test_sub_bytes::<WL16ASSetup::<WL16OhvCheck>,_>(Some(N_THREADS))
     }
 
     #[test]
@@ -441,12 +442,23 @@ mod test {
 
     #[test]
     fn aes_128_no_keyschedule_gf4p4() {
-        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16GF4p4Check>, _>(1, None)
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16OhvCheck>, _>(1, None)
     }
 
     #[test]
     fn aes_128_no_keyschedule_gf4p4_mt() {
         const N_THREADS: usize = 3;
-        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16GF4p4Check>, _>(100, Some(N_THREADS))
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16OhvCheck>, _>(100, Some(N_THREADS))
+    }
+
+    #[test]
+    fn aes_128_no_keyschedule_gf4p4_bitstring() {
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16BitString>, _>(1, None)
+    }
+
+    #[test]
+    fn aes_128_no_keyschedule_gf4p4_bitstring_mt() {
+        const N_THREADS: usize = 3;
+        test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16BitString>, _>(100, Some(N_THREADS))
     }
 }

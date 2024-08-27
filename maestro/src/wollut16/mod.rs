@@ -28,7 +28,7 @@ pub mod online;
 /// The party wrapper for the WOLLUT16 protocol.
 pub struct WL16Party {
     inner: ChidaParty,
-    prep_ohv: Vec<RndOhvOutput>,
+    prep_ohv: Vec<RndOhv16Output>,
     opt: bool,
 }
 
@@ -38,15 +38,16 @@ pub struct RndOhv16(u16);
 
 /// Output of the random one-hot vector pre-processing.
 ///
-/// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (3,3)-sharing of the corresponding `GF4` element that indicates
+/// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (2,3)-sharing of the corresponding `GF4` element that indicates
 /// the position of 1 in the vector.
-pub struct RndOhvOutput {
+pub struct RndOhv16Output {
     /// share i of one-hot vector
     pub si: RndOhv16,
     /// share i+1 of one-hot vector
     pub sii: RndOhv16,
-    /// (3,3) sharing of the position of the 1 in the vector
-    pub random: GF4,
+    /// (2,3) sharing of the position of the 1 in the vector
+    pub random_si: GF4,
+    pub random_sii: GF4,
 }
 
 impl WL16Party {
