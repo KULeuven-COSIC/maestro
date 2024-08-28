@@ -16,7 +16,8 @@ pub mod rep3_core;
 pub mod benchmark;
 
 
-use crate::benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16BitStringBenchmark, MalLUT16OhvBenchmark}};
+use crate::benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::GF4CircuitASBenchmark, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16BitStringBenchmark, MalLUT16OhvBenchmark}};
+use crate::benchmark::gf4_circuit_malsec::GF4CircuitASGF4p4Benchmark;
 use itertools::Itertools;
 use crate::rep3_core::network::{self, ConnectedParty};
 use std::path::PathBuf;
@@ -69,9 +70,10 @@ pub enum ProtocolVariant {
     MalLut16Bitstring,
     MalLut16Ohv,
     MalGF4Circuit,
-    MalGF4CircuitAllCheck,
-    MalGF4CircuitBucketBeaverCheck,
-    MalGF4CircuitRecBeaverCheck,
+    MalGF4CircuitOpt,
+    // MalGF4CircuitAllCheck,
+    // MalGF4CircuitBucketBeaverCheck,
+    // MalGF4CircuitRecBeaverCheck,
 }
 
 fn main() -> Result<(), String> {
@@ -123,11 +125,12 @@ impl ProtocolVariant {
             ProtocolVariant::MalLut16Bitstring => &MalLUT16BitStringBenchmark,
             ProtocolVariant::MalLut16Ohv => &MalLUT16OhvBenchmark,
             ProtocolVariant::MalGF4Circuit => &GF4CircuitASBenchmark,
+            ProtocolVariant::MalGF4CircuitOpt => &GF4CircuitASGF4p4Benchmark
             // ProtocolVariant::MalLut16PrepCheck => &MalLUT16PrepCheckBenchmark,
             // ProtocolVariant::MalLut16AllCheck => &MalLUT16AllCheckBenchmark,
-            ProtocolVariant::MalGF4CircuitAllCheck => &GF4CircuitAllCheckASBenchmark,
-            ProtocolVariant::MalGF4CircuitBucketBeaverCheck => &GF4CircuitASBucketBeaverBenchmark,
-            ProtocolVariant::MalGF4CircuitRecBeaverCheck => &GF4CircuitASRecBeaverBenchmark,
+            // ProtocolVariant::MalGF4CircuitAllCheck => &GF4CircuitAllCheckASBenchmark,
+            // ProtocolVariant::MalGF4CircuitBucketBeaverCheck => &GF4CircuitASBucketBeaverBenchmark,
+            // ProtocolVariant::MalGF4CircuitRecBeaverCheck => &GF4CircuitASRecBeaverBenchmark,
         }
     }
 }

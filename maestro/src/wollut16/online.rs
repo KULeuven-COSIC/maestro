@@ -6,7 +6,7 @@ use crate::{
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
         Field,
-    }, util::ArithmeticBlackBox
+    }, util::ArithmeticBlackBox, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}
 };
 use crate::rep3_core::{
     network::task::{Direction, IoLayerOwned},
@@ -206,49 +206,6 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
         .enumerate()
         .for_each(|(j, s_i)| *s_i = wol_inv_map(&a_h_a_l_ii[j], &a_h_a_l_ii[j + n]));
     Ok(())
-}
-
-/// This function computes the WOL transform from `GF(2^8)` to `GF(2^4)^2`.
-pub fn wol_bitslice_gf4(x: &[GF8]) -> (Vec<BsGF4>, Vec<BsGF4>) {
-    let n = if x.len() % 2 == 0 {
-        x.len() / 2
-    } else {
-        x.len() / 2 + 1
-    };
-    let mut xh = vec![BsGF4::ZERO; n];
-    let mut xl = vec![BsGF4::ZERO; n];
-    for i in 0..(n - 1) {
-        let (xh1, xl1) = wol_map(&x[2 * i]);
-        let (xh2, xl2) = wol_map(&x[2 * i + 1]);
-        xh[i] = BsGF4::new(xh1, xh2);
-        xl[i] = BsGF4::new(xl1, xl2);
-    }
-    if n == x.len() / 2 {
-        let (xh1, xl1) = wol_map(&x[x.len() - 2]);
-        let (xh2, xl2) = wol_map(&x[x.len() - 1]);
-        xh[n - 1] = BsGF4::new(xh1, xh2);
-        xl[n - 1] = BsGF4::new(xl1, xl2);
-    } else {
-        let (xh1, xl1) = wol_map(&x[x.len() - 2]);
-        xh[n - 1] = BsGF4::new(xh1, GF4::ZERO);
-        xl[n - 1] = BsGF4::new(xl1, GF4::ZERO);
-    }
-    (xh, xl)
-}
-
-/// This function computes the reverse WOL transform from `GF(2^4)^2` to `GF(2^8)`.
-pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
-    for i in 0..(x.len() / 2) {
-        let (xh1, xh2) = xh[i].unpack();
-        let (xl1, xl2) = xl[i].unpack();
-        x[2 * i] = wol_inv_map(&xh1, &xl1);
-        x[2 * i + 1] = wol_inv_map(&xh2, &xl2);
-    }
-    if xh.len() * 2 != x.len() {
-        let (xh1, _) = xh[xh.len() - 1].unpack();
-        let (xl1, _) = xl[xh.len() - 1].unpack();
-        x[x.len() - 1] = wol_inv_map(&xh1, &xl1);
-    }
 }
 
 /// This function is an optimized version of the multiplicative inversion as in `Protocol 2`.

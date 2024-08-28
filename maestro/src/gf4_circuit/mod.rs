@@ -21,7 +21,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use crate::rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}};
+use crate::{rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 
 use crate::{
     aes::GF8InvBlackBox, chida::{self, ChidaParty}, share::{
@@ -29,7 +29,7 @@ use crate::{
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
         Field,
-    }, util::{mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording}, ArithmeticBlackBox}, wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}
+    }, util::{mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording}, ArithmeticBlackBox}
 };
 
 /// The party wrapper for the GF4 circuit protocol.
