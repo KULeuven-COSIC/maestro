@@ -4,6 +4,3 @@ resolver = "2"
 members = [
     "maestro",
 ]
-
-[profile.release]
-lto = "fat"
