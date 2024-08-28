@@ -1,7 +1,7 @@
 use std::mem;
 
 use itertools::Itertools;
-use rep3_core::{network::task::Direction, party::{error::MpcResult, MainParty, Party}, share::RssShare};
+use crate::rep3_core::{network::task::Direction, party::{error::MpcResult, MainParty, Party}, share::RssShare};
 
 use crate::share::gf8::GF8;
 
@@ -383,7 +383,7 @@ fn inv_sbox_layer<Protocol: GF8InvBlackBoxSS>(
 pub mod test {
     use itertools::{izip, repeat_n, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
-    use rep3_core::test::TestSetup;
+    use crate::rep3_core::test::TestSetup;
 
     use crate::aes::ss::{aes128_inv_no_keyschedule, aes128_no_keyschedule};
     use crate::aes::test::{secret_share_aes_key_state, AES_SBOX, AES_TEST_EXPECTED_OUTPUT, AES_TEST_INPUT, AES_TEST_ROUNDKEYS};

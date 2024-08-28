@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use crate::{
     chida, lut256, share::{bs_bool16::BsBool16, gf4::GF4, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder, Ohv16TripleRecorder}, wollut16::{RndOhv16, RndOhv16Output}
 };
-use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
+use crate::rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
 
 fn map_si(rss: &RssShare<BsBool16>) -> &BsBool16 {
     &rss.si
@@ -597,7 +597,7 @@ pub mod test {
             RndOhv16Output,
         }
     };
-    use rep3_core::{share::RssShare, test::TestSetup};
+    use crate::rep3_core::{share::RssShare, test::TestSetup};
 
     use super::{generate_ohv16, un_bitslice4};
 

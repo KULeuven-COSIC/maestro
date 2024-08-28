@@ -1,8 +1,8 @@
 
-use rep3_core::network::ConnectedParty;
-use maestro::chida::{ChidaBenchmarkParty, ImplVariant};
+use crate::rep3_core::network::ConnectedParty;
+use crate::chida::{ChidaBenchmarkParty, ImplVariant};
 
-use impl_benchmark_protocol;
+use super::impl_benchmark_protocol;
 
 
 impl_benchmark_protocol!(

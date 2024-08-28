@@ -1,7 +1,7 @@
 use criterion::*;
 use maestro::share::gf2p64::GF2p64;
 use rand::thread_rng;
-use rep3_core::{party::RngExt, share::RssShare};
+use maestro::rep3_core::{party::RngExt, share::RssShare};
 
 pub fn random_rss(n: usize) -> Vec<RssShare<GF2p64>> {
     let mut rng = thread_rng();

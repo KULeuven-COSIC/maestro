@@ -10,3 +10,4 @@ pub mod wollut16;
 pub mod wollut16_malsec;
 pub mod gf4_circuit_malsec;
 pub mod util;
+pub mod rep3_core;

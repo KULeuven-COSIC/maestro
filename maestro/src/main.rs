@@ -1,15 +1,27 @@
 #![doc = include_str!("../../README.md")]
 
+#![allow(dead_code)]
+pub mod aes;
+pub mod chida;
+pub mod furukawa;
+pub mod gf4_circuit;
+pub mod lut256;
+pub mod share;
+pub mod wollut16;
+pub mod wollut16_malsec;
+pub mod gf4_circuit_malsec;
+pub mod util;
+pub mod rep3_core;
 #[macro_use]
-mod utils;
-mod benchmark;
+pub mod benchmark;
 
-use benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16BitStringBenchmark, MalLUT16OhvBenchmark}};
+
+use crate::benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::{GF4CircuitASBenchmark, GF4CircuitASBucketBeaverBenchmark, GF4CircuitASRecBeaverBenchmark, GF4CircuitAllCheckASBenchmark}, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16BitStringBenchmark, MalLUT16OhvBenchmark}};
 use itertools::Itertools;
-use rep3_core::network::{self, ConnectedParty};
+use crate::rep3_core::network::{self, ConnectedParty};
 use std::path::PathBuf;
 
-use utils::{BenchmarkProtocol, BenchmarkResult};
+use crate::benchmark::utils::{BenchmarkProtocol, BenchmarkResult};
 use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
@@ -91,7 +103,7 @@ fn main() -> Result<(), String> {
         }
     }
     
-    utils::benchmark_protocols(party_index, &config, cli.rep, cli.simd, cli.threads, boxed, cli.csv).unwrap();
+    benchmark::utils::benchmark_protocols(party_index, &config, cli.rep, cli.simd, cli.threads, boxed, cli.csv).unwrap();
     Ok(())
 }
 

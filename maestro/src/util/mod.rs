@@ -1,4 +1,4 @@
-use rep3_core::{network::task::IoLayerOwned, party::error::MpcResult, share::{RssShare, RssShareVec}};
+use crate::rep3_core::{network::task::IoLayerOwned, party::error::MpcResult, share::{RssShare, RssShareVec}};
 
 use crate::share::Field;
 

@@ -1,5 +1,5 @@
 use itertools::{izip, Itertools};
-use rep3_core::share::{HasZero, RssShare};
+use crate::rep3_core::share::{HasZero, RssShare};
 use std::{array, fmt::Debug, ops::{Index, IndexMut}};
 use crate::share::{bs_bool16::BsBool16, gf2p64::{embed_gf2_deg012, embed_gf2_deg036, embed_gf2_deg8, embed_gf4p4_deg2, embed_gf4p4_deg3, GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field};
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
@@ -900,7 +900,7 @@ pub mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, SeedableRng};
     use rand_chacha::ChaCha20Rng;
-    use rep3_core::{party::{MainParty, RngExt}, share::{HasZero, RssShare}, test::localhost_setup};
+    use crate::rep3_core::{party::{MainParty, RngExt}, share::{HasZero, RssShare}, test::localhost_setup};
     use crate::{share::{bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd}, gf4::BsGF4, gf8::GF8, test::{consistent, secret_share, secret_share_vector}, Field}, util::mul_triple_vec::{BitStringMulTripleRecorder, BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF2p64SubfieldEncoder, GF4p4TripleRecorder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector, Ohv16TripleEncoder, Ohv16TripleRecorder, Ohv16TripleVector}};
     use crate::share::test::assert_eq;
     use super::{GenericMulTripleVector, MulTripleEncoder};

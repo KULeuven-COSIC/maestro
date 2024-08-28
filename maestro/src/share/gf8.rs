@@ -8,10 +8,10 @@
 use crate::share::gf8_tables;
 use crate::share::Field;
 use rand::{CryptoRng, Rng};
-use rep3_core::network::NetSerializable;
-use rep3_core::party::DigestExt;
-use rep3_core::party::RngExt;
-use rep3_core::share::HasZero;
+use crate::rep3_core::network::NetSerializable;
+use crate::rep3_core::party::DigestExt;
+use crate::rep3_core::party::RngExt;
+use crate::rep3_core::share::HasZero;
 use sha2::Digest;
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};

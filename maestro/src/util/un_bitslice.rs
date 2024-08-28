@@ -1,4 +1,4 @@
-use rep3_core::share::RssShare;
+use crate::rep3_core::share::RssShare;
 
 use crate::{lut256::RndOhv, share::bs_bool16::BsBool16};
 

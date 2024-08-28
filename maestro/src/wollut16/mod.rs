@@ -19,7 +19,7 @@ use crate::{
     chida::ChidaParty,
     share::gf4::GF4, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox},
 };
-use rep3_core::{network::{task::IoLayerOwned, ConnectedParty},
+use crate::rep3_core::{network::{task::IoLayerOwned, ConnectedParty},
 party::error::MpcResult};
 
 pub mod offline;
@@ -121,7 +121,7 @@ impl RndOhv16 {
 
 #[cfg(test)]
 mod test {
-    use rep3_core::{
+    use crate::rep3_core::{
         network::ConnectedParty,
         test::{localhost_connect, TestSetup},
     };

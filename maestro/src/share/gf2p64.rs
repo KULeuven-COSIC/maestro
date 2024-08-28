@@ -12,11 +12,11 @@ use std::{
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
-use rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero};
+use crate::rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::{HasZero, RssShare}};
 use sha2::Digest;
 
 use super::{
-    bs_bool16::BsBool16, gf4::GF4, gf8::GF8, Field, HasTwo, InnerProduct, Invertible, RssShare
+    bs_bool16::BsBool16, gf4::GF4, gf8::GF8, Field, HasTwo, InnerProduct, Invertible
 };
 
 /// An element of `GF(2^64) := GF(2)[X] / X^64 + X^4 + X^3 + X + 1`
@@ -908,7 +908,7 @@ pub fn embed_gf2_deg8(dst: &mut [GF2p64], b0: BsBool16, b1: BsBool16, b2: BsBool
 mod test {
     use itertools::Itertools;
     use rand::thread_rng;
-    use rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
+    use crate::rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
 
     use crate::share::{
         bs_bool16::BsBool16, gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, InnerProduct, Invertible

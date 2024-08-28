@@ -11,9 +11,9 @@ pub mod wol;
 
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
-use rep3_core::network::NetSerializable;
-use rep3_core::party::RngExt;
-use rep3_core::share::{HasZero, RssShare};
+use crate::rep3_core::network::NetSerializable;
+use crate::rep3_core::party::RngExt;
+use crate::rep3_core::share::{HasZero, RssShare};
 
 /// A finite field.
 pub trait Field:
@@ -106,8 +106,8 @@ pub mod test {
     use crate::share::gf4::GF4;
     use crate::share::gf8::GF8;
     use rand::{thread_rng, CryptoRng, Rng};
-    use rep3_core::party::RngExt;
-    use rep3_core::share::{RssShare, RssShareVec};
+    use crate::rep3_core::party::RngExt;
+    use crate::rep3_core::share::{RssShare, RssShareVec};
     use std::borrow::Borrow;
     use std::fmt::Debug;
 

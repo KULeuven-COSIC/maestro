@@ -589,7 +589,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use crate::{network::non_blocking::NonBlockingCommChannel, party::test_export::localhost_connect};
+    use crate::rep3_core::{network::non_blocking::NonBlockingCommChannel, party::test_export::localhost_connect};
 
     use super::non_blocking::NonBlockingStream;
 

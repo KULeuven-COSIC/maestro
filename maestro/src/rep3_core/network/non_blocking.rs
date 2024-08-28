@@ -4,7 +4,7 @@ use std::{
     net::TcpStream,
 };
 
-use crate::party::CommStats;
+use crate::rep3_core::party::CommStats;
 
 use super::{CommChannel, Stream};
 

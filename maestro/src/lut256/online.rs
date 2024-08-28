@@ -9,7 +9,7 @@ use rayon::{
 use crate::{
     aes::GF8InvBlackBox, chida::ChidaParty, share::{gf8::GF8, Field}, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox}
 };
-use rep3_core::{network::task::{Direction, IoLayerOwned},
+use crate::rep3_core::{network::task::{Direction, IoLayerOwned},
 party::{error::MpcResult, MainParty}, share::{RssShare, RssShareVec}};
 
 use super::{lut256_tables, offline, LUT256Party, RndOhv256Output};

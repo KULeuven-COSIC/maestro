@@ -8,7 +8,7 @@ use std::{
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
-use rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero};
+use crate::rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero};
 use sha2::Digest;
 
 use super::Field;
@@ -167,7 +167,7 @@ impl DigestExt for BsBool16 {
 mod test {
     use crate::share::bs_bool16::BsBool16;
     use rand::thread_rng;
-    use rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
+    use crate::rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
 
     #[test]
     fn serialization() {

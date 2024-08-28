@@ -2,7 +2,7 @@ use std::{borrow::Borrow, cell::OnceCell, ops::Sub};
 
 use rand_chacha::ChaCha20Rng;
 
-use crate::{network::{
+use crate::rep3_core::{network::{
         task::{Direction, IoLayer}, NetSerializable, NetSliceReceiver, NetVectorReceiver
     }, share::{HasZero, RssShare, RssShareVec}};
 
@@ -126,7 +126,7 @@ mod test {
     use itertools::{izip, Itertools};
     use rand::RngCore;
 
-    use crate::{network::NetSerializable, party::{
+    use crate::rep3_core::{network::NetSerializable, party::{
             test::DummyNumber, test_export::{PartySetup, TestSetup}, MainParty, Party
         }, share::{HasZero, RssShare}};
 

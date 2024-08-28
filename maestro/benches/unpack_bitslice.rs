@@ -2,7 +2,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
 use rand::thread_rng;
 use maestro::{lut256::RndOhv, share::bs_bool16::BsBool16};
-use rep3_core::{party::RngExt, share::RssShare};
+use maestro::rep3_core::{party::RngExt, share::RssShare};
 
 const SIMD_SIZE: usize = 10000;
 

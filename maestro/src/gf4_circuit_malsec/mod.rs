@@ -1,5 +1,5 @@
 
-use rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare};
+use crate::rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare};
 use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, share::{gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsGF4Encoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
 
 mod offline;
@@ -154,7 +154,7 @@ impl GF8InvBlackBox for GF4CircuitASParty {
 #[cfg(test)]
 mod test {
     use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes};
-    use rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
+    use crate::rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
 
     use super::{GF4CircuitASParty, MultCheckType};
 

@@ -1,5 +1,7 @@
-use rep3_core::network::ConnectedParty;
-use maestro::gf4_circuit::GF4CircuitSemihonestParty;
+use crate::rep3_core::network::ConnectedParty;
+use crate::gf4_circuit::GF4CircuitSemihonestParty;
+
+use super::impl_benchmark_protocol;
 
 
 impl_benchmark_protocol!(

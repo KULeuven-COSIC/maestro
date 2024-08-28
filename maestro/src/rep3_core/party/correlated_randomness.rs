@@ -1,8 +1,8 @@
-use crate::network::task::{Direction, IoLayerOwned};
-use crate::network::CommChannel;
-use crate::party::broadcast::{Broadcast, BroadcastContext};
-use crate::party::error::{MpcError, MpcResult};
-use crate::party::{commitment, MainParty};
+use crate::rep3_core::network::task::{Direction, IoLayerOwned};
+use crate::rep3_core::network::CommChannel;
+use crate::rep3_core::party::broadcast::{Broadcast, BroadcastContext};
+use crate::rep3_core::party::error::{MpcError, MpcResult};
+use crate::rep3_core::party::{commitment, MainParty};
 use rand::{CryptoRng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
@@ -153,8 +153,8 @@ impl AsMut<ChaCha20Rng> for GlobalRng {
 
 #[cfg(test)]
 mod test {
-    use crate::party::correlated_randomness::GlobalRng;
-    use crate::party::test_export::simple_localhost_setup;
+    use crate::rep3_core::party::correlated_randomness::GlobalRng;
+    use crate::rep3_core::party::test_export::simple_localhost_setup;
     use rand::RngCore;
 
     #[test]

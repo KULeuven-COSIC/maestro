@@ -8,7 +8,7 @@ use crate::{
         Field,
     }, util::ArithmeticBlackBox
 };
-use rep3_core::{
+use crate::rep3_core::{
     network::task::{Direction, IoLayerOwned},
     party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare, RssShareVec},
 };
@@ -607,7 +607,7 @@ mod test {
             WL16Party,
         },
     };
-    use rep3_core::{test::TestSetup, party::RngExt, share::RssShare};
+    use crate::rep3_core::{test::TestSetup, party::RngExt, share::RssShare};
 
     use super::{gf8_inv_layer, lut_layer};
 

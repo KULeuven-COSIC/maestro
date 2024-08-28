@@ -9,7 +9,7 @@ use crate::{
     }, util::mul_triple_vec::{GF4p4TripleRecorder, GF4p4TripleVector, MulTripleRecorder}, wollut16::{RndOhv16, RndOhv16Output}
 };
 
-use rep3_core::{
+use crate::rep3_core::{
     network::task::Direction,
     party::{error::MpcResult, MainParty, Party}, share::HasZero,
 };

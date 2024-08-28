@@ -1,13 +1,13 @@
 use itertools::izip;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
-use rep3_core::party::{MainParty, Party};
-use rep3_core::share::{RssShare, RssShareVec};
+use crate::rep3_core::party::{MainParty, Party};
+use crate::rep3_core::share::{RssShare, RssShareVec};
 
 use crate::aes::GF8InvBlackBox;
 use crate::util::ArithmeticBlackBox;
-use rep3_core::network::task::{Direction, IoLayerOwned};
-use rep3_core::party::error::MpcResult;
+use crate::rep3_core::network::task::{Direction, IoLayerOwned};
+use crate::rep3_core::party::error::MpcResult;
 use crate::share::gf8::GF8;
 use crate::share::Field;
 
@@ -531,10 +531,10 @@ pub mod test {
         input_round, input_round_aes_states, mul, output_round, VectorAesState,
     };
     use crate::chida::{ChidaBenchmarkParty, ChidaParty, ImplVariant};
-    use rep3_core::network::ConnectedParty;
-    use rep3_core::test::{localhost_connect, PartySetup, TestSetup};
-    use rep3_core::party::{MainParty, RngExt};
-    use rep3_core::share::RssShare;
+    use crate::rep3_core::network::ConnectedParty;
+    use crate::rep3_core::test::{localhost_connect, PartySetup, TestSetup};
+    use crate::rep3_core::party::{MainParty, RngExt};
+    use crate::rep3_core::share::RssShare;
     use crate::share::gf8::GF8;
     use crate::share::test::{
         assert_eq, consistent, random_secret_shared_vector, secret_share_vector,

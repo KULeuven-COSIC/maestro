@@ -1,4 +1,4 @@
-use crate::party::error::{MpcError, MpcResult};
+use crate::rep3_core::party::error::{MpcError, MpcResult};
 use rand::{CryptoRng, Rng};
 use sha2::{Digest, Sha256};
 
@@ -35,8 +35,8 @@ pub fn open(commitment: &[u8], msg: &[u8]) -> MpcResult<()> {
 
 #[cfg(test)]
 mod test {
-    use crate::party::commitment::{commit, open};
-    use crate::party::error::MpcError;
+    use crate::rep3_core::party::commitment::{commit, open};
+    use crate::rep3_core::party::error::MpcError;
     use rand::thread_rng;
 
     #[test]

@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use rep3_core::{network::ConnectedParty, party::{error::MpcResult, MainParty}};
+use crate::rep3_core::{network::ConnectedParty, party::{error::MpcResult, MainParty}};
 
 use crate::aes::{self};
 

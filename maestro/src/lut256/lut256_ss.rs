@@ -5,7 +5,7 @@ use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
 use crate::{aes::ss::{GF8InvBlackBoxSS, GF8InvBlackBoxSSMal}, share::{bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf8::GF8}, util::mul_triple_vec::{BsBool16Encoder, MulTripleEncoder, MulTripleRecorder, MulTripleVector, NoMulTripleRecording, Ohv16TripleEncoder, Ohv16TripleVector}, wollut16_malsec::mult_verification};
-use rep3_core::{network::{task::Direction, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare}};
+use crate::rep3_core::{network::{task::Direction, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare}};
 
 use super::{lut256_tables, offline, RndOhv256OutputSS};
 
@@ -436,9 +436,9 @@ mod test {
     
     use itertools::{izip, repeat_n, Itertools};
     use rand::thread_rng;
-    use rep3_core::network::ConnectedParty;
-    use rep3_core::share::{HasZero, RssShare};
-    use rep3_core::test::{localhost_connect, TestSetup};
+    use crate::rep3_core::network::ConnectedParty;
+    use crate::rep3_core::share::{HasZero, RssShare};
+    use crate::rep3_core::test::{localhost_connect, TestSetup};
 
     use super::{Lut256SSMalParty, Lut256SSParty};
 

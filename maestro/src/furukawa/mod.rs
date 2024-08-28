@@ -17,7 +17,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, ThreadParty}, share::{RssShare, RssShareVec}};
+use crate::rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, ThreadParty}, share::{RssShare, RssShareVec}};
 
 use crate::{
     aes::GF8InvBlackBox, chida, share::{gf2p64::GF2p64Subfield, gf8::GF8, Field}, util::{mul_triple_vec::{GF2p64SubfieldEncoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec
@@ -480,10 +480,10 @@ pub mod test {
     use crate::share::gf8::GF8;
     use crate::share::Field;
     use crate::util::ArithmeticBlackBox;
-    use rep3_core::network::ConnectedParty;
-    use rep3_core::test::{localhost_connect, TestSetup};
-    use rep3_core::party::{DigestExt, RngExt};
-    use rep3_core::share::RssShare;
+    use crate::rep3_core::network::ConnectedParty;
+    use crate::rep3_core::test::{localhost_connect, TestSetup};
+    use crate::rep3_core::party::{DigestExt, RngExt};
+    use crate::rep3_core::share::RssShare;
     use crate::share::gf2p64::GF2p64Subfield;
     use crate::share::test::{assert_eq, consistent};
     use rand::thread_rng;

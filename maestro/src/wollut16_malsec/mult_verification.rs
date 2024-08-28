@@ -2,7 +2,7 @@ use std::slice;
 
 use itertools::Itertools;
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
-use rep3_core::{
+use crate::rep3_core::{
     network::task::Direction,
     party::{broadcast::{Broadcast, BroadcastContext}, error::MpcResult, DigestExt, MainParty, Party}, share::{HasZero, RssShare, RssShareVec},
 };
@@ -427,8 +427,8 @@ mod test {
 
     use itertools::izip;
     use rand::{thread_rng, CryptoRng, Rng};
-    use rep3_core::{party::{broadcast::{Broadcast, BroadcastContext}, MainParty}, share::{HasZero, RssShare}};
-    use rep3_core::test::{PartySetup, TestSetup};
+    use crate::rep3_core::{party::{broadcast::{Broadcast, BroadcastContext}, MainParty}, share::{HasZero, RssShare}};
+    use crate::rep3_core::test::{PartySetup, TestSetup};
     use crate::{
         share::{
             bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8, test::{assert_eq, consistent, secret_share, secret_share_vector}, Field, InnerProduct

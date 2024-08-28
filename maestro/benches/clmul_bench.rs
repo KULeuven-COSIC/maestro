@@ -1,7 +1,7 @@
 use criterion::*;
 use maestro::share::gf2p64::GF2p64;
 use rand::thread_rng;
-use rep3_core::party::RngExt;
+use maestro::rep3_core::party::RngExt;
 
 fn clmul_bench_variants(c: &mut Criterion) {
     let mut rng = thread_rng();

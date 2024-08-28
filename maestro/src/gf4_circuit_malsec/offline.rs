@@ -2,7 +2,7 @@ use itertools::izip;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::{furukawa, share::{gf4::BsGF4, Field}, util::mul_triple_vec::{BsGF4Encoder, MulTripleRecorder, MulTripleVector}, wollut16_malsec};
-use rep3_core::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}};
+use crate::rep3_core::{network::task::Direction, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}};
 
 
 pub fn prepare_beaver_triples_recursive_check(party: &mut MainParty, dst: &mut MulTripleVector<BsGF4>, context: &mut BroadcastContext, n: usize) -> MpcResult<()> {
@@ -91,8 +91,8 @@ mod test {
 
     use super::{optimistic_mul, optimistic_mul_mt, prepare_beaver_triples_recursive_check};
     use crate::{share::{gf4::BsGF4, test::{assert_eq, consistent}, Field}, util::mul_triple_vec::{MulTripleRecorder, MulTripleVector}};
-    use rep3_core::party::{broadcast::{Broadcast, BroadcastContext}, MainParty};
-    use rep3_core::test::localhost_setup;
+    use crate::rep3_core::party::{broadcast::{Broadcast, BroadcastContext}, MainParty};
+    use crate::rep3_core::test::localhost_setup;
 
 
     #[test]

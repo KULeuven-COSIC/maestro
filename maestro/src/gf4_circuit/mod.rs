@@ -21,7 +21,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}};
+use crate::rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}};
 
 use crate::{
     aes::GF8InvBlackBox, chida::{self, ChidaParty}, share::{
@@ -340,7 +340,7 @@ fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
 
 #[cfg(test)]
 mod test {
-    use rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
+    use crate::rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
 
     use crate::aes::test::{
             test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,

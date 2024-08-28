@@ -1,6 +1,6 @@
 use std::ops::AddAssign;
 
-use rep3_core::{
+use crate::rep3_core::{
     network::task::Direction,
     party::{
         broadcast::{Broadcast, BroadcastContext}, correlated_randomness::GlobalRng, error::{MpcError, MpcResult}, DigestExt, MainParty, Party
@@ -565,7 +565,7 @@ pub mod test {
         furukawa::{offline::bucket_cut_and_choose, MulTripleVector},
         share::{gf8::GF8, test::consistent, Field},
     };
-    use rep3_core::{
+    use crate::rep3_core::{
         test::{simple_localhost_setup, PartySetup, TestSetup},
         party::MainParty,
         share::RssShare,

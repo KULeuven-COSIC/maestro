@@ -7,8 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use maestro::{aes::{self, GF8InvBlackBox}, share::gf8::GF8, util::ArithmeticBlackBox};
-use rep3_core::{network::{Config, ConnectedParty}, party::{error::MpcResult, CombinedCommStats}};
+use crate::{aes::{self, GF8InvBlackBox}, share::gf8::GF8, util::ArithmeticBlackBox};
+use crate::rep3_core::{network::{Config, ConnectedParty}, party::{error::MpcResult, CombinedCommStats}};
 
 pub struct BenchmarkResult {
     prep_time: Duration,
@@ -331,7 +331,7 @@ macro_rules! impl_benchmark_protocol {
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr,$abb_fn:expr, None, None) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
             fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::utils::run_benchmark_no_prep_no_finalize(conn, simd, n_worker_threads, $setup_fn, $abb_fn)
+                crate::benchmark::utils::run_benchmark_no_prep_no_finalize(conn, simd, n_worker_threads, $setup_fn, $abb_fn)
             }   
         );
     };
@@ -339,7 +339,7 @@ macro_rules! impl_benchmark_protocol {
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr, $abb_fn:expr, None, $finalize_fn:expr) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
             fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::utils::run_benchmark_no_prep(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($finalize_fn))
+                crate::benchmark::utils::run_benchmark_no_prep(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($finalize_fn))
             }   
         );
     };
@@ -347,7 +347,7 @@ macro_rules! impl_benchmark_protocol {
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr, $abb_fn:expr, $prep_fn:expr, None) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
             fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::utils::run_benchmark_no_finalize(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($prep_fn))
+                crate::benchmark::utils::run_benchmark_no_finalize(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($prep_fn))
             }   
         );
     };
@@ -355,7 +355,7 @@ macro_rules! impl_benchmark_protocol {
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr, $abb_fn:expr, $prep_fn:expr, $finalize_fn:expr) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
             fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::utils::run_benchmark(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($prep_fn), Some($finalize_fn))
+                crate::benchmark::utils::run_benchmark(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($prep_fn), Some($finalize_fn))
             }   
         );
     };

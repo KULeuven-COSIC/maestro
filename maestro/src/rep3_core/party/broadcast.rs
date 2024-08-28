@@ -1,8 +1,8 @@
-use crate::network::task::Direction;
-use crate::network::NetSerializable;
-use crate::party::error::{MpcError, MpcResult};
-use crate::party::MainParty;
-use crate::share::RssShare;
+use crate::rep3_core::network::task::Direction;
+use crate::rep3_core::network::NetSerializable;
+use crate::rep3_core::party::error::{MpcError, MpcResult};
+use crate::rep3_core::party::MainParty;
+use crate::rep3_core::share::RssShare;
 use sha2::digest::FixedOutput;
 use sha2::{Digest, Sha256};
 use std::error::Error;
@@ -253,13 +253,13 @@ impl Error for BroadcastError {}
 mod test {
     use std::ops::Sub;
 
-    use crate::network::task::Direction;
-    use crate::party::broadcast::{Broadcast, BroadcastContext};
-    use crate::party::error::MpcError;
-    use crate::party::test::DummyNumber;
-    use crate::party::test_export::{PartySetup, TestSetup};
-    use crate::party::{DigestExt, MainParty, RngExt};
-    use crate::share::{HasZero, RssShare};
+    use crate::rep3_core::network::task::Direction;
+    use crate::rep3_core::party::broadcast::{Broadcast, BroadcastContext};
+    use crate::rep3_core::party::error::MpcError;
+    use crate::rep3_core::party::test::DummyNumber;
+    use crate::rep3_core::party::test_export::{PartySetup, TestSetup};
+    use crate::rep3_core::party::{DigestExt, MainParty, RngExt};
+    use crate::rep3_core::share::{HasZero, RssShare};
     use rand::{thread_rng, CryptoRng, Rng};
     use sha2::digest::FixedOutput;
     use sha2::{Digest, Sha256};

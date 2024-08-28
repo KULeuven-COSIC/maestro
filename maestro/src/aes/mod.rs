@@ -1,4 +1,4 @@
-use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::RssShare};
+use crate::rep3_core::{party::{error::MpcResult, MainParty, Party}, share::RssShare};
 
 use crate::{share::gf8::GF8, util::ArithmeticBlackBox};
 pub mod ss;
@@ -457,7 +457,7 @@ pub mod test {
 
     use itertools::repeat_n;
     use rand::{thread_rng, CryptoRng, Rng};
-    use rep3_core::{test::TestSetup, share::RssShare};
+    use crate::rep3_core::{test::TestSetup, share::RssShare};
     use crate::{
         aes::{
             aes128_inv_no_keyschedule, aes128_keyschedule, aes128_no_keyschedule, sbox_layer,

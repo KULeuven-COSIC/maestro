@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::error::MpcResult};
+use crate::rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::error::MpcResult};
 
 use crate::{
     chida::ChidaParty,
@@ -96,7 +96,7 @@ impl RndOhv {
 
 #[cfg(test)]
 mod test {
-    use rep3_core::{
+    use crate::rep3_core::{
         network::ConnectedParty,
         test::{localhost_connect, TestSetup},
     };

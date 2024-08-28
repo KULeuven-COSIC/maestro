@@ -2,7 +2,8 @@
 resolver = "2"
 
 members = [
-    "rep3-core",
     "maestro",
-    "benchmark",
 ]
+
+[profile.release]
+lto = "fat"

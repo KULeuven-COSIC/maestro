@@ -6,7 +6,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use crate::{
     chida, share::{bs_bool16::BsBool16, gf8::GF8, Field}, util::{self, mul_triple_vec::{BitStringMulTripleRecorder, MulTripleRecorder, Ohv16TripleRecorder}}, wollut16
 };
-use rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
+use crate::rep3_core::{party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare}};
 
 use super::{RndOhv256Output, RndOhv256OutputSS};
 
@@ -318,7 +318,7 @@ fn un_bitslice8(bs: &[Vec<RssShare<BsBool16>>]) -> Vec<RssShare<GF8>> {
 mod test {
     use itertools::{izip, repeat_n, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
-    use rep3_core::{test::TestSetup, share::{HasZero, RssShare, RssShareVec}};
+    use crate::rep3_core::{test::TestSetup, share::{HasZero, RssShare, RssShareVec}};
 
     use crate::{
         chida::{online::test::ChidaSetup, ChidaParty},

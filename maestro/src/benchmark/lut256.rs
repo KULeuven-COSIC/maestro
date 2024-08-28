@@ -1,8 +1,10 @@
 use std::time::{Duration, Instant};
-use rep3_core::{network::ConnectedParty, party::CombinedCommStats};
-use maestro::{aes::{self, ss::{GF8InvBlackBoxSS, GF8InvBlackBoxSSMal}, GF8InvBlackBox}, lut256::{lut256_ss::{Lut256SSMalParty, Lut256SSParty}, LUT256Party}};
+use crate::rep3_core::{network::ConnectedParty, party::CombinedCommStats};
+use crate::{aes::{self, ss::{GF8InvBlackBoxSS, GF8InvBlackBoxSSMal}, GF8InvBlackBox}, lut256::{lut256_ss::{Lut256SSMalParty, Lut256SSParty}, LUT256Party}};
 
-use crate::utils::{BenchmarkProtocol, BenchmarkResult};
+use crate::benchmark::utils::{BenchmarkProtocol, BenchmarkResult};
+
+use super::impl_benchmark_protocol;
 
 impl_benchmark_protocol!(
     LUT256Benchmark,  // benchmark struct name

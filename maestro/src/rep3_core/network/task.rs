@@ -11,7 +11,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crate::party::CombinedCommStats;
+use crate::rep3_core::party::CombinedCommStats;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 
@@ -1070,7 +1070,7 @@ mod test {
     use itertools::Itertools;
     use rand::{seq::SliceRandom, thread_rng, CryptoRng, Rng, RngCore};
 
-    use crate::{
+    use crate::rep3_core::{
         network::{receiver::VecReceiver, task::U64_BYTE_SIZE, CommChannel},
         party::test_export::localhost_connect,
     };

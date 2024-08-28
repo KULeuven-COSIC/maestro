@@ -16,7 +16,7 @@
 use crate::{
     aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector, Ohv16TripleEncoder, Ohv16TripleVector}, ArithmeticBlackBox}, wollut16::{self, RndOhv16Output}
 };
-use rep3_core::{
+use crate::rep3_core::{
     network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare
 };
 
@@ -234,7 +234,7 @@ impl GF8InvBlackBox for WL16ASParty {
 mod test {
     use std::marker::PhantomData;
 
-    use rep3_core::{
+    use crate::rep3_core::{
         network::ConnectedParty,
         test::{localhost_connect, TestSetup},
     };

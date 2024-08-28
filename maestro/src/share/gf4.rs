@@ -16,7 +16,7 @@ use std::{
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
-use rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero};
+use crate::rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero};
 use sha2::Digest;
 
 use super::{gf4_bs_table, Field};
@@ -383,7 +383,7 @@ impl DigestExt for BsGF4 {
 #[cfg(test)]
 mod test {
     use rand::thread_rng;
-    use rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
+    use crate::rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
     use super::{BsGF4, GF4};
 
     #[test]

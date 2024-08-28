@@ -7,10 +7,10 @@ pub mod correlated_randomness;
 pub mod error;
 mod thread_party;
 
-use crate::network::task::{Direction, IoLayerOwned};
-use crate::network::{self, ConnectedParty, NetSerializable};
-use crate::party::correlated_randomness::SharedRng;
-use crate::share::{HasZero, RssShare, RssShareVec};
+use crate::rep3_core::network::task::{Direction, IoLayerOwned};
+use crate::rep3_core::network::{self, ConnectedParty, NetSerializable};
+use crate::rep3_core::party::correlated_randomness::SharedRng;
+use crate::rep3_core::share::{HasZero, RssShare, RssShareVec};
 use itertools::{repeat_n, Itertools};
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -606,7 +606,7 @@ pub mod test_export {
 
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
-    use crate::network::{Config, ConnectedParty, CreatedParty};
+    use crate::rep3_core::network::{Config, ConnectedParty, CreatedParty};
 
     use super::MainParty;
 
@@ -891,12 +891,12 @@ pub mod test_export {
 
 #[cfg(test)]
 pub mod test {
-    use crate::network::task::Direction;
-    use crate::network::{Config, ConnectedParty, CreatedParty, NetSerializable};
-    use crate::party::correlated_randomness::SharedRng;
-    use crate::party::test_export::{create_certificates, localhost_setup, simple_localhost_setup};
-    use crate::party::MainParty;
-    use crate::share::HasZero;
+    use crate::rep3_core::network::task::Direction;
+    use crate::rep3_core::network::{Config, ConnectedParty, CreatedParty, NetSerializable};
+    use crate::rep3_core::party::correlated_randomness::SharedRng;
+    use crate::rep3_core::party::test_export::{create_certificates, localhost_setup, simple_localhost_setup};
+    use crate::rep3_core::party::MainParty;
+    use crate::rep3_core::share::HasZero;
     use rand::{CryptoRng, Fill, Rng, RngCore};
     use sha2::Digest;
     use std::net::{IpAddr, Ipv4Addr};

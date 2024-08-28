@@ -1,5 +1,7 @@
-use rep3_core::network::ConnectedParty;
-use maestro::{aes::GF8InvBlackBox, util::ArithmeticBlackBox, wollut16_malsec::{PrepCheckType, WL16ASParty}};
+use crate::rep3_core::network::ConnectedParty;
+use crate::{aes::GF8InvBlackBox, util::ArithmeticBlackBox, wollut16_malsec::{PrepCheckType, WL16ASParty}};
+
+use super::impl_benchmark_protocol;
 
 // impl_benchmark_protocol!(
 //     MalLUT16Benchmark, // benchmark struct name
