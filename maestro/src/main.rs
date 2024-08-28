@@ -37,8 +37,8 @@ struct Cli {
     )]
     threads: Option<usize>,
 
-    #[arg(long, help = "The number of parallel AES calls to benchmark.")]
-    simd: usize,
+    #[arg(long, help = "The number of parallel AES calls to benchmark. You can pass multiple values.", num_args = 1..)]
+    simd: Vec<usize>,
 
     #[arg(long, help = "The number repetitions of the protocol execution")]
     rep: usize,
@@ -80,6 +80,13 @@ fn main() -> Result<(), String> {
     let cli = Cli::parse();
 
     let (party_index, config) = network::Config::from_file(&cli.config).unwrap();
+
+    if cli.simd.is_empty() {
+        return Err("simd parameter required".to_string());
+    }
+    if !cli.simd.iter().all_unique() {
+        return Err(format!("Duplicate simd values in argument {:?}", cli.simd));
+    }
 
     let mut boxed: Vec<Box<dyn BenchmarkProtocol>> = Vec::new();
     if !cli.all {

@@ -7,6 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use itertools::Itertools;
+
 use crate::{aes::{self, GF8InvBlackBox}, share::gf8::GF8, util::ArithmeticBlackBox};
 use crate::rep3_core::{network::{Config, ConnectedParty}, party::{error::MpcResult, CombinedCommStats}};
 
@@ -74,25 +76,30 @@ pub fn benchmark_protocols(
     party_index: usize,
     config: &Config,
     iterations: usize,
-    simd: usize,
+    simd: Vec<usize>,
     n_worker_threads: Option<usize>,
     protocols: Vec<Box<dyn BenchmarkProtocol>>,
     output: PathBuf,
 ) -> io::Result<()> {
     let mut results = Vec::new();
-    for prot in &protocols {
-        println!("Benchmarking {}", prot.protocol_name());
-        let agg = benchmark(
-            party_index,
-            config,
-            iterations,
-            simd,
-            n_worker_threads,
-            prot,
-        );
-        results.push(agg);
-        println!("Finished benchmark for {}", prot.protocol_name());
+    for simd_i in &simd {
+        let mut results_of_simd_i = Vec::new();
+        for prot in &protocols {
+            println!("Benchmarking {}", prot.protocol_name());
+            let agg = benchmark(
+                party_index,
+                config,
+                iterations,
+                *simd_i,
+                n_worker_threads,
+                prot,
+            );
+            results_of_simd_i.push(agg);
+            println!("Finished benchmark for {}", prot.protocol_name());
+        }
+        results.push(results_of_simd_i);
     }
+    
 
     println!(
         "Writing CSV-formatted benchmark results to {}",
@@ -101,8 +108,10 @@ pub fn benchmark_protocols(
     // header
     let mut writer = BufWriter::new(File::create(output)?);
     writeln!(&mut writer, "protocol,simd,pre-processing-time,online-time,finalize-time,pre-processing-bytes-sent-to-next,pre-processing-bytes-received-from-next,pre-processing-bytes-rounds-next,pre-processing-bytes-sent-to-prev,pre-processing-bytes-received-from-prev,pre-processing-bytes-rounds-prev,online-bytes-sent-to-next,online-bytes-received-from-next,online-bytes-rounds-next,online-bytes-sent-to-prev,online-bytes-received-from-prev,online-bytes-rounds-prev,finalize-bytes-sent-to-next,finalize-bytes-received-from-next,finalize-bytes-rounds-next,finalize-bytes-sent-to-prev,finalize-bytes-received-from-prev,finalize-bytes-rounds-prev")?;
-    for (agg, prot) in results.into_iter().zip(protocols) {
-        agg.write_to_csv(&mut writer, &prot.protocol_name(), &simd.to_string())?;
+    for (simd_i, results) in simd.into_iter().zip_eq(results) {
+        for (agg, prot) in results.into_iter().zip(&protocols) {
+            agg.write_to_csv(&mut writer, &prot.protocol_name(), &simd_i.to_string())?;
+        }
     }
     Ok(())
 }
