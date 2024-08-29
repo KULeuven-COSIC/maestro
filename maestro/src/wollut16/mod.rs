@@ -8,9 +8,7 @@
 //! 
 //! The *maliciously-secure* variant of this protocol is found in [crate::wollut16_malsec].
 //!
-//! This module notably contains
-//!   - [wollut16_benchmark] that implements the AES benchmark
-//!   - [WL16Party] the party wrapper for the protocol. [WL16Party] also implements [ArithmeticBlackBox]
+//! This module notably contains [WL16Party] the party wrapper for the protocol. [WL16Party] also implements [ArithmeticBlackBox]
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 

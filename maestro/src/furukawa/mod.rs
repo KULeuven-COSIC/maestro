@@ -6,9 +6,7 @@
 //! The online phase proceeds like the semi-honest variant but before outputs are revealed, a post-sacrificing step checks
 //! the validity of all multiplications that are computed in the online phase before.
 //!
-//! This module notably contains
-//!   - [furukawa_benchmark] that implements the AES benchmark
-//!   - [FurukawaParty] the party wrapper for the protocol. [FurukawaParty] also implements [ArithmeticBlackBox]
+//! This module notably contains [FurukawaParty]: the party wrapper for the protocol. [FurukawaParty] also implements [ArithmeticBlackBox]
 
 use std::ops::AddAssign;
 

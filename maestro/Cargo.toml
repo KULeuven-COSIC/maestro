@@ -30,11 +30,6 @@ clap = {version = "4.4.13", features = ["derive"]}
 # serial_test = "*"
 criterion = "0.5.1"
 
-[[bin]]
-name = "lut_benchmark"
-harness = false
-required-features = ["benchmark-helper"]
-
 [lib]
 required-features = ["verbose-timing"]
 

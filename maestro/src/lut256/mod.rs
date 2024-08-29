@@ -3,9 +3,7 @@
 //! The core is a sub-protocol to compute the SBOX using a lookup table.
 //! This table lookup requires a pre-processed random one-hot vector of size `256`.
 //!
-//! This module notably contains
-//!   - [lut256_benchmark] that implements the AES benchmark
-//!   - [LUT256Party] the party wrapper for the protocol. [LUT256Party] also implements [ArithmeticBlackBox]
+//! This module notably contains [LUT256Party] the party wrapper for the protocol. [LUT256Party] also implements [ArithmeticBlackBox]
 //!
 
 use std::time::Duration;

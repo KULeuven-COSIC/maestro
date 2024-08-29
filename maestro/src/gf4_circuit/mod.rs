@@ -9,9 +9,7 @@
 //!
 //! This protocol does not require any pre-processing.
 //!
-//! This module notably contains
-//!   - [gf4_circuit_benchmark] that implements the AES benchmark
-//!   - [GF4CircuitSemihonestParty] the party wrapper for the protocol. [GF4CircuitSemihonestParty] also implements [ArithmeticBlackBox]
+//! This module notably contains [GF4CircuitSemihonestParty]: the party wrapper for the protocol. [GF4CircuitSemihonestParty] also implements [ArithmeticBlackBox]
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 

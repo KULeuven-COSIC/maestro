@@ -7,7 +7,7 @@
 //! 3) Use the reverse WOL transform to convert the result to `GF(2^8)`.
 //! 
 //! The main difference to the *semi-honest* WOL LUT 16 in [crate::wollut16] is that we in addition have a verification phase for multiplication triples generated during the protocol execution.
-//! TODO: Add brief text on consistency check for views of different parties.
+//! All openings and broadcasts are efficiently checked by hashing the (expected) transcript of the protocol and comparing the hash.
 //!
 //! This module notably contains
 //!   - [WL16ASParty] the party wrapper for the protocol.
