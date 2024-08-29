@@ -502,8 +502,9 @@ pub fn mul_no_sync<P: Party, F: Field>(
     for (i, alpha_i) in alphas.into_iter().enumerate() {
         ci[i] = ai[i] * bi[i] + ai[i] * bii[i] + aii[i] * bi[i] + alpha_i;
     }
+    let rcv = party.receive_field_slice(Direction::Next, cii);
     party.send_field_slice(Direction::Previous, ci);
-    party.receive_field_slice(Direction::Next, cii).rcv()?;
+    rcv.rcv()?;
     Ok(())
 }
 
