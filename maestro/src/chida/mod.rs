@@ -28,8 +28,8 @@ pub enum ImplVariant {
 pub struct ChidaParty(MainParty);
 
 impl ChidaParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        MainParty::setup(connected, n_worker_threads).map(Self)
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads, prot_str).map(Self)
     }
 
     pub fn party_index(&self) -> usize {
@@ -71,8 +71,9 @@ impl ChidaBenchmarkParty {
         connected: ConnectedParty,
         variant: ImplVariant,
         n_worker_threads: Option<usize>,
+        prot_str: Option<String>
     ) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|party| Self {
+        ChidaParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             variant,
         })

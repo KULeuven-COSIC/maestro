@@ -151,7 +151,8 @@ impl BenchmarkProtocol for ProtocolVariant {
         conn: ConnectedParty,
         simd: usize,
         n_worker_threads: Option<usize>,
+        prot_str: Option<String>,
     ) -> BenchmarkResult {
-        self.get_protocol().run(conn, simd, n_worker_threads)
+        self.get_protocol().run(conn, simd, n_worker_threads, prot_str)
     }
 }

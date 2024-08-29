@@ -15,9 +15,9 @@ use itertools::{repeat_n, Itertools};
 use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use sha2::Digest;
+use sha2::{Digest, Sha256};
 use std::borrow::Borrow;
-use std::io::{self, Write};
+use std::io::{self, ErrorKind, Write};
 use std::ops::Sub;
 use std::thread;
 
@@ -181,7 +181,8 @@ pub struct MainParty {
 }
 
 impl MainParty {
-    pub fn setup(mut party: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
+    /// - `prot_string` - a string that describes the setup this party has (application-specific to detect inconsistent configuration between parties)
+    pub fn setup(mut party: ConnectedParty, n_worker_threads: Option<usize>, prot_string: Option<String>) -> MpcResult<Self> {
         let mut rng = ChaCha20Rng::from_entropy();
 
         let (rand_next, rand_prev) = match party.i {
@@ -209,7 +210,7 @@ impl MainParty {
             _ => unreachable!(),
         };
 
-        Ok(Self {
+        let party = Self {
             i: party.i,
             io: Some(IoLayerOwned::spawn_io(party.comm_prev, party.comm_next)?),
             random_next: rand_next,
@@ -217,7 +218,33 @@ impl MainParty {
             random_local: rng,
             stats: CombinedCommStats::empty(),
             thread_pool: n_worker_threads.map(Self::build_thread_pool),
-        })
+        };
+
+        if let Some(prot_str) = prot_string {
+            // hash prot_string and broadcast it
+            let prot_str_hash: [u8; 32] = {
+                let mut hasher = Sha256::new();
+                hasher.update(prot_str.as_bytes());
+                hasher.finalize().try_into().unwrap()
+            };
+            let mut prot_str_hash_next = [0u8; 32];
+            let mut prot_str_hash_prev = [0u8; 32];
+            let rcv_next = party.io().receive_slice(Direction::Next, &mut prot_str_hash_next);
+            let rcv_prev = party.io().receive_slice(Direction::Previous, &mut prot_str_hash_prev);
+            party.io().send(Direction::Next, prot_str_hash.to_vec());
+            party.io().send(Direction::Previous, prot_str_hash.to_vec());
+            rcv_next.rcv()?;
+            rcv_prev.rcv()?;
+            party.wait_for_completion();
+
+            // now check if all prot_str are the same
+            if prot_str_hash != prot_str_hash_next || prot_str_hash != prot_str_hash_prev {
+                let message = format!("Protocol string does not match the one received from the other parties (hashes don't match). Check that the same cofiguration/protocol/threads etc are used to run all parties. My protocol string: '{}'", prot_str);
+                println!("{}", message);
+                return Err(error::MpcError::Io(io::Error::new(ErrorKind::InvalidInput, message)));
+            }
+        }
+        Ok(party)
     }
 
     fn build_thread_pool(n_worker_threads: usize) -> ThreadPool {
@@ -811,7 +838,7 @@ pub mod test_export {
     ) {
         let _f1 = move |p: ConnectedParty| {
             // println!("P1: Before Setup");
-            let mut p = MainParty::setup(p, n_threads).unwrap();
+            let mut p = MainParty::setup(p, n_threads, None).unwrap();
             // println!("P1: After Setup");
             let res = f1(&mut p);
             p.teardown().unwrap();
@@ -819,7 +846,7 @@ pub mod test_export {
         };
         let _f2 = move |p: ConnectedParty| {
             // println!("P2: Before Setup");
-            let mut p = MainParty::setup(p, n_threads).unwrap();
+            let mut p = MainParty::setup(p, n_threads, None).unwrap();
             // println!("P2: After Setup");
             let res = f2(&mut p);
             p.teardown().unwrap();
@@ -827,7 +854,7 @@ pub mod test_export {
         };
         let _f3 = move |p: ConnectedParty| {
             // println!("P3: Before Setup");
-            let mut p = MainParty::setup(p, n_threads).unwrap();
+            let mut p = MainParty::setup(p, n_threads, None).unwrap();
             // println!("P3: After Setup");
             let res = f3(&mut p);
             p.teardown().unwrap();
@@ -899,12 +926,14 @@ pub mod test {
     use crate::rep3_core::share::HasZero;
     use rand::{CryptoRng, Fill, Rng, RngCore};
     use sha2::Digest;
+    use std::io::ErrorKind;
     use std::net::{IpAddr, Ipv4Addr};
     use std::ops::{Add, Sub};
     use std::str::FromStr;
     use std::thread;
 
-    use super::test_export::localhost_connect;
+    use super::error::MpcError;
+    use super::test_export::{localhost_connect};
     use super::{DigestExt, RngExt};
 
     /// Dummy test implementation for Z / 256Z
@@ -1152,6 +1181,7 @@ pub mod test {
                     let mut party1 = MainParty::setup(
                         party1.connect(config.clone(), None).unwrap(),
                         Some(N_THREADS),
+                        None,
                     )
                     .unwrap();
                     // teardown
@@ -1161,7 +1191,7 @@ pub mod test {
                     // create another party in the same thread
                     let party1 = CreatedParty::bind(0, IpAddr::V4(addr1), port1).unwrap();
                     let party1 = party1.connect(config, None).unwrap();
-                    let mut party1 = MainParty::setup(party1, Some(N_THREADS)).unwrap();
+                    let mut party1 = MainParty::setup(party1, Some(N_THREADS), None).unwrap();
                     // ok
                     party1.teardown().unwrap()
                 })
@@ -1182,6 +1212,7 @@ pub mod test {
                     let mut party2 = MainParty::setup(
                         party2.connect(config.clone(), None).unwrap(),
                         Some(N_THREADS),
+                        None
                     )
                     .unwrap();
                     // teardown
@@ -1191,7 +1222,7 @@ pub mod test {
                     // create another party in the same thread
                     let party2 = CreatedParty::bind(1, IpAddr::V4(addr2), port2).unwrap();
                     let party2 = party2.connect(config, None).unwrap();
-                    let mut party2 = MainParty::setup(party2, Some(N_THREADS)).unwrap();
+                    let mut party2 = MainParty::setup(party2, Some(N_THREADS), None).unwrap();
 
                     // ok
                     party2.teardown().unwrap()
@@ -1207,6 +1238,7 @@ pub mod test {
                     let mut party3 = MainParty::setup(
                         party3.connect(config.clone(), None).unwrap(),
                         Some(N_THREADS),
+                        None
                     )
                     .unwrap();
                     // teardown
@@ -1216,7 +1248,7 @@ pub mod test {
                     // create another party in the same thread
                     let party3 = CreatedParty::bind(2, IpAddr::V4(addr3), port3).unwrap();
                     let party3 = party3.connect(config, None).unwrap();
-                    let mut party3 = MainParty::setup(party3, Some(N_THREADS)).unwrap();
+                    let mut party3 = MainParty::setup(party3, Some(N_THREADS), None).unwrap();
 
                     // ok
                     party3.teardown().unwrap()
@@ -1227,5 +1259,24 @@ pub mod test {
         party1.join().unwrap();
         party2.join().unwrap();
         party3.join().unwrap();
+    }
+
+    #[test]
+    fn prot_str_check_correct() {
+        // use a different prot string for p2
+        let prot_str = "test::prot_str_check_correct".to_string();
+        let prot_str2 = "test::prot_str_check_incorrect".to_string();
+
+        let program = |prot_str: String| {
+            move |p: ConnectedParty| {
+                let main_party_res = MainParty::setup(p, None, Some(prot_str));
+                match main_party_res {
+                    Ok(_) => panic!("expected error"),
+                    Err(MpcError::Io(io_err)) => assert_eq!(io_err.kind(), ErrorKind::InvalidInput),
+                    _ => panic!("expected IoError with ErrorKind InvalidInput"),
+                }
+            }
+        };
+        let ((), (), ()) = localhost_connect(program(prot_str.clone()), program(prot_str.clone()), program(prot_str2));
     }
 }

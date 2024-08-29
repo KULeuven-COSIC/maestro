@@ -36,8 +36,8 @@ use crate::{
 pub struct GF4CircuitSemihonestParty(ChidaParty);
 
 impl GF4CircuitSemihonestParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(Self)
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads, prot_str).map(Self)
     }
 
     fn io(&self) -> &IoLayerOwned {
@@ -371,7 +371,7 @@ mod test {
             f: Fx,
             n_worker_threads: Option<usize>,
         ) -> (T, GF4CircuitSemihonestParty) {
-            let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads).unwrap();
+            let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             party.0.teardown().unwrap();
             (t, party)

@@ -33,8 +33,8 @@ pub struct FurukawaParty<F: Field + DigestExt + Sync + Send + GF2p64Subfield> {
 }
 
 impl<F: Field + DigestExt + Sync + Send + GF2p64Subfield> FurukawaParty<F> {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, use_recursive_check: bool) -> MpcResult<Self> {
-        MainParty::setup(connected, n_worker_threads).map(|party| Self {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>, use_recursive_check: bool) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             triples_to_check: MulTripleVector::new(),
             pre_processing: None,
@@ -515,7 +515,7 @@ pub mod test {
             n_worker_threads: Option<usize>,
             use_recursive_check: bool,
         ) -> (T, FurukawaParty<F>) {
-            let mut party = FurukawaParty::setup(conn, n_worker_threads, use_recursive_check).unwrap();
+            let mut party = FurukawaParty::setup(conn, n_worker_threads, None, use_recursive_check).unwrap();
             let t = f(&mut party);
             party.finalize().unwrap();
             party.inner.teardown().unwrap();

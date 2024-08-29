@@ -27,9 +27,9 @@ pub struct GF4CircuitASParty {
 }
 
 impl GF4CircuitASParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, check_type: MultCheckType) -> MpcResult<Self> {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>, check_type: MultCheckType) -> MpcResult<Self> {
 
-        MainParty::setup(connected, n_worker_threads).map(|party| Self {
+        MainParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             broadcast_context: BroadcastContext::new(),
             gf4_triples_to_check: MulTripleVector::new(),
@@ -342,7 +342,7 @@ mod test {
 
     fn localhost_setup_gf4_circuit_as<T1: Send, F1: Send + FnOnce(&mut GF4CircuitASParty) -> T1, T2: Send, F2: Send + FnOnce(&mut GF4CircuitASParty) -> T2, T3: Send, F3: Send + FnOnce(&mut GF4CircuitASParty) -> T3>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>, check_type: MultCheckType) -> ((T1,GF4CircuitASParty), (T2,GF4CircuitASParty), (T3,GF4CircuitASParty)) {
         fn adapter<T, Fx: FnOnce(&mut GF4CircuitASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>, check_type: MultCheckType) -> (T,GF4CircuitASParty) {
-            let mut party = GF4CircuitASParty::setup(conn, n_worker_threads, check_type).unwrap();
+            let mut party = GF4CircuitASParty::setup(conn, n_worker_threads, None, check_type).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

@@ -58,8 +58,8 @@ pub struct RndOhv256OutputSS {
 }
 
 impl LUT256Party {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|party| Self {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             lut_time: Duration::from_secs(0),
@@ -125,7 +125,7 @@ mod test {
             f: Fx,
             n_worker_threads: Option<usize>,
         ) -> (T, LUT256Party) {
-            let mut party = LUT256Party::setup(conn, n_worker_threads).unwrap();
+            let mut party = LUT256Party::setup(conn, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

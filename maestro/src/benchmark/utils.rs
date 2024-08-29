@@ -7,6 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use itertools::Itertools;
+
 use crate::{aes::{self, GF8InvBlackBox}, share::gf8::GF8, util::ArithmeticBlackBox};
 use crate::rep3_core::{network::{Config, ConnectedParty}, party::{error::MpcResult, CombinedCommStats}};
 
@@ -27,6 +29,7 @@ pub trait BenchmarkProtocol {
         conn: ConnectedParty,
         simd: usize,
         n_worker_threads: Option<usize>,
+        prot_string: Option<String>,
     ) -> BenchmarkResult;
 }
 
@@ -52,6 +55,7 @@ fn benchmark(
     simd: usize,
     n_worker_threads: Option<usize>,
     protocol: &Box<dyn BenchmarkProtocol>,
+    prot_str: String,
 ) -> AggregatedBenchmarkResult {
     let mut agg = AggregatedBenchmarkResult::new();
     for i in 0..iterations {
@@ -62,7 +66,7 @@ fn benchmark(
             Some(Duration::from_secs(60)),
         )
         .unwrap();
-        let res = protocol.run(conn, simd, n_worker_threads);
+        let res = protocol.run(conn, simd, n_worker_threads, Some(prot_str.clone()));
         agg.update(res);
         thread::sleep(Duration::from_secs(WAIT_BETWEEN_SEC));
     }
@@ -84,6 +88,10 @@ pub fn benchmark_protocols(
     writeln!(&mut writer, "protocol,simd,pre-processing-time,online-time,finalize-time,pre-processing-bytes-sent-to-next,pre-processing-bytes-received-from-next,pre-processing-bytes-rounds-next,pre-processing-bytes-sent-to-prev,pre-processing-bytes-received-from-prev,pre-processing-bytes-rounds-prev,online-bytes-sent-to-next,online-bytes-received-from-next,online-bytes-rounds-next,online-bytes-sent-to-prev,online-bytes-received-from-prev,online-bytes-rounds-prev,finalize-bytes-sent-to-next,finalize-bytes-received-from-next,finalize-bytes-rounds-next,finalize-bytes-sent-to-prev,finalize-bytes-received-from-prev,finalize-bytes-rounds-prev")?;
 
     let mut results = Vec::new();
+
+    let protocol_names = protocols.iter().map(|p| p.protocol_name()).join(", ");
+    let benchmark_prot_string = format!("MAESTRO benchmark [rep: {}, simd: {:?}, threads: {:?}, targets: {}]", iterations, &simd, n_worker_threads, protocol_names);
+
     for simd_i in &simd {
         let mut results_of_simd_i = Vec::new();
         for prot in &protocols {
@@ -95,6 +103,7 @@ pub fn benchmark_protocols(
                 *simd_i,
                 n_worker_threads,
                 prot,
+                format!("{} current benchmark [protocol: {}, simd: {}]", &benchmark_prot_string, prot.protocol_name(), *simd_i),
             );
             println!("Finished benchmark for {}", prot.protocol_name());
             agg.write_to_csv(&mut writer, &prot.protocol_name(), &simd_i.to_string())?;
@@ -224,17 +233,18 @@ pub(crate) fn run_benchmark<Protocol: GF8InvBlackBox, ABB: ArithmeticBlackBox<GF
     conn: ConnectedParty,
     simd: usize,
     n_worker_threads: Option<usize>,
+    prot_str: Option<String>,
     setup_f: F,
     abb_f: H,
     prep_f: Option<I>,
     finalize_f: Option<J>,
 ) -> BenchmarkResult
-where F: FnOnce(ConnectedParty, Option<usize>) -> Protocol,
+where F: FnOnce(ConnectedParty, Option<usize>, Option<String>) -> Protocol,
 H: FnOnce(&mut Protocol) -> &mut ABB,
 I: FnOnce(&mut Protocol, usize) -> MpcResult<()>,
 J: FnOnce(&mut Protocol) -> MpcResult<()>,
 {
-    let mut party = setup_f(conn, n_worker_threads);
+    let mut party = setup_f(conn, n_worker_threads, prot_str);
     let _setup_comm_stats = party.main_party_mut().io().reset_comm_stats();
     println!("After setup");
 
@@ -292,43 +302,46 @@ pub(crate) fn run_benchmark_no_prep<Protocol: GF8InvBlackBox, ABB: ArithmeticBla
     conn: ConnectedParty,
     simd: usize,
     n_worker_threads: Option<usize>,
+    prot_str: Option<String>,
     setup_f: F,
     abb_f: H,
     finalize_f: Option<J>,
 ) -> BenchmarkResult
-where F: FnOnce(ConnectedParty, Option<usize>) -> Protocol,
+where F: FnOnce(ConnectedParty, Option<usize>, Option<String>) -> Protocol,
 H: FnOnce(&mut Protocol) -> &mut ABB,
 J: FnOnce(&mut Protocol) -> MpcResult<()>,
 {
-    run_benchmark(conn, simd, n_worker_threads, setup_f, abb_f, None as Option<fn(&mut Protocol, usize) -> MpcResult<()>>, finalize_f)
+    run_benchmark(conn, simd, n_worker_threads, prot_str, setup_f, abb_f, None as Option<fn(&mut Protocol, usize) -> MpcResult<()>>, finalize_f)
 }
 
 pub(crate) fn run_benchmark_no_finalize<Protocol: GF8InvBlackBox, ABB: ArithmeticBlackBox<GF8>, F, H, I>(
     conn: ConnectedParty,
     simd: usize,
     n_worker_threads: Option<usize>,
+    prot_str: Option<String>,
     setup_f: F,
     abb_f: H,
     prep_f: Option<I>,
 ) -> BenchmarkResult
-where F: FnOnce(ConnectedParty, Option<usize>) -> Protocol,
+where F: FnOnce(ConnectedParty, Option<usize>, Option<String>) -> Protocol,
 H: FnOnce(&mut Protocol) -> &mut ABB,
 I: FnOnce(&mut Protocol,usize) -> MpcResult<()>,
 {
-    run_benchmark(conn, simd, n_worker_threads, setup_f, abb_f, prep_f, None as Option<fn(&mut Protocol) -> MpcResult<()>>)
+    run_benchmark(conn, simd, n_worker_threads, prot_str, setup_f, abb_f, prep_f, None as Option<fn(&mut Protocol) -> MpcResult<()>>)
 }
 
 pub(crate) fn run_benchmark_no_prep_no_finalize<Protocol: GF8InvBlackBox, ABB: ArithmeticBlackBox<GF8>, F, H>(
     conn: ConnectedParty,
     simd: usize,
     n_worker_threads: Option<usize>,
+    prot_str: Option<String>,
     setup_f: F,
     abb_f: H,
 ) -> BenchmarkResult
-where F: FnOnce(ConnectedParty, Option<usize>) -> Protocol,
+where F: FnOnce(ConnectedParty, Option<usize>, Option<String>) -> Protocol,
 H: FnOnce(&mut Protocol) -> &mut ABB
 {
-    run_benchmark(conn, simd, n_worker_threads, setup_f, abb_f, None as Option<fn(&mut Protocol, usize) -> MpcResult<()>>, None as Option<fn(&mut Protocol) -> MpcResult<()>>)
+    run_benchmark(conn, simd, n_worker_threads, prot_str, setup_f, abb_f, None as Option<fn(&mut Protocol, usize) -> MpcResult<()>>, None as Option<fn(&mut Protocol) -> MpcResult<()>>)
 }
 
 #[macro_export]
@@ -336,32 +349,32 @@ macro_rules! impl_benchmark_protocol {
     // match arm for no preprocessing and no finalize
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr,$abb_fn:expr, None, None) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
-            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::benchmark::utils::run_benchmark_no_prep_no_finalize(conn, simd, n_worker_threads, $setup_fn, $abb_fn)
+            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, prot_str: Option<String>) -> crate::BenchmarkResult {
+                crate::benchmark::utils::run_benchmark_no_prep_no_finalize(conn, simd, n_worker_threads, prot_str, $setup_fn, $abb_fn)
             }   
         );
     };
     // match arm for no preprocessing but finalize
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr, $abb_fn:expr, None, $finalize_fn:expr) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
-            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::benchmark::utils::run_benchmark_no_prep(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($finalize_fn))
+            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, prot_str: Option<String>) -> crate::BenchmarkResult {
+                crate::benchmark::utils::run_benchmark_no_prep(conn, simd, n_worker_threads, prot_str, $setup_fn, $abb_fn, Some($finalize_fn))
             }   
         );
     };
     // match arm for preprocessing and no finalize
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr, $abb_fn:expr, $prep_fn:expr, None) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
-            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::benchmark::utils::run_benchmark_no_finalize(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($prep_fn))
+            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, prot_str: Option<String>) -> crate::BenchmarkResult {
+                crate::benchmark::utils::run_benchmark_no_finalize(conn, simd, n_worker_threads, prot_str, $setup_fn, $abb_fn, Some($prep_fn))
             }   
         );
     };
     // match arm for everything
     ($struct_name:ident, $prot_name:literal, $setup_fn:expr, $abb_fn:expr, $prep_fn:expr, $finalize_fn:expr) => {
         crate::impl_benchmark_protocol!($struct_name, $prot_name, 
-            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> crate::BenchmarkResult {
-                crate::benchmark::utils::run_benchmark(conn, simd, n_worker_threads, $setup_fn, $abb_fn, Some($prep_fn), Some($finalize_fn))
+            fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, prot_str: Option<String>) -> crate::BenchmarkResult {
+                crate::benchmark::utils::run_benchmark(conn, simd, n_worker_threads, prot_str, $setup_fn, $abb_fn, Some($prep_fn), Some($finalize_fn))
             }   
         );
     };

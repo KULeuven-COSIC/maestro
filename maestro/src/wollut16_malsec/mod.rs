@@ -52,8 +52,8 @@ pub struct WL16ASParty{
 }
 
 impl WL16ASParty {
-    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, prep_check: PrepCheckType, use_gf4p4_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        MainParty::setup(connected, n_worker_threads).map(|party| Self {
+    pub fn setup(connected: ConnectedParty, check_after_prep: bool, check_after_sbox: bool, prep_check: PrepCheckType, use_gf4p4_check: bool, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             check_after_prep,
@@ -274,7 +274,7 @@ mod test {
 
     pub fn localhost_setup_wl16as<P: WL16Params, T1: Send, F1: Send + FnOnce(&mut WL16ASParty) -> T1, T2: Send, F2: Send + FnOnce(&mut WL16ASParty) -> T2, T3: Send, F3: Send + FnOnce(&mut WL16ASParty) -> T3>(f1: F1, f2: F2, f3: F3, n_worker_threads: Option<usize>) -> ((T1,WL16ASParty), (T2,WL16ASParty), (T3,WL16ASParty)) {
         fn adapter<P: WL16Params, T, Fx: FnOnce(&mut WL16ASParty)->T>(conn: ConnectedParty, f: Fx, n_worker_threads: Option<usize>) -> (T,WL16ASParty) {
-            let mut party = WL16ASParty::setup(conn, P::CHECK_AFTER_PREP, P::CHECK_AFTER_SBOX, P::PREP_CHECK, P::GF4P4_CHECK, n_worker_threads).unwrap();
+            let mut party = WL16ASParty::setup(conn, P::CHECK_AFTER_PREP, P::CHECK_AFTER_SBOX, P::PREP_CHECK, P::GF4P4_CHECK, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

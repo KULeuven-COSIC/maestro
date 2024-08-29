@@ -9,7 +9,7 @@ use super::impl_benchmark_protocol;
 impl_benchmark_protocol!(
     LUT256Benchmark,  // benchmark struct name
     "lut256", // protocol name
-    |conn: ConnectedParty, n_worker_threads: Option<usize>| LUT256Party::setup(conn, n_worker_threads).unwrap(), // setup
+    |conn: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>| LUT256Party::setup(conn, n_worker_threads, prot_str).unwrap(), // setup
     |party: &mut LUT256Party| party, // get ABB<GF8>
     |party: &mut LUT256Party, simd: usize| party.do_preprocessing(0, simd), // do preprocessing
     None // no finalize
@@ -21,8 +21,8 @@ impl BenchmarkProtocol for Lut256SSBenchmark {
     fn protocol_name(&self) -> String {
         "lut256_ss".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-            let mut party = Lut256SSParty::setup(conn, n_worker_threads).unwrap();
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, prot_str: Option<String>) -> BenchmarkResult {
+            let mut party = Lut256SSParty::setup(conn, n_worker_threads, prot_str).unwrap();
             let _setup_comm_stats = party.main_party_mut().io().reset_comm_stats();
             println!("After setup");
             
@@ -59,8 +59,8 @@ impl BenchmarkProtocol for Lut256SSBenchmark {
     }
 }
 
-fn lut256_ss_mal_run_benchmark(conn: ConnectedParty, simd: usize, use_ohv_check: bool, n_worker_threads: Option<usize>) -> BenchmarkResult {
-    let mut party = Lut256SSMalParty::setup(conn, use_ohv_check, n_worker_threads).unwrap();
+fn lut256_ss_mal_run_benchmark(conn: ConnectedParty, simd: usize, use_ohv_check: bool, n_worker_threads: Option<usize>, prot_str: Option<String>) -> BenchmarkResult {
+    let mut party = Lut256SSMalParty::setup(conn, use_ohv_check, n_worker_threads, prot_str).unwrap();
     let _setup_comm_stats = party.main_party_mut().io().reset_comm_stats();
     println!("After setup");
     
@@ -108,8 +108,8 @@ impl BenchmarkProtocol for Lut256SSMalBenchmark {
     fn protocol_name(&self) -> String {
         "mal-lut256-ss".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-        lut256_ss_mal_run_benchmark(conn, simd, false, n_worker_threads)
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, prot_str: Option<String>) -> BenchmarkResult {
+        lut256_ss_mal_run_benchmark(conn, simd, false, n_worker_threads, prot_str)
     }
 }
 
@@ -118,7 +118,7 @@ impl BenchmarkProtocol for Lut256SSMalOhvCheckBenchmark {
     fn protocol_name(&self) -> String {
         "mal-lut256-ss-opt".to_string()
     }
-    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) -> BenchmarkResult {
-        lut256_ss_mal_run_benchmark(conn, simd, true, n_worker_threads)
+    fn run(&self, conn: ConnectedParty, simd: usize, n_worker_threads: Option<usize>, prot_str: Option<String>) -> BenchmarkResult {
+        lut256_ss_mal_run_benchmark(conn, simd, true, n_worker_threads, prot_str)
     }
 }

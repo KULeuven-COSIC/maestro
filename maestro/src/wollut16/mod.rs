@@ -51,8 +51,8 @@ pub struct RndOhv16Output {
 }
 
 impl WL16Party {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|party| Self {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             opt: true,
@@ -150,7 +150,7 @@ mod test {
             f: Fx,
             n_worker_threads: Option<usize>,
         ) -> (T, WL16Party) {
-            let mut party = WL16Party::setup(conn, n_worker_threads).unwrap();
+            let mut party = WL16Party::setup(conn, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();

@@ -15,8 +15,8 @@ pub struct Lut256SSParty {
 }
 
 impl Lut256SSParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        MainParty::setup(connected, n_worker_threads).map(|inner| Self {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads, prot_str).map(|inner| Self {
             inner,
             prep_ohv: Vec::new(),
         })
@@ -148,8 +148,8 @@ pub struct Lut256SSMalParty {
 }
 
 impl Lut256SSMalParty {
-    pub fn setup(connected: ConnectedParty, use_ohv_check: bool, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        MainParty::setup(connected, n_worker_threads).map(|inner| Self {
+    pub fn setup(connected: ConnectedParty, use_ohv_check: bool, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads, prot_str).map(|inner| Self {
             inner,
             prep_ohv: Vec::new(),
             context: BroadcastContext::new(),
@@ -464,7 +464,7 @@ mod test {
             f: Fx,
             n_worker_threads: Option<usize>,
         ) -> (T, Lut256SSParty) {
-            let mut party = Lut256SSParty::setup(conn, n_worker_threads).unwrap();
+            let mut party = Lut256SSParty::setup(conn, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             party.finalize().unwrap();
             party.inner.teardown().unwrap();
@@ -624,7 +624,7 @@ mod test {
             use_ohv_check: bool,
             n_worker_threads: Option<usize>,
         ) -> (T, Lut256SSMalParty) {
-            let mut party = Lut256SSMalParty::setup(conn, use_ohv_check, n_worker_threads).unwrap();
+            let mut party = Lut256SSMalParty::setup(conn, use_ohv_check, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             party.finalize().unwrap();
             party.inner.teardown().unwrap();

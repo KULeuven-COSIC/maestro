@@ -566,7 +566,7 @@ pub mod test {
             f: Fx,
             n_threads: Option<usize>,
         ) -> (T, ChidaParty) {
-            let mut party = ChidaParty::setup(conn, n_threads).unwrap();
+            let mut party = ChidaParty::setup(conn, n_threads, None).unwrap();
             let t = f(&mut party);
             party.0.teardown().unwrap();
             (t, party)
@@ -602,7 +602,7 @@ pub mod test {
             variant: ImplVariant,
             n_worker_threads: Option<usize>,
         ) -> (T, ChidaBenchmarkParty) {
-            let mut party = ChidaBenchmarkParty::setup(conn, variant, n_worker_threads).unwrap();
+            let mut party = ChidaBenchmarkParty::setup(conn, variant, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             party.inner.0.teardown().unwrap();
             (t, party)
