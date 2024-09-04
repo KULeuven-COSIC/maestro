@@ -1,28 +1,24 @@
 //! This module contains the online phase components.
 
 use crate::{
-    aes::GF8InvBlackBox,
-    network::task::{Direction, IoLayerOwned},
-    party::{error::MpcResult, ArithmeticBlackBox, Party},
-    share::{
+    aes::GF8InvBlackBox, chida::ChidaParty, share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-        Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec,
-    },
+        Field,
+    }, util::ArithmeticBlackBox, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}
+};
+use crate::rep3_core::{
+    network::task::{Direction, IoLayerOwned},
+    party::{error::MpcResult, MainParty, Party}, share::{HasZero, RssShare, RssShareVec},
 };
 use itertools::{izip, Itertools};
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
-use sha2::Sha256;
 
-#[cfg(feature = "verbose-timing")]
-use {crate::party::PARTY_TIMER, std::time::Instant};
-
-use super::{RndOhv16, RndOhvOutput, WL16Party};
+use super::{RndOhv16, RndOhv16Output, WL16Party};
 
 /// Computes `<<x * y>>` for `[[x]]` and `[[y]]` over GF4.
 ///
@@ -78,16 +74,12 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
     if party.prep_ohv.len() < v.len() {
         panic!("Not enough pre-processed random one-hot vectors available. Use WL16Party::prepare_rand_ohv to generate them.");
     }
-    #[cfg(feature = "verbose-timing")]
-    let lut_open_time = Instant::now();
-
-    let alphas = party.generate_alpha(v.len());
 
     let rnd_ohv = &party.prep_ohv[party.prep_ohv.len() - v.len()..];
     let rcv_cii = party.io().receive_field(Direction::Next, v.len());
     let rcv_ciii = party.io().receive_field(Direction::Previous, v.len());
-    let ci: Vec<_> = izip!(v.iter(), rnd_ohv, alphas)
-        .map(|(v, r, alpha)| *v + r.random + alpha)
+    let ci: Vec<_> = izip!(v.iter(), rnd_ohv, party.inner.generate_alpha(v.len()))
+        .map(|(v, r, alpha)| *v + r.random_si + alpha)
         .collect();
     party.io().send_field::<GF4>(Direction::Next, &ci, ci.len());
     party
@@ -96,23 +88,10 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
 
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_open", lut_open_time.elapsed());
 
-    #[cfg(feature = "verbose-timing")]
-    let lut_local_time = Instant::now();
     let res = lut_with_rnd_ohv_bitsliced(rnd_ohv, ci, cii, ciii);
     // remove used pre-processing material
     party.prep_ohv.truncate(party.prep_ohv.len() - v.len());
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_local", lut_local_time.elapsed());
 
     party.io().wait_for_completion();
     Ok(res)
@@ -120,7 +99,7 @@ pub fn lut_layer(party: &mut WL16Party, v: &[GF4]) -> MpcResult<(Vec<GF4>, Vec<G
 
 #[inline]
 pub fn lut_with_rnd_ohv_bitsliced(
-    rnd_ohv: &[RndOhvOutput],
+    rnd_ohv: &[RndOhv16Output],
     ci: Vec<GF4>,
     cii: Vec<GF4>,
     ciii: Vec<GF4>,
@@ -152,11 +131,10 @@ fn ss_to_rss_layer(
     debug_assert_eq!(xss_i.len(), x_i.len());
     debug_assert_eq!(xss_i.len(), x_ii.len());
     // Shares of zero
-    let alphas: Vec<GF4> = party.inner.generate_alpha(xss_i.len());
+    let alphas = party.inner.generate_alpha(xss_i.len());
     //
-    x_i.iter_mut()
-        .enumerate()
-        .for_each(|(j, y_i)| *y_i = xss_i[j] + alphas[j]);
+    izip!(x_i.iter_mut(), xss_i, alphas)
+        .for_each(|(y_i, &xss, alpha)| *y_i = xss + alpha);
     party
         .io()
         .send_field::<GF4>(Direction::Previous, x_i.iter(), x_i.len());
@@ -180,8 +158,6 @@ fn ss_to_rss_layer(
 ///
 /// The output, the share [[x^-1]]_i, is written into `(s_i,s_ii)`.
 pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-    #[cfg(feature = "verbose-timing")]
-    let total = Instant::now();
 
     let n = si.len();
     // Step 1: WOL-conversion
@@ -195,23 +171,8 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
     // Step 4: Compute additive sharing of v
     let v = compute_v(&ah_i_sq, &al_i_sq, &ah_mul_al);
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local1", total.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let lut_layer_time = Instant::now();
-
     // Step 5: Compute replicated sharing of v inverse
     let (v_inv_i, v_inv_ii) = lut_layer(party, &v)?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut", lut_layer_time.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local2 = Instant::now();
 
     // Step 6: Locally compute additive sharing of a_h' and a_l'
     let ah_plus_al_i: Vec<_> = ah_i
@@ -227,14 +188,6 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
     let a_h_prime_ss = local_multiplication(&ah_i, &ah_ii, &v_inv_i, &v_inv_ii);
     let a_l_prime_ss = local_multiplication(&ah_plus_al_i, &ah_plus_al_ii, &v_inv_i, &v_inv_ii);
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local2", local2.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let ss_rss_timer = Instant::now();
-
     // Step 7: Generate replicated sharing of a_h' and a_l'
     let mut a_h_a_l_i = vec![GF4::ZERO; 2 * n];
     let mut a_h_a_l_ii = vec![GF4::ZERO; 2 * n];
@@ -245,14 +198,6 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
         &mut a_h_a_l_ii,
     )?;
 
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_ss_to_rss", ss_rss_timer.elapsed());
-    #[cfg(feature = "verbose-timing")]
-    let local3 = Instant::now();
-
     // Step 8: WOL-back-conversion
     si.iter_mut()
         .enumerate()
@@ -260,61 +205,7 @@ pub fn gf8_inv_layer(party: &mut WL16Party, si: &mut [GF8], sii: &mut [GF8]) -> 
     sii.iter_mut()
         .enumerate()
         .for_each(|(j, s_i)| *s_i = wol_inv_map(&a_h_a_l_ii[j], &a_h_a_l_ii[j + n]));
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_local3", local3.elapsed());
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer", total.elapsed());
     Ok(())
-}
-
-/// This function computes the WOL transform from `GF(2^8)` to `GF(2^4)^2`.
-pub fn wol_bitslice_gf4(x: &[GF8]) -> (Vec<BsGF4>, Vec<BsGF4>) {
-    let n = if x.len() % 2 == 0 {
-        x.len() / 2
-    } else {
-        x.len() / 2 + 1
-    };
-    let mut xh = vec![BsGF4::ZERO; n];
-    let mut xl = vec![BsGF4::ZERO; n];
-    for i in 0..(n - 1) {
-        let (xh1, xl1) = wol_map(&x[2 * i]);
-        let (xh2, xl2) = wol_map(&x[2 * i + 1]);
-        xh[i] = BsGF4::new(xh1, xh2);
-        xl[i] = BsGF4::new(xl1, xl2);
-    }
-    if n == x.len() / 2 {
-        let (xh1, xl1) = wol_map(&x[x.len() - 2]);
-        let (xh2, xl2) = wol_map(&x[x.len() - 1]);
-        xh[n - 1] = BsGF4::new(xh1, xh2);
-        xl[n - 1] = BsGF4::new(xl1, xl2);
-    } else {
-        let (xh1, xl1) = wol_map(&x[x.len() - 2]);
-        xh[n - 1] = BsGF4::new(xh1, GF4::ZERO);
-        xl[n - 1] = BsGF4::new(xl1, GF4::ZERO);
-    }
-    (xh, xl)
-}
-
-/// This function computes the reverse WOL transform from `GF(2^4)^2` to `GF(2^8)`.
-pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
-    for i in 0..(x.len() / 2) {
-        let (xh1, xh2) = xh[i].unpack();
-        let (xl1, xl2) = xl[i].unpack();
-        x[2 * i] = wol_inv_map(&xh1, &xl1);
-        x[2 * i + 1] = wol_inv_map(&xh2, &xl2);
-    }
-    if xh.len() * 2 != x.len() {
-        let (xh1, _) = xh[xh.len() - 1].unpack();
-        let (xl1, _) = xl[xh.len() - 1].unpack();
-        x[x.len() - 1] = wol_inv_map(&xh1, &xl1);
-    }
 }
 
 /// This function is an optimized version of the multiplicative inversion as in `Protocol 2`.
@@ -349,10 +240,11 @@ fn gf8_inv_layer_opt_party<P: Party>(
     party: &mut P,
     si: &mut [GF8],
     sii: &mut [GF8],
-    prep_ohv: &[RndOhvOutput],
+    prep_ohv: &[RndOhv16Output],
 ) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     debug_assert_eq!(si.len(), prep_ohv.len());
+
     let (mut ah_i, mut al_i) = wol_bitslice_gf4(si);
     let (ah_ii, mut al_ii) = wol_bitslice_gf4(sii);
     let v = izip!(ah_i.iter(), ah_ii.iter(), al_i.iter(), al_ii.iter())
@@ -363,6 +255,7 @@ fn gf8_inv_layer_opt_party<P: Party>(
             e_mul_ah2 + al2 + ah_mul_al
         })
         .collect();
+
     let (v_inv_i, v_inv_ii) = lut_layer_opt(party, v, prep_ohv)?;
 
     // local mult
@@ -476,11 +369,9 @@ pub fn gf8_inv_layer_opt_mt(
 pub fn lut_layer_opt<P: Party>(
     party: &mut P,
     mut v: Vec<BsGF4>,
-    rnd_ohv: &[RndOhvOutput],
+    rnd_ohv: &[RndOhv16Output],
 ) -> MpcResult<(Vec<BsGF4>, Vec<BsGF4>)> {
     debug_assert_eq!(rnd_ohv.len(), 2 * v.len());
-    #[cfg(feature = "verbose-timing")]
-    let lut_open_time = Instant::now();
 
     let rcv_cii = party.receive_field::<BsGF4>(Direction::Next, v.len());
     let rcv_ciii = party.receive_field::<BsGF4>(Direction::Previous, v.len());
@@ -490,38 +381,25 @@ pub fn lut_layer_opt<P: Party>(
             .take(2 * rnd_ohv.len())
             .enumerate()
             .for_each(|(i, dst)| {
-                *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
+                *dst += BsGF4::new(rnd_ohv[2 * i].random_si, rnd_ohv[2 * i + 1].random_si);
             });
         let empty_v = v[vlen].unpack().1;
-        v[vlen] += BsGF4::new(rnd_ohv[rnd_ohv.len() - 1].random, empty_v);
+        v[vlen] += BsGF4::new(rnd_ohv[rnd_ohv.len() - 1].random_si, empty_v);
     } else {
         v.iter_mut().enumerate().for_each(|(i, dst)| {
-            *dst += BsGF4::new(rnd_ohv[2 * i].random, rnd_ohv[2 * i + 1].random);
+            *dst += BsGF4::new(rnd_ohv[2 * i].random_si, rnd_ohv[2 * i + 1].random_si);
         });
     }
 
     let ci = v;
-    party.send_field::<BsGF4>(Direction::Next, &ci, ci.len());
-    party.send_field::<BsGF4>(Direction::Previous, &ci, ci.len());
+    // TODO party_send_all
+    party.send_field_slice(Direction::Next, &ci);
+    party.send_field_slice(Direction::  Previous, &ci);
 
     let cii = rcv_cii.rcv()?;
     let ciii = rcv_ciii.rcv()?;
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_open", lut_open_time.elapsed());
 
-    #[cfg(feature = "verbose-timing")]
-    let lut_local_time = Instant::now();
     let res = lut_with_rnd_ohv_bitsliced_opt(rnd_ohv, ci, cii, ciii);
-
-    #[cfg(feature = "verbose-timing")]
-    PARTY_TIMER
-        .lock()
-        .unwrap()
-        .report_time("gf8_inv_layer_lut_local", lut_local_time.elapsed());
-
     Ok(res)
 }
 
@@ -543,6 +421,7 @@ fn ss_to_rss_layer_opt<P: Party>(
     izip!(ss2.iter_mut(), party.generate_alpha(n)).for_each(|(si, alpha)| {
         *si += alpha;
     });
+    // TODO party_send_chunks
     party.send_field::<BsGF4>(Direction::Previous, ss1.iter().chain(ss2.iter()), 2 * n);
     let res = rcv_ii.rcv()?;
     ss1_ii.copy_from_slice(&res[..n]);
@@ -552,7 +431,7 @@ fn ss_to_rss_layer_opt<P: Party>(
 
 #[inline]
 pub fn lut_with_rnd_ohv_bitsliced_opt(
-    rnd_ohv: &[RndOhvOutput],
+    rnd_ohv: &[RndOhv16Output],
     ci: Vec<BsGF4>,
     mut cii: Vec<BsGF4>,
     mut ciii: Vec<BsGF4>,
@@ -588,7 +467,7 @@ pub fn lut_with_rnd_ohv_bitsliced_opt(
 }
 
 impl GF8InvBlackBox for WL16Party {
-    fn constant(&self, value: GF8) -> crate::share::RssShare<GF8> {
+    fn constant(&self, value: GF8) -> RssShare<GF8> {
         self.inner.constant(value)
     }
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
@@ -607,22 +486,19 @@ impl GF8InvBlackBox for WL16Party {
             gf8_inv_layer(self, si, sii)
         }
     }
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        self.inner.as_party_mut()
+    }
 }
 
-impl<F: Field> ArithmeticBlackBox<F> for WL16Party
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field> ArithmeticBlackBox<F> for WL16Party {
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.inner.pre_processing(n_multiplications)
+        <ChidaParty as ArithmeticBlackBox<F>>::pre_processing(&mut self.inner, n_multiplications)
     }
 
     fn io(&self) -> &IoLayerOwned {
-        self.inner.io()
+        <ChidaParty as ArithmeticBlackBox<F>>::io(&self.inner)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -633,7 +509,7 @@ where
         self.inner.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F> {
         self.inner.generate_alpha(n)
     }
 
@@ -661,12 +537,12 @@ where
         self.inner.output_round(si, sii)
     }
 
-    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
-        self.inner.output_to(to_p1, to_p2, to_p3)
-    }
+    // fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+    //     self.inner.output_to(to_p1, to_p2, to_p3)
+    // }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.inner.finalize()
+        <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.inner)
     }
 }
 
@@ -680,12 +556,11 @@ mod test {
             test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
             test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
         },
-        party::test::TestSetup,
         share::{
             gf4::GF4,
             gf8::GF8,
             test::{assert_eq, consistent, secret_share_vector},
-            Field, FieldRngExt, RssShare,
+            Field
         },
         wollut16::{
             online::{gf8_inv_layer_opt, gf8_inv_layer_opt_mt, GF4_INV},
@@ -693,18 +568,16 @@ mod test {
             WL16Party,
         },
     };
+    use crate::rep3_core::{test::TestSetup, party::RngExt, share::RssShare};
 
     use super::{gf8_inv_layer, lut_layer};
 
     fn secret_share_additive<R: Rng + CryptoRng, F: Field>(
         rng: &mut R,
         it: impl ExactSizeIterator<Item = F>,
-    ) -> (Vec<F>, Vec<F>, Vec<F>)
-    where
-        R: FieldRngExt<F>,
-    {
-        let s1 = rng.generate(it.len());
-        let s2 = rng.generate(it.len());
+    ) -> (Vec<F>, Vec<F>, Vec<F>) {
+        let s1 = F::generate(rng, it.len());
+        let s2 = F::generate(rng, it.len());
         let s3 = izip!(it, s1.iter(), s2.iter())
             .map(|(el, r1, r2)| el - *r1 - *r2)
             .collect();
@@ -727,10 +600,7 @@ mod test {
                     .collect_vec()
             }
         };
-        let (h1, h2, h3) = WL16Setup::localhost_setup(program(in1), program(in2), program(in3));
-        let (s1, p1) = h1.join().unwrap();
-        let (s2, p2) = h2.join().unwrap();
-        let (s3, p3) = h3.join().unwrap();
+        let ((s1, p1), (s2, p2), (s3, p3)) = WL16Setup::localhost_setup(program(in1), program(in2), program(in3));
 
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
@@ -786,10 +656,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());
@@ -817,10 +684,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup(program(s1), program(s2), program(s3));
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());
@@ -849,15 +713,12 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup_multithreads(
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup_multithreads(
             N_THREADS,
             program(s1),
             program(s2),
             program(s3),
         );
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());
@@ -872,7 +733,7 @@ mod test {
         const N_THREADS: usize = 6;
         const N: usize = 100000;
         let mut rng = thread_rng();
-        let inputs: Vec<GF8> = rng.generate(N);
+        let inputs: Vec<GF8> = GF8::generate(&mut rng, N);
         let mut rng = thread_rng();
         let (s1, s2, s3) = secret_share_vector(&mut rng, inputs.clone().into_iter());
         let program = |v: Vec<RssShare<GF8>>| {
@@ -888,15 +749,12 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = WL16Setup::localhost_setup_multithreads(
+        let ((s1, _), (s2, _), (s3, _)) = WL16Setup::localhost_setup_multithreads(
             N_THREADS,
             program(s1),
             program(s2),
             program(s3),
         );
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
         assert_eq!(s1.len(), inputs.len());
         assert_eq!(s2.len(), inputs.len());
         assert_eq!(s3.len(), inputs.len());

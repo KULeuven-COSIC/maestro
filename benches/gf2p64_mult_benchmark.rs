@@ -1,10 +1,11 @@
 use criterion::*;
-use rep3_aes::share::{gf2p64::GF2p64, FieldRngExt};
+use maestro::share::gf2p64::GF2p64;
 use rand::*;
+use maestro::rep3_core::party::RngExt;
 
 fn bench_multiplication(c: &mut Criterion) {
     let mut rng = thread_rng();
-    let elements: Vec<GF2p64> = rng.generate(2);
+    let elements: Vec<GF2p64> = GF2p64::generate(&mut rng, 2);
     let x = elements[0];
     let y = elements[1];
 

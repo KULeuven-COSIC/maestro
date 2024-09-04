@@ -1,14 +1,12 @@
 use criterion::*;
-use rep3_aes::share::{gf2p64::GF2p64, FieldRngExt, RssShare};
-use rand::{rngs::ThreadRng, thread_rng};
+use maestro::share::gf2p64::GF2p64;
+use rand::thread_rng;
+use maestro::rep3_core::{party::RngExt, share::RssShare};
 
-pub fn random_rss(n: usize) -> Vec<RssShare<GF2p64>>
-where
-    ThreadRng: FieldRngExt<GF2p64>,
-{
+pub fn random_rss(n: usize) -> Vec<RssShare<GF2p64>> {
     let mut rng = thread_rng();
-    let x: Vec<GF2p64> = FieldRngExt::generate(&mut rng, n);
-    let y: Vec<GF2p64> = FieldRngExt::generate(&mut rng, n);
+    let x: Vec<GF2p64> = GF2p64::generate(&mut rng, n);
+    let y: Vec<GF2p64> = GF2p64::generate(&mut rng, n);
     let res = x
         .iter()
         .zip(y.iter())
@@ -23,8 +21,8 @@ fn bench_inner_product(c: &mut Criterion) {
 
     for k in 0..5 {
         let n: usize = 2usize.pow(2u32.pow(k));
-        let x: Vec<GF2p64> = rng.generate(n);
-        let y: Vec<GF2p64> = rng.generate(n);
+        let x: Vec<GF2p64> = GF2p64::generate(&mut rng, n);
+        let y: Vec<GF2p64> = GF2p64::generate(&mut rng, n);
         let x1 = x.clone();
         let y1 = y.clone();
 

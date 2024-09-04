@@ -4,7 +4,7 @@ use itertools::Itertools;
 use rand::{CryptoRng, Rng};
 use sha2::Digest;
 
-use crate::{party::{error::MpcResult, ArithmeticBlackBox}, share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare}};
+use crate::{rep3_core::{network::NetSerializable, party::{error::MpcResult, DigestExt, RngExt}, share::{HasZero, RssShare}}, share::{gf8::GF8, Field}, util::ArithmeticBlackBox};
 
 // a bit-wise xor shared ring element mod 2^64
 // encoded as little endian
@@ -14,20 +14,35 @@ pub struct Z64Bool(u64);
 impl Field for Z64Bool {
     const NBYTES: usize = 8;
 
-    fn serialized_size(n_elements: usize) -> usize {
-        n_elements * Self::NBYTES
-    }
-
-    const ZERO: Self = Self(0);
+    
 
     const ONE: Self = Self(1);
 
     fn is_zero(&self) -> bool {
         self.0 == 0
     }
+}
+
+impl HasZero for Z64Bool {
+    const ZERO: Self = Self(0);
+}
+
+impl NetSerializable for Z64Bool {
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements * Self::NBYTES
+    }
 
     fn as_byte_vec(it: impl IntoIterator<Item= impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         it.into_iter().flat_map(|z64| z64.borrow().to_owned().0.to_le_bytes().into_iter()).collect()
+    }
+
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        let mut res = vec![0u8; Self::serialized_size(elements.len())];
+        res.chunks_exact_mut(Self::NBYTES).zip_eq(elements).for_each(|(dst, z64)| {
+            let bytes = z64.0.to_le_bytes();
+            dst.copy_from_slice(&bytes);
+        });
+        res
     }
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
         debug_assert!(v.len() % 8 == 0);
@@ -76,47 +91,26 @@ impl Sub for Z64Bool {
     }
 }
 
-impl<R: Rng + CryptoRng> FieldRngExt<Z64Bool> for R {
-    fn fill(&mut self, buf: &mut [Z64Bool]) {
+impl RngExt for Z64Bool {
+    fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
         for b in buf {
-            b.0 = self.next_u64().to_le()
+            b.0 = rng.next_u64().to_le()
         }
     }
-    fn generate(&mut self, n: usize) -> Vec<Z64Bool> {
+    fn generate<R: Rng + CryptoRng>(rng: &mut R, n: usize) -> Vec<Self> {
         let mut v = vec![Z64Bool::ZERO; n];
-        <Self as FieldRngExt<Z64Bool>>::fill(self, &mut v);
+        Self::fill(rng, &mut v);
         v
     }
 }
 
-impl<D: Digest> FieldDigestExt<Z64Bool> for D {
-    fn update(&mut self, message: &[Z64Bool]) {
+impl DigestExt for Z64Bool {
+    fn update<D: Digest>(digest: &mut D, message: &[Self]) {
         for m in message {
-            self.update(&m.0.to_le_bytes());
+            digest.update(&m.0.to_le_bytes());
         }
     }
 }
-
-// impl FieldVectorCommChannel<Z64Bool> for CommChannel {
-//     fn write_vector(&mut self, vector: &[Z64Bool]) -> std::io::Result<()> {
-//         let mut buf = vec![0u8; 8*vector.len()];
-//         for (i,v) in vector.iter().enumerate() {
-//             let bytes = v.0.to_le_bytes();
-//             buf[8*i..8*i+8].copy_from_slice(&bytes);
-//         }
-//         self.write(&buf)
-//     }
-//     fn read_vector(&mut self, buffer: &mut [Z64Bool]) -> std::io::Result<()> {
-//         let mut buf = vec![0u8; 8*buffer.len()];
-//         self.read(&mut buf)?;
-//         for (i, bytes) in buf.chunks_exact(8).enumerate() {
-//             let mut arr = [0u8; 8];
-//             arr.copy_from_slice(bytes);
-//             buffer[i].0 = u64::from_le_bytes(arr);
-//         }
-//         Ok(())
-//     }
-// }
 
 fn bit_slice(dst: &mut Vec<Z64Bool>, a: &[Z64Bool], index: usize) {
     dst.clear();
@@ -323,8 +317,11 @@ fn ripple_carry_adder<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protoco
 pub mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
+    use crate::rep3_core::share::RssShare;
+    use crate::rep3_core::test::TestSetup;
     use crate::share::Field;
-    use crate::{chida::online::test::ChidaSetup, conversion::{convert_boolean_to_ring, convert_ring_to_boolean, ripple_carry_adder}, party::{test::TestSetup, ArithmeticBlackBox}, share::{gf8::GF8, test::{consistent_vector, secret_share_vector}, FieldRngExt, RssShare}};
+    use crate::util::ArithmeticBlackBox;
+    use crate::{chida::online::test::ChidaSetup, conversion::{convert_boolean_to_ring, convert_ring_to_boolean, ripple_carry_adder}, share::{gf8::GF8, test::{consistent_vector, secret_share_vector}}};
 
     use super::{bit_slice, unbit_slice, Z64Bool};
 

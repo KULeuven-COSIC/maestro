@@ -1,16 +1,17 @@
 use criterion::*;
-use rep3_aes::share::{gf2p64::GF2p64, FieldRngExt};
+use maestro::share::gf2p64::GF2p64;
 use rand::thread_rng;
+use maestro::rep3_core::party::RngExt;
 
 fn clmul_bench_variants(c: &mut Criterion) {
     let mut rng = thread_rng();
     let n: usize = 2*32768;
-    let x: Vec<GF2p64> = rng.generate(n);
-    let y: Vec<GF2p64> = rng.generate(n);
+    let x: Vec<GF2p64> = GF2p64::generate(&mut rng, n);
+    let y: Vec<GF2p64> = GF2p64::generate(&mut rng, n);
     let x1 = x.clone();
     let y1 = y.clone();
-    let x2 = x.clone();
-    let y2 = y.clone();
+    // let x2 = x.clone();
+    // let y2 = y.clone();
 
     /* 
     #[allow(deprecated)]

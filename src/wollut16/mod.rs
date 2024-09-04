@@ -8,22 +8,17 @@
 //! 
 //! The *maliciously-secure* variant of this protocol is found in [crate::wollut16_malsec].
 //!
-//! This module notably contains
-//!   - [wollut16_benchmark] that implements the AES benchmark
-//!   - [WL16Party] the party wrapper for the protocol. [WL16Party] also implements [ArithmeticBlackBox]
+//! This module notably contains [WL16Party] the party wrapper for the protocol. [WL16Party] also implements [ArithmeticBlackBox]
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 
-use std::time::Instant;
 
 use crate::{
-    aes::{self, GF8InvBlackBox},
-    benchmark::{BenchmarkProtocol, BenchmarkResult},
     chida::ChidaParty,
-    network::{task::IoLayerOwned, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox, NoMulTripleRecording},
-    share::gf4::GF4,
+    share::gf4::GF4, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox},
 };
+use crate::rep3_core::{network::{task::IoLayerOwned, ConnectedParty},
+party::error::MpcResult};
 
 pub mod offline;
 pub mod online;
@@ -31,7 +26,7 @@ pub mod online;
 /// The party wrapper for the WOLLUT16 protocol.
 pub struct WL16Party {
     inner: ChidaParty,
-    prep_ohv: Vec<RndOhvOutput>,
+    prep_ohv: Vec<RndOhv16Output>,
     opt: bool,
 }
 
@@ -41,20 +36,21 @@ pub struct RndOhv16(u16);
 
 /// Output of the random one-hot vector pre-processing.
 ///
-/// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (3,3)-sharing of the corresponding `GF4` element that indicates
+/// Contains a (2,3)-sharing of a size 16 one-hot vector `RndOhv16` and a (2,3)-sharing of the corresponding `GF4` element that indicates
 /// the position of 1 in the vector.
-pub struct RndOhvOutput {
+pub struct RndOhv16Output {
     /// share i of one-hot vector
     pub si: RndOhv16,
     /// share i+1 of one-hot vector
     pub sii: RndOhv16,
-    /// (3,3) sharing of the position of the 1 in the vector
-    pub random: GF4,
+    /// (2,3) sharing of the position of the 1 in the vector
+    pub random_si: GF4,
+    pub random_sii: GF4,
 }
 
 impl WL16Party {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|party| Self {
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             prep_ohv: Vec::new(),
             opt: true,
@@ -80,94 +76,6 @@ impl WL16Party {
 
     pub fn io(&self) -> &IoLayerOwned {
         <ChidaParty as ArithmeticBlackBox<GF4>>::io(&self.inner)
-    }
-}
-
-/// This function implements the AES benchmark.
-///
-/// The arguments are
-/// - `connected` - the local party
-/// - `simd` - number of parallel AES calls
-/// - `n_worker_threads` - number of worker threads
-pub fn wollut16_benchmark(connected: ConnectedParty, simd: usize, n_worker_threads: Option<usize>) {
-    let mut party = WL16Party::setup(connected, n_worker_threads).unwrap();
-    let setup_comm_stats = party.io().reset_comm_stats();
-    let start_prep = Instant::now();
-    party.do_preprocessing(0, simd).unwrap();
-    let prep_duration = start_prep.elapsed();
-    let prep_comm_stats = party.io().reset_comm_stats();
-
-    let input = aes::random_state(party.inner.as_party_mut(), simd);
-    // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(party.inner.as_party_mut());
-
-    let start = Instant::now();
-    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-    let duration = start.elapsed();
-    let online_comm_stats = party.io().reset_comm_stats();
-    let _ = aes::output(&mut party.inner, output).unwrap();
-    party.inner.teardown().unwrap();
-
-    println!("Finished benchmark");
-
-    println!(
-        "Party {}: LUT-16 with SIMD={} took {}s (pre-processing) and {}s (online phase)",
-        party.inner.party_index(),
-        simd,
-        prep_duration.as_secs_f64(),
-        duration.as_secs_f64()
-    );
-    println!("Setup:");
-    setup_comm_stats.print_comm_statistics(party.inner.party_index());
-    println!("Pre-Processing:");
-    prep_comm_stats.print_comm_statistics(party.inner.party_index());
-    println!("Online Phase:");
-    online_comm_stats.print_comm_statistics(party.inner.party_index());
-    party.inner.print_statistics();
-}
-
-pub struct LUT16Benchmark;
-
-impl BenchmarkProtocol for LUT16Benchmark {
-    fn protocol_name(&self) -> String {
-        "lut16".to_string()
-    }
-    fn run(
-        &self,
-        conn: ConnectedParty,
-        simd: usize,
-        n_worker_threads: Option<usize>,
-    ) -> BenchmarkResult {
-        let mut party = WL16Party::setup(conn, n_worker_threads).unwrap();
-        let _setup_comm_stats = party.io().reset_comm_stats();
-        println!("After setup");
-        let start_prep = Instant::now();
-        party.do_preprocessing(0, simd).unwrap();
-        let prep_duration = start_prep.elapsed();
-        let prep_comm_stats = party.io().reset_comm_stats();
-        println!("After pre-processing");
-
-        let input = aes::random_state(party.inner.as_party_mut(), simd);
-        // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(party.inner.as_party_mut());
-
-        let start = Instant::now();
-        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-        let duration = start.elapsed();
-        let online_comm_stats = party.io().reset_comm_stats();
-        println!("After online");
-        let _ = aes::output(&mut party.inner, output).unwrap();
-        println!("After output");
-        party.inner.teardown().unwrap();
-        println!("After teardown");
-
-        BenchmarkResult::new(
-            prep_duration,
-            duration,
-            prep_comm_stats,
-            online_comm_stats,
-            party.inner.get_additional_timers(),
-        )
     }
 }
 
@@ -211,38 +119,36 @@ impl RndOhv16 {
 
 #[cfg(test)]
 mod test {
-    use std::thread::JoinHandle;
-
-    use crate::{
+    use crate::rep3_core::{
         network::ConnectedParty,
-        party::test::{localhost_connect, TestSetup},
+        test::{localhost_connect, TestSetup},
     };
 
     use super::WL16Party;
 
     pub fn localhost_setup_wl16<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut WL16Party) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut WL16Party) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut WL16Party) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
         n_worker_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, WL16Party)>,
-        JoinHandle<(T2, WL16Party)>,
-        JoinHandle<(T3, WL16Party)>,
+        (T1, WL16Party),
+        (T2, WL16Party),
+        (T3, WL16Party),
     ) {
         fn adapter<T, Fx: FnOnce(&mut WL16Party) -> T>(
             conn: ConnectedParty,
             f: Fx,
             n_worker_threads: Option<usize>,
         ) -> (T, WL16Party) {
-            let mut party = WL16Party::setup(conn, n_worker_threads).unwrap();
+            let mut party = WL16Party::setup(conn, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             // party.finalize().unwrap();
             party.inner.teardown().unwrap();
@@ -258,39 +164,39 @@ mod test {
     pub struct WL16Setup;
     impl TestSetup<WL16Party> for WL16Setup {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut WL16Party) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut WL16Party) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut WL16Party) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            std::thread::JoinHandle<(T1, WL16Party)>,
-            std::thread::JoinHandle<(T2, WL16Party)>,
-            std::thread::JoinHandle<(T3, WL16Party)>,
+            (T1, WL16Party),
+            (T2, WL16Party),
+            (T3, WL16Party),
         ) {
             localhost_setup_wl16(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut WL16Party) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut WL16Party) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut WL16Party) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut WL16Party) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut WL16Party) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut WL16Party) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, WL16Party)>,
-            JoinHandle<(T2, WL16Party)>,
-            JoinHandle<(T3, WL16Party)>,
+            (T1, WL16Party),
+            (T2, WL16Party),
+            (T3, WL16Party),
         ) {
             localhost_setup_wl16(f1, f2, f3, Some(n_threads))
         }

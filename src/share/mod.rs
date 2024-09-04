@@ -9,13 +9,17 @@ pub mod gf8;
 mod gf8_tables;
 pub mod wol;
 
-use std::borrow::Borrow;
-use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
+
+use crate::rep3_core::network::NetSerializable;
+use crate::rep3_core::party::RngExt;
+use crate::rep3_core::share::{HasZero, RssShare};
 
 /// A finite field.
 pub trait Field:
     Default
+    + HasZero
+    + NetSerializable
     + Add<Output = Self>
     + Sub<Output = Self>
     + Mul<Output = Self>
@@ -24,19 +28,20 @@ pub trait Field:
     + Copy
     + PartialEq
     + AddAssign
+    + RngExt
 {
     // + AsRef<[u8]>
     /// The field size in byte
     const NBYTES: usize;
 
-    /// Returns the size in byte of a serialization of n_elements many field elements
-    fn serialized_size(n_elements: usize) -> usize;
+    // /// Returns the size in byte of a serialization of n_elements many field elements
+    // fn serialized_size(n_elements: usize) -> usize;
 
     /// The field size in bits
     const NBITS: usize = 8 * Self::NBYTES;
 
-    /// Zero the neutral element of addition
-    const ZERO: Self;
+    // /// Zero the neutral element of addition
+    // const ZERO: Self;
 
     /// One the neutral element of multiplication
     const ONE: Self;
@@ -44,14 +49,14 @@ pub trait Field:
     /// Returns if the value is zero
     fn is_zero(&self) -> bool;
 
-    /// Serializes the field elements
-    fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, len: usize) -> Vec<u8>;
+    // /// Serializes the field elements
+    // fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, len: usize) -> Vec<u8>;
 
-    /// Deserializes field elements from a byte vector
-    fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
+    // /// Deserializes field elements from a byte vector
+    // fn from_byte_vec(v: Vec<u8>, len: usize) -> Vec<Self>;
 
-    /// Deserializes field elements from a byte vector into a slice
-    fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
+    // /// Deserializes field elements from a byte vector into a slice
+    // fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]);
 }
 
 /// Field that provide a method to compute multiplicative inverses.
@@ -96,113 +101,19 @@ pub trait InnerProduct: Field {
     fn weak_inner_product3(a: &[RssShare<Self>], b: &[RssShare<Self>]) -> Self;
 }
 
-/// A party's RSS-share of a (2,3)-shared field element.
-#[derive(Clone, Debug)]
-pub struct RssShare<F: Field> {
-    /// The first share of the party.
-    pub si: F,
-    /// The second share of the party.
-    pub sii: F,
-}
-
-/// A vector of [RssShare]s.
-pub type RssShareVec<F> = Vec<RssShare<F>>;
-
-impl<F: Field> RssShare<F> {
-    /// Computes an RSS-share given two shares.
-    pub fn from(si: F, sii: F) -> Self {
-        Self { si, sii }
-    }
-
-    /// Multiplies the RSS-share with a scalar.
-    pub fn mul_by_sc(self, scalar: F) -> Self {
-        Self {
-            si: self.si * scalar,
-            sii: self.sii * scalar,
-        }
-    }
-
-    #[inline]
-    pub fn constant(i: usize, value: F) -> Self {
-        if i == 0 {
-            Self::from(value, F::ZERO)
-        } else if i == 2 {
-            Self::from(F::ZERO, value)
-        } else {
-            Self::from(F::ZERO, F::ZERO)
-        }
-    }
-}
-
-impl<F: Field> Add<Self> for RssShare<F> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        RssShare {
-            si: self.si + rhs.si,
-            sii: self.sii + rhs.sii,
-        }
-    }
-}
-
-impl<F: Field> Sub<Self> for RssShare<F> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        RssShare {
-            si: self.si - rhs.si,
-            sii: self.sii - rhs.sii,
-        }
-    }
-}
-
-impl<F: Field + Copy> Mul<F> for RssShare<F> {
-    type Output = Self;
-
-    fn mul(self, rhs: F) -> Self::Output {
-        RssShare {
-            si: self.si * rhs,
-            sii: self.sii * rhs,
-        }
-    }
-}
-
-impl<F: Field> AddAssign for RssShare<F> {
-    fn add_assign(&mut self, rhs: Self) {
-        self.si += rhs.si;
-        self.sii += rhs.sii;
-    }
-}
-
-impl<F: Field + Copy> Copy for RssShare<F> {}
-
-/// Field that provides methods to generate random values.
-pub trait FieldRngExt<F: Field> {
-    /// Generate a random vector of field elements of length `n`.
-    fn generate(&mut self, n: usize) -> Vec<F>;
-    /// Fill the given buffer with random field elements.
-    fn fill(&mut self, buf: &mut [F]);
-}
-
-/// Field that provides methods to feed elements into a hash function.
-pub trait FieldDigestExt<F: Field> {
-    /// Feeds a slice of field elements to a hash function.
-    fn update(&mut self, message: &[F]);
-}
-
 #[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use crate::share::gf4::GF4;
     use crate::share::gf8::GF8;
-    use crate::share::{Field, FieldRngExt, RssShare};
-    use rand::{rngs::ThreadRng, thread_rng, CryptoRng, Rng};
+    use rand::{thread_rng, CryptoRng, Rng};
+    use crate::rep3_core::party::RngExt;
+    use crate::rep3_core::share::{RssShare, RssShareVec};
     use std::borrow::Borrow;
     use std::fmt::Debug;
-    use itertools::Itertools;
 
-    use super::RssShareVec;
+    use super::Field;
 
-    pub fn consistent<F: Field + PartialEq + Debug>(
+    pub fn consistent<F: Field + Debug>(
         share1: &RssShare<F>,
         share2: &RssShare<F>,
         share3: &RssShare<F>,
@@ -224,7 +135,7 @@ pub mod test {
         );
     }
 
-    pub fn assert_eq<F: Field + PartialEq + Debug>(
+    pub fn assert_eq<F: Field + Debug>(
         share1: RssShare<F>,
         share2: RssShare<F>,
         share3: RssShare<F>,
@@ -242,17 +153,17 @@ pub mod test {
         }
     }
 
-    pub fn assert_eq_vector<F: Field + PartialEq + Debug>(share1: impl IntoIterator<Item=RssShare<F>>, share2: impl IntoIterator<Item=RssShare<F>>, share3: impl IntoIterator<Item=RssShare<F>>, values: impl IntoIterator<Item=F>) {
+    pub fn assert_eq_vector<F: Field>(share1: impl IntoIterator<Item=RssShare<F>>, share2: impl IntoIterator<Item=RssShare<F>>, share3: impl IntoIterator<Item=RssShare<F>>, values: impl IntoIterator<Item=F>) {
         for (s1, (s2, (s3, v))) in share1.into_iter().zip_eq(share2.into_iter().zip_eq(share3.into_iter().zip_eq(values))) {
             assert_eq(s1, s2, s3, v);
         }
     }
 
-    pub fn secret_share<F: Field, R: Rng + CryptoRng + FieldRngExt<F>>(
+    pub fn secret_share<F: Field, R: Rng + CryptoRng>(
         rng: &mut R,
         x: &F,
     ) -> (RssShare<F>, RssShare<F>, RssShare<F>) {
-        let r = rng.generate(2);
+        let r = F::generate(rng, 2);
         let x1 = RssShare::from(x.clone() - r[0] - r[1], r[0]);
         let x2 = RssShare::from(r[0], r[1]);
         let x3 = RssShare::from(r[1], x.clone() - r[0] - r[1]);
@@ -262,10 +173,7 @@ pub mod test {
     pub fn secret_share_vector<F: Field, R: Rng + CryptoRng>(
         rng: &mut R,
         elements: impl IntoIterator<Item = impl Borrow<F>>,
-    ) -> (RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)
-    where
-        R: FieldRngExt<F>,
-    {
+    ) -> (RssShareVec<F>, RssShareVec<F>, RssShareVec<F>) {
         let (s1, (s2, s3)) = elements
             .into_iter()
             .map(|value| {
@@ -278,12 +186,9 @@ pub mod test {
 
     pub fn random_secret_shared_vector<F: Field>(
         n: usize,
-    ) -> (Vec<F>, RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)
-    where
-        ThreadRng: FieldRngExt<F>,
-    {
+    ) -> (Vec<F>, RssShareVec<F>, RssShareVec<F>, RssShareVec<F>) {
         let mut rng = thread_rng();
-        let x: Vec<F> = FieldRngExt::generate(&mut rng, n);
+        let x: Vec<F> = RngExt::generate(&mut rng, n);
         let (s1, s2, s3) = secret_share_vector(&mut rng, x.iter());
 
         (x, s1, s2, s3)
@@ -293,8 +198,8 @@ pub mod test {
     fn cmul_gf8() {
         const N: usize = 100;
         let mut rng = thread_rng();
-        let x: Vec<GF8> = rng.generate(N);
-        let c: Vec<GF8> = rng.generate(N);
+        let x: Vec<GF8> = GF8::generate(&mut rng, N);
+        let c: Vec<GF8> = GF8::generate(&mut rng, N);
 
         for i in 0..N {
             let (x1, x2, x3) = secret_share::<GF8, _>(&mut rng, &x[i]);
@@ -311,8 +216,8 @@ pub mod test {
     fn cmul_gf4() {
         const N: usize = 100;
         let mut rng = thread_rng();
-        let x: Vec<GF4> = rng.generate(N);
-        let c: Vec<GF4> = rng.generate(N);
+        let x: Vec<GF4> = GF4::generate(&mut rng, N);
+        let c: Vec<GF4> = GF4::generate(&mut rng, N);
 
         for i in 0..N {
             let (x1, x2, x3) = secret_share(&mut rng, &x[i]);

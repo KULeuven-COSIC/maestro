@@ -1,5 +1,5 @@
 [package]
-name = "rep3-aes"
+name = "maestro"
 version = "0.1.0"
 edition = "2021"
 
@@ -14,20 +14,20 @@ clmul = []
 [dependencies]
 rustls = {version = "0.22.1"}
 rustls-pemfile = "2.0.0"
-rand = {version = "0.8.5"}
-rand_chacha = "0.3.1"
-sha2 = "0.10.8"
-toml = "0.8"
 serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0.113"
-clap = {version = "4.4.13", features = ["derive"]}
+toml = "0.8"
 oneshot = "0.1.6"
 ghash = "0.5.0"
 bytemuck = { version = "1.14.0", features = ["derive"]}
 itertools = "0.12.1"
-criterion = {version ="0.4", optional = true }
 lazy_static = {version = "1.4.0" }
+criterion = {version ="0.4", optional = true }
 rayon = "1.10.0"
+rand = {version = "0.8.5"}
+sha2 = "0.10.8"
+rand_chacha = "0.3.1"
+clap = {version = "4.4.13", features = ["derive"]}
 hex = "0.4.3"
 array-init = "2.1.0"
 
@@ -39,11 +39,6 @@ aes-gcm = "0.10.3"
 [[bin]]
 name = "rep3-aes-mozaik"
 path = "src/rep3_aes_mozaik.rs"
-
-[[bin]]
-name = "lut_benchmark"
-harness = false
-required-features = ["benchmark-helper"]
 
 [lib]
 required-features = ["verbose-timing"]
@@ -62,3 +57,7 @@ required-features = ["clmul"]
 name = "clmul_bench"
 harness = false
 required-features = ["clmul"]
+
+[[bench]]
+name = "unpack_bitslice"
+harness = false

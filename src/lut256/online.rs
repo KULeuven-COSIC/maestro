@@ -1,19 +1,16 @@
 use std::time::Instant;
 
 use itertools::izip;
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
-use sha2::Sha256;
 
 use crate::{
-    aes::GF8InvBlackBox,
-    network::task::{Direction, IoLayerOwned},
-    party::{error::MpcResult, ArithmeticBlackBox, MainParty},
-    share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec},
+    aes::GF8InvBlackBox, chida::ChidaParty, share::{gf8::GF8, Field}, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox}
 };
+use crate::rep3_core::{network::task::{Direction, IoLayerOwned},
+party::{error::MpcResult, MainParty}, share::{RssShare, RssShareVec}};
 
 use super::{lut256_tables, offline, LUT256Party, RndOhv256Output};
 
@@ -28,9 +25,9 @@ impl GF8InvBlackBox for LUT256Party {
         let n_prep = n_rnd_ohv + n_rnd_ohv_ks;
         let mut prep =
             if self.inner.has_multi_threading() && 2 * n_prep > self.inner.num_worker_threads() {
-                offline::generate_rndohv256_mt(self.inner.as_party_mut(), n_prep)?
+                offline::generate_rndohv256_mt::<_, GF8>(self.inner.as_party_mut(), &mut NoMulTripleRecording,  n_prep)?
             } else {
-                offline::generate_rndohv256(self.inner.as_party_mut(), n_prep)?
+                offline::generate_rndohv256(self.inner.as_party_mut(), &mut NoMulTripleRecording, n_prep)?
             };
         if self.prep_ohv.is_empty() {
             self.prep_ohv = prep;
@@ -70,6 +67,10 @@ impl GF8InvBlackBox for LUT256Party {
         self.io().wait_for_completion();
         Ok(())
     }
+
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        self.inner.as_party_mut()
+    }
 }
 
 fn lut256_mt(
@@ -106,20 +107,14 @@ fn lut256(si: &mut [GF8], sii: &mut [GF8], ciii: &[GF8], rnd_ohv: &[RndOhv256Out
     });
 }
 
-impl<F: Field> ArithmeticBlackBox<F> for LUT256Party
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field> ArithmeticBlackBox<F> for LUT256Party {
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.inner.pre_processing(n_multiplications)
+        <ChidaParty as ArithmeticBlackBox<F>>::pre_processing(&mut self.inner, n_multiplications)
     }
 
     fn io(&self) -> &IoLayerOwned {
-        self.inner.io()
+        <ChidaParty as ArithmeticBlackBox<F>>::io(&self.inner)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -130,7 +125,7 @@ where
         self.inner.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F> {
         self.inner.generate_alpha(n)
     }
 
@@ -158,12 +153,12 @@ where
         self.inner.output_round(si, sii)
     }
 
-    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
-        self.inner.output_to(to_p1, to_p2, to_p3)
-    }
+    // fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+    //     self.inner.output_to(to_p1, to_p2, to_p3)
+    // }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.inner.finalize()
+        <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.inner)
     }
 }
 

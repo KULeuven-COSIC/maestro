@@ -2,7 +2,7 @@ use std::{io, slice};
 
 use itertools::{repeat_n, Itertools};
 
-use crate::{aes::{self, AesKeyState, GF8InvBlackBox, VectorAesState}, party::{error::{MpcError, MpcResult}, ArithmeticBlackBox}, share::{gf8::GF8, Field, RssShare}};
+use crate::{aes::{self, AesKeyState, GF8InvBlackBox, VectorAesState}, rep3_core::{party::error::{MpcError, MpcResult}, share::RssShare}, share::{gf8::GF8, Field}, util::ArithmeticBlackBox};
 
 use self::gf128::{GF128, TryFromGF128SliceError};
 pub mod gf128;
@@ -215,7 +215,7 @@ where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
 mod test {
     use itertools::Itertools;
     use rand::thread_rng;
-    use crate::{chida::{self, online::test::{ChidaSetup, ChidaSetupSimple}, ChidaBenchmarkParty, ChidaParty}, gcm::gf128::GF128, party::{test::{localhost_setup, TestSetup}, ArithmeticBlackBox, MainParty}, share::{gf8::GF8, test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}, RssShare}};
+    use crate::{chida::{self, online::test::{ChidaSetup, ChidaSetupSimple}, ChidaBenchmarkParty, ChidaParty}, gcm::gf128::GF128, rep3_core::{party::MainParty, share::RssShare, test::{localhost_setup, TestSetup}}, share::{gf8::GF8, test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}}};
     use super::{aes128_gcm_decrypt, aes128_gcm_encrypt, semi_honest_tag_check};
 
     pub(super) struct AesGcm128Testvector {

@@ -12,11 +12,11 @@ use std::{
 
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
+use crate::rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::{HasZero, RssShare}};
 use sha2::Digest;
 
 use super::{
-    gf4::GF4, gf8::GF8, Field, FieldDigestExt, FieldRngExt, HasTwo, InnerProduct, Invertible,
-    RssShare,
+    bs_bool16::BsBool16, gf4::GF4, gf8::GF8, Field, HasTwo, InnerProduct, Invertible
 };
 
 /// An element of `GF(2^64) := GF(2)[X] / X^64 + X^4 + X^3 + X + 1`
@@ -389,24 +389,62 @@ impl GF2p64 {
         });
         Self::propagate_carries(word, carry)
     }
+
+    #[inline]
+    pub fn extend_from_bit(vec: &mut Vec<Self>, bit: &BsBool16) {
+        let mut x = bit.as_u16();
+        for _ in 0..16 {
+            vec.push(Self::new(x & 1));
+            x >>= 1;
+        }
+    }
+
+    #[inline]
+    pub fn extend_from_bitstring(vec: &mut Vec<Self>, bitstring: &[BsBool16], simd_len: usize) {
+        debug_assert!(bitstring.len() <= Self::NBITS * simd_len);
+        let mut transposed = vec![Self::ZERO; 16*simd_len];
+        bitstring.chunks_exact(simd_len).enumerate().for_each(|(bitpos, simd_bit)| {
+            simd_bit.iter().enumerate().for_each(|(j,bit)| {
+                let mut bit = bit.as_u16() as u64;
+                for i in 0..16 {
+                    transposed[16*j+i].0 |= (bit & 1) << bitpos;
+                    bit >>= 1;
+                }
+            })
+        });
+        vec.extend_from_slice(&transposed);
+    }
 }
 
 impl Field for GF2p64 {
     const NBYTES: usize = 8;
-
-    const ZERO: Self = Self(0u64);
 
     const ONE: Self = Self(1u64);
 
     fn is_zero(&self) -> bool {
         self.0 == 0u64
     }
+}
 
+impl HasZero for GF2p64 {
+    const ZERO: Self = Self(0u64);
+}
+
+impl NetSerializable for GF2p64 {
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         // Using big-endian encoding
         it.into_iter()
             .flat_map(|gf| gf.borrow().0.to_be_bytes())
             .collect()
+    }
+
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        // Using big-endian encoding
+        let mut res = vec![0u8; Self::serialized_size(elements.len())];
+        res.chunks_exact_mut(8).zip_eq(elements).for_each(|(chunk, el)| {
+            chunk.copy_from_slice(&el.0.to_be_bytes());
+        });
+        res
     }
 
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
@@ -681,24 +719,24 @@ impl Debug for GF2p64 {
     }
 }
 
-impl<R: Rng + CryptoRng> FieldRngExt<GF2p64> for R {
-    fn generate(&mut self, n: usize) -> Vec<GF2p64> {
-        let mut r = vec![0; n * GF2p64::NBYTES];
-        self.fill_bytes(&mut r);
-        GF2p64::from_byte_vec(r, n)
+impl RngExt for GF2p64 {
+    fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
+        let mut v = vec![0u8; buf.len() * GF2p64::NBYTES];
+        rng.fill_bytes(&mut v);
+        Self::from_byte_slice(v, buf)
     }
 
-    fn fill(&mut self, buf: &mut [GF2p64]) {
-        let mut v = vec![0u8; buf.len() * GF2p64::NBYTES];
-        self.fill_bytes(&mut v);
-        GF2p64::from_byte_slice(v, buf)
+    fn generate<R: Rng + CryptoRng>(rng: &mut R, n: usize) -> Vec<Self> {
+        let mut r = vec![0; n * GF2p64::NBYTES];
+        rng.fill_bytes(&mut r);
+        GF2p64::from_byte_vec(r, n)
     }
 }
 
-impl<D: Digest> FieldDigestExt<GF2p64> for D {
-    fn update(&mut self, message: &[GF2p64]) {
+impl DigestExt for GF2p64 {
+    fn update<D: Digest>(digest: &mut D, message: &[Self]) {
         for x in message {
-            self.update(x.0.to_be_bytes());
+            digest.update(x.0.to_be_bytes());
         }
     }
 }
@@ -797,12 +835,83 @@ impl GF2p64Subfield for GF4 {
     }
 }
 
+#[rustfmt::skip]
+const GF4_EXT_EB_TABLE0: [u64; 16] = [0x0000000000000000, 0x0000000000000001, 0xb848d14948d52b97, 0xb848d14948d52b96, 0xa181e7d66f5ff794, 0xa181e7d66f5ff795, 0x19c9369f278adc03, 0x19c9369f278adc02, 0x5db84357ce785d09, 0x5db84357ce785d08, 0xe5f0921e86ad769e, 0xe5f0921e86ad769f, 0xfc39a481a127aa9d, 0xfc39a481a127aa9c, 0x447175c8e9f2810a, 0x447175c8e9f2810b];
+#[rustfmt::skip]
+const GF4_EXT_EB_TABLE1: [u64; 16] = [0x0000000000000000, 0x14f1968d182dd50f, 0xe783b218b4f7828e, 0xf3722495acda5781, 0x425086d25fa48e9a, 0x56a1105f47895b95, 0xa5d334caeb530c14, 0xb122a247f37ed91b, 0x5176233df09ddbe4, 0x4587b5b0e8b00eeb, 0xb6f59125446a596a, 0xa20407a85c478c65, 0x1326a5efaf39557e, 0x07d73362b7148071, 0xf4a517f71bced7f0, 0xe054817a03e302ff];
+#[rustfmt::skip]
+const GF4_EXT_EB_TABLE2: [u64; 16] = [0x0000000000000000, 0x1bf7034c8bcbc73e, 0xbacfec5a0a44ed0d, 0xa138ef16818f2a33, 0x58d19564f7685dd5, 0x432696287ca39aeb, 0xe21e793efd2cb0d8, 0xf9e97a7276e777e6, 0xa6cb12e9ca5a79b5, 0xbd3c11a54191be8b, 0x1c04feb3c01e94b8, 0x07f3fdff4bd55386, 0xfe1a878d3d322460, 0xe5ed84c1b6f9e35e, 0x44d56bd73776c96d, 0x5f22689bbcbd0e53];
+// const GF4_EXT_EB_TABLE3: [u64; 16] = [0x0000000000000000, 0xa5d51fb65fe6c30e, 0xb9ddfd59eb0f5923, 0x1c08e2efb4e99a2d, 0xfaeb4e7aafdb3005, 0x5f3e51ccf03df30b, 0x4336b32344d46926, 0xe6e3ac951b32aa28, 0xf54ee43fdf842e10, 0x509bfb898062ed1e, 0x4c931966348b7733, 0xe94606d06b6db43d, 0x0fa5aa45705f1e15, 0xaa70b5f32fb9dd1b, 0xb678571c9b504736, 0x13ad48aac4b68438];
+
+/// Embeds a0 + a1 * alpha from the degree 4 extension GF(2^4) \[alpha\] / 2*alpha^4 + 2*alpha^2 + 4*alpha + 8
+/// into [GF2p64].
+pub fn embed_gf4p4_deg2(a0: GF4, a1: GF4) -> GF2p64 {
+    // the embedding is done in two steps (pre-computed in lookup tables)
+    // (1) compute the isomorphism from GF(2^4)^4 to GF(2^16)
+    // (2) embed GF(2^16) into a subgroup in GF(2^64) of the same size
+    //
+    // for (1), let x be the generator for GF(2^4), alpha be the generator for GF(2^4)^4 and y be the generator for GF(2^16), then
+    // the isomorphism psi maps x -> 1 + y + y^3 + y^4 and alpha -> 1 + y + y^2.
+    //
+    // the tables Ti are computed as follows: Ti[x0 + x1 * x + x2 * x^2 + x3 * x^3] = (x0 + x1 * psi(x) + x2 * psi(x)^2 + x3 * psi(x)^3) * psi(alpha)**i
+    // thus the isomorphism (a0 + a1 * alpha + a2 * alpha^2 + a3 * alpha^3) -> GF(2^16) can be computed using the tables as 
+    // T0[a0] + T1[a1] + T2[a2] + T3[a3]
+    // we only need at most deg3, so we omit T3
+    //
+    // for (2), the embedding is via u^56 + u^55 + u^54 + u^53 + u^51 + u^50 + u^48 + u^47 + u^46 + u^44 + u^43 + u^39 + u^37 + u^36 + u^34 + u^30 + u^29 + u^28 + u^23
+    // + u^22 + u^21 + u^20 + u^19 + u^18 + u^17 + u^16 + u^13 + u^12 + u^10 + u^9 + u^7 + u^6 + u^5 + u^4 + u^3 + u + 1
+    // where u is the generator of GF(2^64)
+    // each table entry is embedded already
+    GF2p64(GF4_EXT_EB_TABLE0[a0.as_u8() as usize] ^ GF4_EXT_EB_TABLE1[a1.as_u8() as usize])
+}
+
+/// Embeds a0 + a1 * alpha + a2 * alpha^2 from the degree 4 extension GF(2^4) \[alpha\] / 2* alpha^4 + 2*alpha^2 + 4*alpha + 8
+/// into [GF2p64].
+pub fn embed_gf4p4_deg3(a0: GF4, a1: GF4, a2: GF4) -> GF2p64 {
+    GF2p64(GF4_EXT_EB_TABLE0[a0.as_u8() as usize] ^ GF4_EXT_EB_TABLE1[a1.as_u8() as usize] ^ GF4_EXT_EB_TABLE2[a2.as_u8() as usize])
+}
+
+/// Embeds b0 + b1 * u + b2 * u^2 into [GF2p64]. This is bitsliced by 16.
+pub fn embed_gf2_deg012(dst: &mut[GF2p64], b0: BsBool16, b1: BsBool16, b2: BsBool16) {
+    debug_assert_eq!(dst.len(), 16);
+    for i in 0..16 {
+        let b = ((b0.as_u16() >> i) & 0b1) | ((b1.as_u16() >> i) & 0b1) << 1 | ((b2.as_u16() >> i) & 0b1) << 2;
+        dst[i] = GF2p64(b as u64);
+    }
+}
+
+/// Embeds b0 + b3 * u^3 + b6 * u^6 into [GF2p64]. This is bitsliced by 16.
+pub fn embed_gf2_deg036(dst: &mut [GF2p64], b0: BsBool16, b3: BsBool16, b6: BsBool16) {
+    debug_assert_eq!(dst.len(), 16);
+    for i in 0..16 {
+        let b = ((b0.as_u16() >> i) & 0b1) | ((b3.as_u16() >> i) & 0b1) << 3 | ((b6.as_u16() >> i) & 0b1) << 6;
+        dst[i] = GF2p64(b as u64);
+    }
+}
+
+/// Embeds sum_{i=0}^8 bi * u^i into [GF2p64]. This is bitsliced by 16.
+pub fn embed_gf2_deg8(dst: &mut [GF2p64], b0: BsBool16, b1: BsBool16, b2: BsBool16, b3: BsBool16, b4: BsBool16, b5: BsBool16, b6: BsBool16, b7: BsBool16, b8: BsBool16) {
+    debug_assert_eq!(dst.len(), 16);
+    for i in 0..16 {
+        let b = ((b0.as_u16() >> i) & 0b1) | ((b1.as_u16() >> i) & 0b1) << 1 | ((b2.as_u16() >> i) & 0b1) << 2
+        | ((b3.as_u16() >> i) & 0b1) << 3
+        | ((b4.as_u16() >> i) & 0b1) << 4
+        | ((b5.as_u16() >> i) & 0b1) << 5
+        | ((b6.as_u16() >> i) & 0b1) << 6
+        | ((b7.as_u16() >> i) & 0b1) << 7
+        | ((b8.as_u16() >> i) & 0b1) << 8;
+        dst[i] = GF2p64(b as u64);
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use rand::thread_rng;
+    use crate::rep3_core::{network::NetSerializable, party::RngExt, share::HasZero};
 
     use crate::share::{
-        gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, FieldRngExt, InnerProduct, Invertible,
+        bs_bool16::BsBool16, gf2p64::GF2p64Subfield, gf4::GF4, gf8::GF8, Field, InnerProduct, Invertible
     };
 
     #[cfg(any(
@@ -917,8 +1026,8 @@ mod test {
     #[allow(deprecated)]
     fn test_inner_product() {
         let mut rng = thread_rng();
-        let a: Vec<GF2p64> = rng.generate(29);
-        let b: Vec<GF2p64> = rng.generate(29);
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
         assert_eq!(
             GF2p64::fallback_inner_product(&a, &b),
             GF2p64::inner_product(&a, &b)
@@ -959,8 +1068,8 @@ mod test {
     #[test]
     fn test_fast_mul() {
         let mut rng = thread_rng();
-        let a: Vec<GF2p64> = rng.generate(128);
-        let b: Vec<GF2p64> = rng.generate(128);
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 128);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 128);
         a.into_iter().zip(b).for_each(|(a, b)| {
             assert_eq!(a*b, GF2p64::mul_clmul_u64_fast(&a,&b))
         });
@@ -993,8 +1102,8 @@ mod test {
     #[test]
     fn test_inner_gf2p64_inner_prod_correctness() {
         let mut rng = thread_rng();
-        let a: Vec<GF2p64> = rng.generate(29);
-        let b: Vec<GF2p64> = rng.generate(29);
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
 
         let expected = GF2p64::inner_product(&a, &b);
         let mut actual = GF2p64InnerProd::new();
@@ -1003,5 +1112,37 @@ mod test {
         }
         let actual = actual.sum();
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_extend_from_bit() {
+        let inputs = (0..16).map(|i| BsBool16::new(i as u16)).collect_vec();
+        let mut v = Vec::new();
+        for (i,inp) in inputs.into_iter().enumerate() {
+            GF2p64::extend_from_bit(&mut v, &inp);
+            assert_eq!(v.len(), 16*(i+1));
+            let bits = inp.as_u16();
+            for j in 0..16 {
+                assert_eq!(v[v.len()-16+j], GF2p64::new((bits >> j) & 0x1));
+            }
+        }
+    }
+
+    #[test]
+    fn test_extend_from_bitstring() {
+        // simple case
+
+        fn test(string: &[BsBool16], expected: GF2p64) {
+            let mut v = Vec::new();
+            GF2p64::extend_from_bitstring(&mut v, string, 1);
+            assert_eq!(v.len(), 16);
+            assert_eq!(v[0], expected);
+            for i in 1..16 {
+                assert_eq!(v[i], GF2p64::ZERO);
+            }
+        }
+
+        test(&[BsBool16::new(0b1)], GF2p64::new(1u64));
+        test(&[BsBool16::new(1), BsBool16::new(0), BsBool16::new(1), BsBool16::new(0), BsBool16::new(1), BsBool16::new(1), BsBool16::new(0), BsBool16::new(1)], GF2p64::new(0b10110101u64));
     }
 }

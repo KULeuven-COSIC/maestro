@@ -5,7 +5,7 @@ use ghash::{GHash, universal_hash::{KeyInit, UniversalHash}};
 use rand::{Rng, CryptoRng};
 use sha2::Digest;
 
-use crate::share::{gf8::GF8, Field, FieldDigestExt, FieldRngExt};
+use crate::{rep3_core::{network::NetSerializable, party::{DigestExt, RngExt}, share::HasZero}, share::{gf8::GF8, Field}};
 
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)] //, TransparentWrapper)]
@@ -21,16 +21,20 @@ impl GF128 {
 impl Field for GF128 {
     const NBYTES: usize = 16;
 
-    fn serialized_size(n_elements: usize) -> usize {
-        n_elements * Self::NBYTES
-    }
-
-    const ZERO: Self = GF128([0u8; 16]);
-
     const ONE: Self = GF128([0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
     fn is_zero(&self) -> bool {
         return self.0.iter().all(|x| *x == 0);
+    }
+}
+
+impl HasZero for GF128 {
+    const ZERO: Self = GF128([0u8; 16]);
+}
+
+impl NetSerializable for GF128 {
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements * Self::NBYTES
     }
 
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, len: usize) -> Vec<u8> {
@@ -40,6 +44,14 @@ impl Field for GF128 {
             vec.extend_from_slice(&arr);
         });
         vec
+    }
+
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        let mut res = vec![0u8; Self::serialized_size(elements.len())];
+        res.chunks_exact_mut(Self::NBYTES).zip_eq(elements).for_each(|(dst, gf)| {
+            dst.copy_from_slice(&gf.0);
+        });
+        res
     }
 
     fn from_byte_slice(v: Vec<u8>, dest: &mut [Self]) {
@@ -140,30 +152,24 @@ impl TryFrom<&[u8]> for GF128 {
 
 // unsafe impl TransparentWrapper<[u8; 16]> for GF128 {}
 
-impl<R: Rng + CryptoRng> FieldRngExt<GF128> for R {
-    fn fill(&mut self, buf: &mut [GF128]) {
-        let mut bytes = vec![0u8; 16*buf.len()];
-        self.fill_bytes(&mut bytes);
-        let mut it = bytes.into_iter();
-        for el in buf {
-            for i in 0..16 {
-                el.0[i] = it.next().unwrap();
-            }
+impl RngExt for GF128 {
+    fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
+        for gf in buf {
+            rng.fill_bytes(&mut gf.0);
         }
     }
-    fn generate(&mut self, n: usize) -> Vec<GF128> {
-        (0..n).map(|_| {
-            let mut bytes = [0u8; 16];
-            self.fill_bytes(&mut bytes);
-            GF128(bytes)
-        }).collect()
+
+    fn generate<R: Rng + CryptoRng>(rng: &mut R, n: usize) -> Vec<Self> {
+        let mut v = vec![Self::ZERO; n];
+        Self::fill(rng, &mut v);
+        v
     }
 }
 
-impl<D: Digest> FieldDigestExt<GF128> for D {
-    fn update(&mut self, message: &[GF128]) {
+impl DigestExt for GF128 {
+    fn update<D: Digest>(digest: &mut D, message: &[Self]) {
         for m in message {
-            self.update(m.0);
+            digest.update(m.0);
         }
     }
 }

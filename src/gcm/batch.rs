@@ -2,7 +2,7 @@ use std::{io, iter};
 
 use itertools::{izip, repeat_n, Itertools};
 
-use crate::{aes::{self, AesKeyScheduleBatch, AesKeyState, GF8InvBlackBox, VectorAesState}, gcm::{from_gf128, into_gf128}, party::{error::{MpcError, MpcResult}, ArithmeticBlackBox}, share::{gf8::GF8, Field, RssShare}};
+use crate::{aes::{self, AesKeyScheduleBatch, AesKeyState, GF8InvBlackBox, VectorAesState}, gcm::{from_gf128, into_gf128}, rep3_core::{party::{self, error::{MpcError, MpcResult}}, share::{HasZero, RssShare}}, share::{gf8::GF8, Field}, util::ArithmeticBlackBox};
 
 use super::{gf128::GF128, Aes128GcmCiphertext};
 
@@ -363,7 +363,7 @@ fn into_ghash_input_iter<'a>(party_index: usize, associated_data: &'a [u8], ciph
             let mut arr = [0u8; 16];
             arr[..chunk.len()].copy_from_slice(chunk);
             let ad_block = GF128::from(arr);
-            RssShare::constant(party_index, ad_block)
+            party::constant(party_index, ad_block)
         });
     let ct_len = 8 * ciphertext.len() as u64;
     let ct_iter = ciphertext.chunks(16).into_iter()
@@ -379,7 +379,7 @@ fn into_ghash_input_iter<'a>(party_index: usize, associated_data: &'a [u8], ciph
     let mut last_block = [0u8; 16];
     last_block[0..8].copy_from_slice(&ad_len.to_be_bytes());
     last_block[8..16].copy_from_slice(&ct_len.to_be_bytes());
-    let last_block = RssShare::constant(party_index, GF128::from(last_block));
+    let last_block = party::constant(party_index, GF128::from(last_block));
     ad_iter.chain(ct_iter).chain(iter::once(last_block))
 }
 
@@ -389,7 +389,7 @@ pub mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
 
-    use crate::{aes::{self, AesKeyState}, chida::{online::test::ChidaSetupSimple, ChidaBenchmarkParty}, gcm::{batch::{batch_aes128_gcm_decrypt_with_ks, batch_aes128_gcm_encrypt_with_ks, DecParam, DecParamOwned, EncParam, EncParamOwned}, test::{get_test_vectors, AesGcm128Testvector}}, party::test::TestSetup, share::{gf8::GF8, test::{assert_eq_vector, consistent_vector, secret_share_vector}}};
+    use crate::{aes::{self, AesKeyState}, chida::{online::test::ChidaSetupSimple, ChidaBenchmarkParty}, gcm::{batch::{batch_aes128_gcm_decrypt_with_ks, batch_aes128_gcm_encrypt_with_ks, DecParam, DecParamOwned, EncParam, EncParamOwned}, test::{get_test_vectors, AesGcm128Testvector}}, rep3_core::test::TestSetup, share::{gf8::GF8, test::{assert_eq_vector, consistent_vector, secret_share_vector}}};
 
     #[test]
     fn batch_aes_gcm_128_encrypt_with_ks_test_vectors() {

@@ -10,14 +10,9 @@
 //!
 //! [^note]: Araki et al. "High-Throughput Semi-Honest Secure Three-Party Computation with an Honest Majority" in CCS'16 (<https://eprint.iacr.org/2016/768>).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::aes::{self};
-
-use crate::benchmark::{BenchmarkProtocol, BenchmarkResult};
-use crate::network::ConnectedParty;
-use crate::party::error::MpcResult;
-use crate::party::{CombinedCommStats, MainParty};
+use crate::{aes::{self}, rep3_core::{network::ConnectedParty, party::{error::MpcResult, MainParty}}};
 
 pub mod online;
 
@@ -31,8 +26,8 @@ pub enum ImplVariant {
 pub struct ChidaParty(MainParty);
 
 impl ChidaParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        MainParty::setup(connected, n_worker_threads).map(Self)
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        MainParty::setup(connected, n_worker_threads, prot_str).map(Self)
     }
 
     pub fn party_index(&self) -> usize {
@@ -74,92 +69,11 @@ impl ChidaBenchmarkParty {
         connected: ConnectedParty,
         variant: ImplVariant,
         n_worker_threads: Option<usize>,
+        prot_str: Option<String>
     ) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(|party| Self {
+        ChidaParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
             variant,
         })
-    }
-
-    pub fn party_index(&self) -> usize {
-        self.inner.party_index()
-    }
-}
-
-// simd: how many parallel AES calls
-pub fn chida_benchmark(
-    connected: ConnectedParty,
-    simd: usize,
-    variant: ImplVariant,
-    n_worker_threads: Option<usize>,
-) {
-    let mut party = ChidaBenchmarkParty::setup(connected, variant, n_worker_threads).unwrap();
-    let setup_comm_stats = party.inner.0.io().reset_comm_stats();
-    let input = aes::random_state(party.inner.as_party_mut(), simd);
-    // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(party.inner.as_party_mut());
-
-    let start = Instant::now();
-    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-    let duration = start.elapsed();
-    let online_comm_stats = party.inner.0.io().reset_comm_stats();
-    let _ = aes::output(&mut party.inner, output).unwrap();
-    party.inner.0.teardown().unwrap();
-
-    println!("Finished benchmark");
-
-    println!(
-        "Party {}: Chida et al. with SIMD={} took {}s",
-        party.inner.0.i,
-        simd,
-        duration.as_secs_f64()
-    );
-
-    println!("Setup:");
-    setup_comm_stats.print_comm_statistics(party.inner.party_index());
-    println!("Pre-Processing:");
-    CombinedCommStats::empty().print_comm_statistics(party.inner.party_index());
-    println!("Online Phase:");
-    online_comm_stats.print_comm_statistics(party.inner.party_index());
-    party.inner.print_statistics();
-}
-
-pub struct ChidaBenchmark;
-
-impl BenchmarkProtocol for ChidaBenchmark {
-    fn protocol_name(&self) -> String {
-        "chida".to_string()
-    }
-    fn run(
-        &self,
-        conn: ConnectedParty,
-        simd: usize,
-        n_worker_threads: Option<usize>,
-    ) -> BenchmarkResult {
-        let mut party =
-            ChidaBenchmarkParty::setup(conn, ImplVariant::Optimized, n_worker_threads).unwrap();
-        let _setup_comm_stats = party.inner.0.io().reset_comm_stats();
-        let input = aes::random_state(party.inner.as_party_mut(), simd);
-        // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(party.inner.as_party_mut());
-        println!("After setup");
-
-        let start = Instant::now();
-        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-        let duration = start.elapsed();
-        println!("After online");
-        let online_comm_stats = party.inner.0.io().reset_comm_stats();
-        let _ = aes::output(&mut party.inner, output).unwrap();
-        println!("After output");
-        party.inner.0.teardown().unwrap();
-        println!("After teardown");
-
-        BenchmarkResult::new(
-            Duration::from_secs(0),
-            duration,
-            CombinedCommStats::empty(),
-            online_comm_stats,
-            party.inner.0.get_additional_timers(),
-        )
     }
 }

@@ -9,43 +9,33 @@
 //!
 //! This protocol does not require any pre-processing.
 //!
-//! This module notably contains
-//!   - [gf4_circuit_benchmark] that implements the AES benchmark
-//!   - [GF4CircuitSemihonestParty] the party wrapper for the protocol. [GF4CircuitSemihonestParty] also implements [ArithmeticBlackBox]
+//! This module notably contains [GF4CircuitSemihonestParty]: the party wrapper for the protocol. [GF4CircuitSemihonestParty] also implements [ArithmeticBlackBox]
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 
-use std::time::{Duration, Instant};
 
 use itertools::{izip, Itertools};
-use rand_chacha::ChaCha20Rng;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use sha2::Sha256;
+use crate::{rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 
 use crate::{
-    aes::{self, GF8InvBlackBox},
-    benchmark::{BenchmarkProtocol, BenchmarkResult},
-    chida::{self, ChidaParty},
-    network::{task::IoLayerOwned, ConnectedParty},
-    party::{error::MpcResult, ArithmeticBlackBox, CombinedCommStats, MainParty, MulTripleRecorder, NoMulTripleRecording, Party},
-    share::{
+    aes::GF8InvBlackBox, chida::{self, ChidaParty}, share::{
         gf4::{BsGF4, GF4},
         gf8::GF8,
         wol::{wol_inv_map, wol_map},
-        Field, FieldDigestExt, FieldRngExt, RssShare, RssShareVec,
-    },
-    wollut16::online::{un_wol_bitslice_gf4, wol_bitslice_gf4},
+        Field,
+    }, util::{mul_triple_vec::{MulTripleRecorder, NoMulTripleRecording}, ArithmeticBlackBox}
 };
 
 /// The party wrapper for the GF4 circuit protocol.
 pub struct GF4CircuitSemihonestParty(ChidaParty);
 
 impl GF4CircuitSemihonestParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>) -> MpcResult<Self> {
-        ChidaParty::setup(connected, n_worker_threads).map(Self)
+    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>) -> MpcResult<Self> {
+        ChidaParty::setup(connected, n_worker_threads, prot_str).map(Self)
     }
 
     fn io(&self) -> &IoLayerOwned {
@@ -53,102 +43,14 @@ impl GF4CircuitSemihonestParty {
     }
 }
 
-/// This function implements the AES benchmark.
-///
-/// The arguments are
-/// - `connected` - the local party
-/// - `simd` - number of parallel AES calls
-/// - `n_worker_threads` - number of worker threads
-pub fn gf4_circuit_benchmark(
-    connected: ConnectedParty,
-    simd: usize,
-    n_worker_threads: Option<usize>,
-) {
-    let mut party = GF4CircuitSemihonestParty::setup(connected, n_worker_threads).unwrap();
-    let setup_comm_stats = party.io().reset_comm_stats();
-
-    let input = aes::random_state(party.0.as_party_mut(), simd);
-    // create random key states for benchmarking purposes
-    let ks = aes::random_keyschedule(party.0.as_party_mut());
-
-    let start = Instant::now();
-    let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-    let duration = start.elapsed();
-    let online_comm_stats = party.io().reset_comm_stats();
-    let _ = aes::output(&mut party.0, output).unwrap();
-    party.0.teardown().unwrap();
-
-    println!("Finished benchmark");
-
-    println!(
-        "Party {}: GF(2^4) circuit with SIMD={} took {}s",
-        party.0.party_index(),
-        simd,
-        duration.as_secs_f64()
-    );
-    println!("Setup:");
-    setup_comm_stats.print_comm_statistics(party.0.party_index());
-    println!("Pre-Processing:");
-    CombinedCommStats::empty().print_comm_statistics(party.0.party_index());
-    println!("Online Phase:");
-    online_comm_stats.print_comm_statistics(party.0.party_index());
-    party.0.print_statistics();
-}
-
-pub struct GF4CircuitBenchmark;
-
-impl BenchmarkProtocol for GF4CircuitBenchmark {
-    fn protocol_name(&self) -> String {
-        "gf4-circuit".to_string()
-    }
-    fn run(
-        &self,
-        conn: ConnectedParty,
-        simd: usize,
-        n_worker_threads: Option<usize>,
-    ) -> BenchmarkResult {
-        let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads).unwrap();
-        let _setup_comm_stats = party.io().reset_comm_stats();
-        println!("After setup");
-
-        let input = aes::random_state(party.0.as_party_mut(), simd);
-        // create random key states for benchmarking purposes
-        let ks = aes::random_keyschedule(party.0.as_party_mut());
-
-        let start = Instant::now();
-        let output = aes::aes128_no_keyschedule(&mut party, input, &ks).unwrap();
-        let duration = start.elapsed();
-        println!("After online");
-        let online_comm_stats = party.io().reset_comm_stats();
-        let _ = aes::output(&mut party.0, output).unwrap();
-        println!("After output");
-        party.0.teardown().unwrap();
-        println!("After teardown");
-
-        BenchmarkResult::new(
-            Duration::from_secs(0),
-            duration,
-            CombinedCommStats::empty(),
-            online_comm_stats,
-            party.0.get_additional_timers(),
-        )
-    }
-}
-
-impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty
-where
-    ChaCha20Rng: FieldRngExt<F>,
-    Sha256: FieldDigestExt<F>,
-{
-    type Rng = ChaCha20Rng;
-    type Digest = Sha256;
+impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty {
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.0.pre_processing(n_multiplications)
+        <ChidaParty as ArithmeticBlackBox<F>>::pre_processing(&mut self.0, n_multiplications)
     }
 
     fn io(&self) -> &IoLayerOwned {
-        self.0.io()
+        <ChidaParty as ArithmeticBlackBox<F>>::io(&self.0)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -159,7 +61,7 @@ where
         self.0.generate_random(n)
     }
 
-    fn generate_alpha(&mut self, n: usize) -> Vec<F> {
+    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=F> {
         self.0.generate_alpha(n)
     }
 
@@ -187,12 +89,12 @@ where
         self.0.output_round(si, sii)
     }
 
-    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
-        self.0.output_to(to_p1, to_p2, to_p3)
-    }
+    // fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+    //     self.0.output_to(to_p1, to_p2, to_p3)
+    // }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        self.0.finalize()
+        <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.0)
     }
 }
 
@@ -210,6 +112,9 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
         } else {
             gf8_inv_via_gf4_mul_opt(self.0.as_party_mut(), &mut NoMulTripleRecording, si, sii)
         }
+    }
+    fn main_party_mut(&mut self) -> &mut MainParty {
+        self.0.as_party_mut()
     }
 }
 
@@ -437,42 +342,38 @@ fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
 
 #[cfg(test)]
 mod test {
-    use std::thread::JoinHandle;
+    use crate::rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
 
-    use crate::{
-        aes::test::{
+    use crate::aes::test::{
             test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
             test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
-        },
-        network::ConnectedParty,
-        party::test::{localhost_connect, TestSetup},
-    };
+        };
 
     use super::GF4CircuitSemihonestParty;
 
     pub fn localhost_setup_gf4_circuit_semi_honest<
-        T1: Send + 'static,
-        F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static,
-        T2: Send + 'static,
-        F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static,
-        T3: Send + 'static,
-        F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static,
+        T1: Send,
+        F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1,
+        T2: Send,
+        F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2,
+        T3: Send,
+        F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3,
     >(
         f1: F1,
         f2: F2,
         f3: F3,
         n_worker_threads: Option<usize>,
     ) -> (
-        JoinHandle<(T1, GF4CircuitSemihonestParty)>,
-        JoinHandle<(T2, GF4CircuitSemihonestParty)>,
-        JoinHandle<(T3, GF4CircuitSemihonestParty)>,
+        (T1, GF4CircuitSemihonestParty),
+        (T2, GF4CircuitSemihonestParty),
+        (T3, GF4CircuitSemihonestParty),
     ) {
         fn adapter<T, Fx: FnOnce(&mut GF4CircuitSemihonestParty) -> T>(
             conn: ConnectedParty,
             f: Fx,
             n_worker_threads: Option<usize>,
         ) -> (T, GF4CircuitSemihonestParty) {
-            let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads).unwrap();
+            let mut party = GF4CircuitSemihonestParty::setup(conn, n_worker_threads, None).unwrap();
             let t = f(&mut party);
             party.0.teardown().unwrap();
             (t, party)
@@ -487,39 +388,39 @@ mod test {
     pub struct GF4SemihonestSetup;
     impl TestSetup<GF4CircuitSemihonestParty> for GF4SemihonestSetup {
         fn localhost_setup<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3,
         >(
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            std::thread::JoinHandle<(T1, GF4CircuitSemihonestParty)>,
-            std::thread::JoinHandle<(T2, GF4CircuitSemihonestParty)>,
-            std::thread::JoinHandle<(T3, GF4CircuitSemihonestParty)>,
+            (T1, GF4CircuitSemihonestParty),
+            (T2, GF4CircuitSemihonestParty),
+            (T3, GF4CircuitSemihonestParty),
         ) {
             localhost_setup_gf4_circuit_semi_honest(f1, f2, f3, None)
         }
         fn localhost_setup_multithreads<
-            T1: Send + 'static,
-            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1 + 'static,
-            T2: Send + 'static,
-            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2 + 'static,
-            T3: Send + 'static,
-            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3 + 'static,
+            T1: Send,
+            F1: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T1,
+            T2: Send,
+            F2: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T2,
+            T3: Send,
+            F3: Send + FnOnce(&mut GF4CircuitSemihonestParty) -> T3,
         >(
             n_threads: usize,
             f1: F1,
             f2: F2,
             f3: F3,
         ) -> (
-            JoinHandle<(T1, GF4CircuitSemihonestParty)>,
-            JoinHandle<(T2, GF4CircuitSemihonestParty)>,
-            JoinHandle<(T3, GF4CircuitSemihonestParty)>,
+            (T1, GF4CircuitSemihonestParty),
+            (T2, GF4CircuitSemihonestParty),
+            (T3, GF4CircuitSemihonestParty),
         ) {
             localhost_setup_gf4_circuit_semi_honest(f1, f2, f3, Some(n_threads))
         }

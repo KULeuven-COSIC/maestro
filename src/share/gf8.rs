@@ -6,14 +6,18 @@
 //! Multiplication is implemented using lookup tables.
 
 use crate::share::gf8_tables;
-use crate::share::{Field, FieldDigestExt, FieldRngExt};
+use crate::share::Field;
 use rand::{CryptoRng, Rng};
+use crate::rep3_core::network::NetSerializable;
+use crate::rep3_core::party::DigestExt;
+use crate::rep3_core::party::RngExt;
+use crate::rep3_core::share::HasZero;
 use sha2::Digest;
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
-/// An element of `GF(2^8) := GF(2)[X] / `.
+/// An element of `GF(2^8) := GF(2)[X] / X^8 + X^4 + X^3 + X + 1`.
 ///
 /// An element is represented as a single byte.
 #[derive(Copy, Clone, Default, PartialEq)]
@@ -62,20 +66,28 @@ impl GF8 {
 impl Field for GF8 {
     const NBYTES: usize = 1;
 
-    const ZERO: Self = Self(0u8);
-
     const ONE: Self = Self(1u8);
-
-    fn serialized_size(n_elements: usize) -> usize {
-        n_elements
-    }
 
     fn is_zero(&self) -> bool {
         self.0 == 0
     }
+}
+
+impl HasZero for GF8 {
+    const ZERO: Self = Self(0u8);
+}
+
+impl NetSerializable for GF8 {
+    fn serialized_size(n_elements: usize) -> usize {
+        n_elements
+    }
 
     fn as_byte_vec(it: impl IntoIterator<Item = impl Borrow<Self>>, _len: usize) -> Vec<u8> {
         it.into_iter().map(|gf| gf.borrow().0).collect()
+    }
+
+    fn as_byte_vec_slice(elements: &[Self]) -> Vec<u8> {
+        elements.iter().map(|x| x.0).collect()
     }
 
     fn from_byte_vec(v: Vec<u8>, _len: usize) -> Vec<Self> {
@@ -214,26 +226,26 @@ impl Mul for GF8 {
     }
 }
 
-impl<R: Rng + CryptoRng> FieldRngExt<GF8> for R {
-    fn generate(&mut self, n: usize) -> Vec<GF8> {
+impl RngExt for GF8 {
+    fn fill<R: Rng + CryptoRng>(rng: &mut R, buf: &mut [Self]) {
+        let mut v = vec![0u8; buf.len()];
+        rng.fill_bytes(&mut v);
+        buf.iter_mut().zip(v).for_each(|(x, r)| x.0 = r)
+    }
+
+    fn generate<R: Rng + CryptoRng>(rng: &mut R, n: usize) -> Vec<Self> {
         let mut r = vec![0; n];
         // r.fill(0);
         // debug_assert_eq!(r.len(), n);
-        self.fill_bytes(&mut r);
+        rng.fill_bytes(&mut r);
         r.into_iter().map(GF8).collect()
-    }
-
-    fn fill(&mut self, buf: &mut [GF8]) {
-        let mut v = vec![0u8; buf.len()];
-        self.fill_bytes(&mut v);
-        buf.iter_mut().zip(v).for_each(|(x, r)| x.0 = r)
     }
 }
 
-impl<D: Digest> FieldDigestExt<GF8> for D {
-    fn update(&mut self, message: &[GF8]) {
+impl DigestExt for GF8 {
+    fn update<D: Digest>(digest: &mut D, message: &[GF8]) {
         for x in message {
-            self.update([x.0]);
+            digest.update([x.0]);
         }
     }
 }
