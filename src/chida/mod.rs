@@ -76,4 +76,8 @@ impl ChidaBenchmarkParty {
             variant,
         })
     }
+
+    pub fn party_index(&self) -> usize {
+        self.inner.party_index()
+    }
 }

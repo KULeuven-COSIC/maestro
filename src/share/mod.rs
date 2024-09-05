@@ -110,6 +110,7 @@ pub mod test {
     use crate::rep3_core::share::{RssShare, RssShareVec};
     use std::borrow::Borrow;
     use std::fmt::Debug;
+    use itertools::Itertools;
 
     use super::Field;
 
@@ -153,7 +154,7 @@ pub mod test {
         }
     }
 
-    pub fn assert_eq_vector<F: Field>(share1: impl IntoIterator<Item=RssShare<F>>, share2: impl IntoIterator<Item=RssShare<F>>, share3: impl IntoIterator<Item=RssShare<F>>, values: impl IntoIterator<Item=F>) {
+    pub fn assert_eq_vector<F: Field + Debug>(share1: impl IntoIterator<Item=RssShare<F>>, share2: impl IntoIterator<Item=RssShare<F>>, share3: impl IntoIterator<Item=RssShare<F>>, values: impl IntoIterator<Item=F>) {
         for (s1, (s2, (s3, v))) in share1.into_iter().zip_eq(share2.into_iter().zip_eq(share3.into_iter().zip_eq(values))) {
             assert_eq(s1, s2, s3, v);
         }

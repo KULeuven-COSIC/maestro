@@ -50,7 +50,7 @@ pub trait Broadcast {
         to: usize,
     ) -> MpcResult<Option<Vec<T>>>;
 
-    fn open_rss_to_multiple<T: NetSerializable + DigestExt>(&mut self, context: &mut BroadcastContext, to_p1: &[RssShare<T>], to_p2: &[RssShare<T>], to_p3: &[RssShare<T>]) -> MpcResult<Vec<T>>;
+    fn open_rss_to_multiple<T: NetSerializable + Add<Output=T> + Clone + DigestExt>(&mut self, context: &mut BroadcastContext, to_p1: &[RssShare<T>], to_p2: &[RssShare<T>], to_p3: &[RssShare<T>]) -> MpcResult<Vec<T>>;
 }
 
 impl Default for BroadcastContext {
@@ -221,7 +221,7 @@ impl Broadcast for MainParty {
         }
     }
 
-    fn open_rss_to_multiple<T: NetSerializable>(&mut self, context: &mut BroadcastContext, to_p1: &[RssShare<T>], to_p2: &[RssShare<T>], to_p3: &[RssShare<T>]) -> MpcResult<Vec<T>>
+    fn open_rss_to_multiple<T: NetSerializable + Add<Output=T> + Clone + DigestExt>(&mut self, context: &mut BroadcastContext, to_p1: &[RssShare<T>], to_p2: &[RssShare<T>], to_p3: &[RssShare<T>]) -> MpcResult<Vec<T>>
     {
         let res1 = self.open_rss_to(context, to_p1, 0)?;
         let res2 = self.open_rss_to(context, to_p2, 1)?;

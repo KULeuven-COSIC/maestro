@@ -210,10 +210,10 @@ pub fn batch_aes128_gcm_decrypt_with_ks<'a, Protocol: ArithmeticBlackBox<GF128> 
         let mut ghash_mask = Vec::with_capacity(16);
         ghash_mask.extend_from_slice(&counter_output[byte_index+16..byte_index+32]);
         let ghash_mask = into_gf128(ghash_mask).unwrap(); // unwrap is safe since ghash_mask has length 16
-        let tag = RssShare::constant(party_index, GF128::try_from(batch.tag).unwrap());
+        let tag = ArithmeticBlackBox::<GF128>::constant(party, GF128::try_from(batch.tag).unwrap());
         tags.push(ghash_mask + tag);
 
-        ciphertext.extend(batch.message.iter().map(|b| RssShare::constant(party_index, GF8(*b))));
+        ciphertext.extend(batch.message.iter().map(|b| GF8InvBlackBox::constant(party, GF8(*b))));
 
         let current_ct = &ciphertext[ciphertext.len()-batch.message.len()..];
         let message: Vec<_> = counter_output.iter().skip(byte_index+32).zip(current_ct) // zip will stop when the (incomplete) last block ends
@@ -464,10 +464,7 @@ pub mod test {
             }
         };
 
-        let (r1, r2, r3) = ChidaSetupSimple::localhost_setup(program(enc_params1), program(enc_params2), program(enc_params3));
-        let (res1, _) = r1.join().unwrap();
-        let (res2, _) = r2.join().unwrap();
-        let (res3, _) = r3.join().unwrap();
+        let ((res1, _), (res2, _), (res3, _)) = ChidaSetupSimple::localhost_setup(program(enc_params1), program(enc_params2), program(enc_params3));
 
         assert_eq!(res1.len(), test_vectors.len());
         assert_eq!(res2.len(), test_vectors.len());
@@ -561,10 +558,7 @@ pub mod test {
             }
         };
 
-        let (r1, r2, r3) = ChidaSetupSimple::localhost_setup(program(dec_params1), program(dec_params2), program(dec_params3));
-        let (res1, _) = r1.join().unwrap();
-        let (res2, _) = r2.join().unwrap();
-        let (res3, _) = r3.join().unwrap();
+        let ((res1, _), (res2, _), (res3, _)) = ChidaSetupSimple::localhost_setup(program(dec_params1), program(dec_params2), program(dec_params3));
 
         assert_eq!(res1.len(), test_vectors.len());
         assert_eq!(res2.len(), test_vectors.len());

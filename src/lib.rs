@@ -10,6 +10,7 @@ pub mod share;
 pub mod wollut16;
 pub mod wollut16_malsec;
 pub mod gf4_circuit_malsec;
+#[macro_use]
 pub mod util;
 pub mod rep3_core;
 pub mod conversion;

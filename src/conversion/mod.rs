@@ -9,7 +9,7 @@ use crate::{rep3_core::{network::NetSerializable, party::{error::MpcResult, Dige
 // a bit-wise xor shared ring element mod 2^64
 // encoded as little endian
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Z64Bool(u64);
+pub struct Z64Bool(pub u64);
 
 impl Field for Z64Bool {
     const NBYTES: usize = 8;
@@ -317,9 +317,9 @@ fn ripple_carry_adder<Protocol: ArithmeticBlackBox<Z64Bool>>(party: &mut Protoco
 pub mod test {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, CryptoRng, Rng};
-    use crate::rep3_core::share::RssShare;
+    use crate::rep3_core::party::RngExt;
+    use crate::rep3_core::share::{HasZero, RssShare};
     use crate::rep3_core::test::TestSetup;
-    use crate::share::Field;
     use crate::util::ArithmeticBlackBox;
     use crate::{chida::online::test::ChidaSetup, conversion::{convert_boolean_to_ring, convert_ring_to_boolean, ripple_carry_adder}, share::{gf8::GF8, test::{consistent_vector, secret_share_vector}}};
 
@@ -331,7 +331,7 @@ pub mod test {
         let mut rng = thread_rng();
         let mut slices = (0..64).map(|_| Vec::<Z64Bool>::new()).collect_vec();
         for n in vec![1, 5, 64, 100, 128, 196, 200] {
-            let el: Vec<Z64Bool> = rng.generate(n);
+            let el: Vec<Z64Bool> = Z64Bool::generate(&mut rng, n);
             // bit-slice
             for (i, slice) in slices.iter_mut().enumerate() {
                 bit_slice(slice, &el, i);
@@ -367,10 +367,7 @@ pub mod test {
             }
         };
 
-        let (h1, h2, h3) = S::localhost_setup(program(a_shares.0, b_shares.0), program(a_shares.1, b_shares.1), program(a_shares.2, b_shares.2));
-        let (res1, _) = h1.join().unwrap();
-        let (res2, _) = h2.join().unwrap();
-        let (res3, _) = h3.join().unwrap();
+        let ((res1, _), (res2, _), (res3, _)) = S::localhost_setup(program(a_shares.0, b_shares.0), program(a_shares.1, b_shares.1), program(a_shares.2, b_shares.2));
 
         let res1 = res1.0.into_iter().zip_eq(res1.1).map(|(si, sii)| RssShare::from(si, sii)).collect_vec();
         let res2 = res2.0.into_iter().zip_eq(res2.1).map(|(si, sii)| RssShare::from(si, sii)).collect_vec();
@@ -418,10 +415,7 @@ pub mod test {
                 convert_boolean_to_ring(p, i, share.into_iter()).unwrap()
             }
         };
-        let (h1, h2, h3) = S::localhost_setup(program(shares.0, 0), program(shares.1, 1), program(shares.2, 2));
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
+        let ((r1, _), (r2, _), (r3, _)) = S::localhost_setup(program(shares.0, 0), program(shares.1, 1), program(shares.2, 2));
 
         assert_eq!(a.len(), r1.0.len());
         consistent_u64(&r1.0, &r1.1, &r2.0, &r2.1, &r3.0, &r3.1);
@@ -454,10 +448,7 @@ pub mod test {
                 convert_ring_to_boolean(p, i,&share_i, &share_ii).unwrap()
             }
         };
-        let (h1,h2,h3) = S::localhost_setup(program(shares.0.clone(), shares.1.clone(), 0), program(shares.1, shares.2.clone(), 1), program(shares.2, shares.0, 2));
-        let (b1, _) = h1.join().unwrap();
-        let (b2, _) = h2.join().unwrap();
-        let (b3, _) = h3.join().unwrap();
+        let ((b1, _), (b2, _), (b3, _)) = S::localhost_setup(program(shares.0.clone(), shares.1.clone(), 0), program(shares.1, shares.2.clone(), 1), program(shares.2, shares.0, 2));
 
         assert_eq!(8*a.len(), b1.len());
         assert_eq!(8*a.len(), b2.len());

@@ -643,7 +643,7 @@ pub mod test_export {
 
     pub(crate) fn create_certificates() -> (KeyPair, KeyPair, KeyPair) {
         fn key_path(filename: &str) -> PathBuf {
-            let mut p = PathBuf::from("../");
+            let mut p = PathBuf::from("./");
             p.push(TEST_KEY_DIR);
             p.push(filename);
             return p;
@@ -651,7 +651,7 @@ pub mod test_export {
 
         fn load_key(name: &str) -> PrivateKeyDer<'static> {
             let mut reader =
-                BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
+                BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", key_path(name).display())));
             let key = rustls_pemfile::private_key(&mut reader)
                 .expect(&format!("Cannot read private key in {}", name))
                 .expect(&format!("No private key in {}", name));
@@ -660,9 +660,9 @@ pub mod test_export {
 
         fn load_cert(name: &str) -> CertificateDer<'static> {
             let mut reader =
-                BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", name)));
+                BufReader::new(File::open(key_path(name)).expect(&format!("Cannot open {}", key_path(name).display())));
             let cert: Vec<_> = rustls_pemfile::certs(&mut reader)
-                .map(|r| r.expect(&format!("Cannot read certificate in {}", name)))
+                .map(|r| r.expect(&format!("Cannot read certificate in {}", key_path(name).display())))
                 .collect();
             assert_eq!(cert.len(), 1);
             let cert = cert[0].clone();
@@ -933,7 +933,7 @@ pub mod test {
     use std::thread;
 
     use super::error::MpcError;
-    use super::test_export::{localhost_connect};
+    use super::test_export::localhost_connect;
     use super::{DigestExt, RngExt};
 
     /// Dummy test implementation for Z / 256Z

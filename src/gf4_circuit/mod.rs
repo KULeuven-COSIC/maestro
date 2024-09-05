@@ -89,9 +89,9 @@ impl<F: Field> ArithmeticBlackBox<F> for GF4CircuitSemihonestParty {
         self.0.output_round(si, sii)
     }
 
-    // fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
-    //     self.0.output_to(to_p1, to_p2, to_p3)
-    // }
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+        self.0.output_to(to_p1, to_p2, to_p3)
+    }
 
     fn finalize(&mut self) -> MpcResult<()> {
         <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.0)

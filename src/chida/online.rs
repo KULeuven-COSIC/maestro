@@ -66,9 +66,9 @@ impl<F: Field> ArithmeticBlackBox<F> for ChidaParty {
         output_round(&mut self.0, &rss, &rss, &rss)
     }
 
-    // fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
-    //     output_round(&mut self.0, to_p1, to_p2, to_p3)
-    // }
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+        output_round(&mut self.0, to_p1, to_p2, to_p3)
+    }
 
     fn finalize(&mut self) -> MpcResult<()> {
         // nothing to do
@@ -146,9 +146,9 @@ impl<F: Field> ArithmeticBlackBox<F> for ChidaBenchmarkParty {
         self.inner.output_round(si, sii)
     }
 
-    // fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
-    //     self.inner.output_to(to_p1, to_p2, to_p3)
-    // }
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>> {
+        self.inner.output_to(to_p1, to_p2, to_p3)
+    }
 
     fn finalize(&mut self) -> MpcResult<()> {
         <ChidaParty as ArithmeticBlackBox<F>>::finalize(&mut self.inner)

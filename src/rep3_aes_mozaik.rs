@@ -1,13 +1,17 @@
 #![allow(dead_code)]
-mod share;
-mod party;
-mod network;
+pub mod aes;
 mod gcm;
-mod chida;
+pub mod chida;
+pub mod furukawa;
+pub mod gf4_circuit;
+pub mod lut256;
+pub mod share;
+pub mod wollut16;
+pub mod wollut16_malsec;
+pub mod gf4_circuit_malsec;
+pub mod util;
+pub mod rep3_core;
 mod conversion;
-mod aes;
-mod furukawa;
-mod benchmark;
 
 use core::slice;
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
@@ -19,10 +23,11 @@ use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
 use furukawa::FurukawaGCMParty;
 use gcm::{batch::{batch_aes128_gcm_decrypt_with_ks, batch_aes128_gcm_encrypt_with_ks, DecParam, EncParam}, gf128::GF128, Aes128GcmCiphertext, RequiredPrepAesGcm128};
 use itertools::{izip, repeat_n, Itertools};
-use network::{Config, ConnectedParty};
-use party::{error::{MpcError, MpcResult}, ArithmeticBlackBox};
+use rep3_core::{network::{Config, ConnectedParty}, share::{HasZero, RssShare}};
+use rep3_core::party::error::{MpcError, MpcResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use share::{gf8::GF8, Field, RssShare};
+use share::gf8::GF8;
+use util::ArithmeticBlackBox;
 
 #[derive(Debug)]
 enum Rep3AesError {
@@ -513,7 +518,7 @@ fn batch_mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<G
     drop(key_share);
 
     let mut pt_lens = Vec::with_capacity(plaintexts.len());
-    let zero = RssShare::constant(party_index, GF8::ZERO);
+    let zero = GF8InvBlackBox::constant(party, GF8::ZERO);
     let pt_flat = plaintexts.into_iter().flat_map(|decrypt_res| {
         match decrypt_res {
             Some(pt) => {
@@ -561,7 +566,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
                         let party_index = connected.i;
                         if cli.active {
-                            let mut party = FurukawaGCMParty::setup(connected, cli.threads)?;
+                            let mut party = FurukawaGCMParty::setup(connected, cli.threads, None)?;
                             if encrypt_args.len() == 1 {
                                 let encrypt_args = encrypt_args.into_iter().next().unwrap();
                                 let res = aes_gcm_128_enc(&mut party, party_index, encrypt_args);
@@ -571,7 +576,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                                 batch_aes_gcm_128_enc(&mut party, party_index, encrypt_args)
                             }
                         }else{
-                            let mut party = ChidaBenchmarkParty::setup(connected, chida::ImplVariant::Simple, cli.threads)?;
+                            let mut party = ChidaBenchmarkParty::setup(connected, chida::ImplVariant::Simple, cli.threads, None)?;
                             if encrypt_args.len() == 1 {
                                 let encrypt_args = encrypt_args.into_iter().next().unwrap();
                                 let res = aes_gcm_128_enc(&mut party, party_index, encrypt_args);
@@ -593,7 +598,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
                         let party_index = connected.i;
                         if cli.active {
-                            let mut party = FurukawaGCMParty::setup(connected, cli.threads)?;
+                            let mut party = FurukawaGCMParty::setup(connected, cli.threads, None)?;
                             if decrypt_args.len() == 1 {
                                 let decrypt_args = decrypt_args.into_iter().next().unwrap();
                                 let res = mozaik_decrypt(&mut party, party_index, decrypt_args);
@@ -603,7 +608,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                                 batch_mozaik_decrypt(&mut party, party_index, decrypt_args)
                             }
                         }else{
-                            let mut party = ChidaBenchmarkParty::setup(connected, ImplVariant::Optimized, cli.threads)?;
+                            let mut party = ChidaBenchmarkParty::setup(connected, ImplVariant::Optimized, cli.threads, None)?;
                             if decrypt_args.len() == 1 {
                                 let decrypt_args = decrypt_args.into_iter().next().unwrap();
                                 let res = mozaik_decrypt(&mut party, party_index, decrypt_args);
@@ -635,7 +640,7 @@ mod rep3_aes_main_test {
     use itertools::{izip, Itertools};
     use rand::thread_rng;
 
-    use crate::{aes, conversion::test::secret_share_vector_ring, execute_command, gcm, share::{gf8::GF8, test::secret_share_vector, RssShare}, Cli, Commands, DecryptResult, EncryptResult, Mode};
+    use crate::{aes, conversion::test::secret_share_vector_ring, execute_command, gcm, rep3_core::share::RssShare, share::{gf8::GF8, test::secret_share_vector}, Cli, Commands, DecryptResult, EncryptResult, Mode};
 
 
     const KEY_SHARE_1: &str = "76c2488bd101fd2999a922d351707fcf";

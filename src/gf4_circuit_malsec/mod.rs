@@ -111,9 +111,9 @@ impl ArithmeticBlackBox<GF8> for GF4CircuitASParty {
         self.inner.open_rss(&mut self.broadcast_context, si, sii)
     }
 
-    // fn output_to(&mut self, to_p1: &[RssShare<GF8>], to_p2: &[RssShare<GF8>], to_p3: &[RssShare<GF8>]) -> MpcResult<Vec<GF8>> {
-    //     self.inner.open_rss_to_multiple(&mut self.broadcast_context, to_p1, to_p2, to_p3)
-    // }
+    fn output_to(&mut self, to_p1: &[RssShare<GF8>], to_p2: &[RssShare<GF8>], to_p3: &[RssShare<GF8>]) -> MpcResult<Vec<GF8>> {
+        self.inner.open_rss_to_multiple(&mut self.broadcast_context, to_p1, to_p2, to_p3)
+    }
 
     fn finalize(&mut self) -> MpcResult<()> {
         self.verify_multiplications()?;

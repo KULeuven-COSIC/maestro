@@ -14,6 +14,7 @@ pub mod util;
 pub mod rep3_core;
 #[macro_use]
 pub mod benchmark;
+mod conversion;
 
 use crate::benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::GF4CircuitASBenchmark, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16BitStringBenchmark, MalLUT16OhvBenchmark}};
 use crate::benchmark::gf4_circuit_malsec::GF4CircuitASGF4p4Benchmark;

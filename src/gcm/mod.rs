@@ -2,7 +2,7 @@ use std::{io, slice};
 
 use itertools::{repeat_n, Itertools};
 
-use crate::{aes::{self, AesKeyState, GF8InvBlackBox, VectorAesState}, rep3_core::{party::error::{MpcError, MpcResult}, share::RssShare}, share::{gf8::GF8, Field}, util::ArithmeticBlackBox};
+use crate::{aes::{self, AesKeyState, GF8InvBlackBox, VectorAesState}, rep3_core::{party::error::{MpcError, MpcResult}, share::{HasZero, RssShare}}, share::{gf8::GF8, Field}, util::ArithmeticBlackBox};
 
 use self::gf128::{GF128, TryFromGF128SliceError};
 pub mod gf128;
@@ -215,7 +215,7 @@ where F: FnOnce(&mut Protocol, &[u8], &[RssShare<GF8>]) -> MpcResult<bool>
 mod test {
     use itertools::Itertools;
     use rand::thread_rng;
-    use crate::{chida::{self, online::test::{ChidaSetup, ChidaSetupSimple}, ChidaBenchmarkParty, ChidaParty}, gcm::gf128::GF128, rep3_core::{party::MainParty, share::RssShare, test::{localhost_setup, TestSetup}}, share::{gf8::GF8, test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}}};
+    use crate::{chida::{self, online::test::{ChidaSetup, ChidaSetupSimple}, ChidaBenchmarkParty, ChidaParty}, gcm::gf128::GF128, rep3_core::{party::MainParty, share::RssShare, test::{localhost_setup, TestSetup}}, share::{gf8::GF8, test::{assert_eq_vector, consistent, consistent_vector, secret_share_vector}}, util::ArithmeticBlackBox};
     use super::{aes128_gcm_decrypt, aes128_gcm_encrypt, semi_honest_tag_check};
 
     pub(super) struct AesGcm128Testvector {
@@ -266,10 +266,7 @@ mod test {
             }
         };
 
-        let (r1, r2, r3) = ChidaSetupSimple::localhost_setup(program(k1, pt1, iv, ad), program(k2, pt2, iv, ad), program(k3, pt3, iv, ad));
-        let (ctxt1, _) = r1.join().unwrap();
-        let (ctxt2, _) = r2.join().unwrap();
-        let (ctxt3, _) = r3.join().unwrap();
+        let ((ctxt1, _), (ctxt2, _), (ctxt3, _)) = ChidaSetupSimple::localhost_setup(program(k1, pt1, iv, ad), program(k2, pt2, iv, ad), program(k3, pt3, iv, ad));
 
         consistent_vector(&ctxt1.tag, &ctxt2.tag, &ctxt3.tag);
         consistent_vector(&ctxt1.ciphertext, &ctxt2.ciphertext, &ctxt3.ciphertext);
@@ -294,10 +291,7 @@ mod test {
             }
         };
 
-        let (r1, r2, r3) = ChidaSetupSimple::localhost_setup(program(k1, ciphertext, tag, iv, ad), program(k2, ciphertext, tag, iv, ad), program(k3, ciphertext, tag, iv, ad));
-        let (m1, _) = r1.join().unwrap();
-        let (m2, _) = r2.join().unwrap();
-        let (m3, _) = r3.join().unwrap();
+        let ((m1, _), (m2, _), (m3, _)) = ChidaSetupSimple::localhost_setup(program(k1, ciphertext, tag, iv, ad), program(k2, ciphertext, tag, iv, ad), program(k3, ciphertext, tag, iv, ad));
 
         consistent_vector(&m1, &m2, &m3);
         let expected_message = expected_plaintext.iter().map(|x| GF8(*x)).collect_vec();
@@ -339,10 +333,7 @@ mod test {
             let rnd: Vec<RssShare<GF128>> = p.generate_random(N);
             rnd
         };
-        let (h1,h2,h3) = ChidaSetupSimple::localhost_setup(program, program, program);
-        let (r1, _) = h1.join().unwrap();
-        let (r2, _) = h2.join().unwrap();
-        let (r3, _) = h3.join().unwrap();
+        let ((r1, _), (r2, _), (r3, _)) = ChidaSetupSimple::localhost_setup(program, program, program);
 
         for (r1, (r2, r3)) in r1.into_iter().zip(r2.into_iter().zip(r3)) {
             consistent(&r1, &r2, &r3);
@@ -369,10 +360,7 @@ mod test {
             }
         };
 
-        let (r1, r2, r3) = ChidaSetup::localhost_setup(program(&tag, tag1.0, tag2.0, tag3.0), program(&tag, tag1.1, tag2.1, tag3.1), program(&tag, tag1.2, tag2.2, tag3.2));
-        r1.join().unwrap();
-        r2.join().unwrap();
-        r3.join().unwrap();
+        let (_, _, _) = ChidaSetup::localhost_setup(program(&tag, tag1.0, tag2.0, tag3.0), program(&tag, tag1.1, tag2.1, tag3.1), program(&tag, tag1.2, tag2.2, tag3.2));
     }
 
     #[test]
@@ -388,10 +376,7 @@ mod test {
             }
         };
 
-        let (h1, h2, h3) = localhost_setup(program(o_share.0), program(o_share.1), program(o_share.2), None);
-        let (s1, _) = h1.join().unwrap();
-        let (s2, _) = h2.join().unwrap();
-        let (s3, _) = h3.join().unwrap();
+        let ((s1, _), (s2, _), (s3, _)) = localhost_setup(program(o_share.0), program(o_share.1), program(o_share.2), None);
         assert_eq!(o, s1);
         assert_eq!(o, s2);
         assert_eq!(o, s3);

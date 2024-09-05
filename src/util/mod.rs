@@ -3,6 +3,7 @@ use crate::rep3_core::{network::task::IoLayerOwned, party::error::MpcResult, sha
 use crate::share::Field;
 
 pub(crate) mod un_bitslice;
+#[macro_use]
 pub(crate) mod mul_triple_vec;
 
 pub trait ArithmeticBlackBox<F: Field> {
@@ -27,5 +28,6 @@ pub trait ArithmeticBlackBox<F: Field> {
         bii: &[F],
     ) -> MpcResult<()>;
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
+    fn output_to(&mut self, to_p1: &[RssShare<F>], to_p2: &[RssShare<F>], to_p3: &[RssShare<F>]) -> MpcResult<Vec<F>>;
     fn finalize(&mut self) -> MpcResult<()>;
 }

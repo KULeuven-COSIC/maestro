@@ -1,5 +1,5 @@
 use itertools::{izip, Itertools};
-use crate::rep3_core::share::{HasZero, RssShare};
+use crate::{conversion::Z64Bool, rep3_core::share::{HasZero, RssShare}};
 use std::{array, fmt::Debug, ops::{Index, IndexMut}};
 use crate::share::{bs_bool16::BsBool16, gf2p64::{embed_gf2_deg012, embed_gf2_deg036, embed_gf2_deg8, embed_gf4p4_deg2, embed_gf4p4_deg3, GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf4::BsGF4, Field};
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
@@ -891,6 +891,27 @@ impl<'a> MulTripleEncoder for GF4p4TripleEncoder<'a> {
     fn clear(&mut self) {
         self.0.clear();
     }
+}
+
+pub struct Z64TripleEncoder<'a>(pub &'a mut MulTripleVector<Z64Bool>);
+
+#[inline]
+fn encode_z64(dst_a: &mut [RssShare<GF2p64>], dst_b: &mut [RssShare<GF2p64>], dst_c: &mut [RssShare<GF2p64>; 64], ai: Z64Bool, aii: Z64Bool, bi: Z64Bool, bii: Z64Bool, ci: Z64Bool, cii: Z64Bool) {
+    #[inline]
+    fn embed_bit(dst: &mut RssShare<GF2p64>, xi: Z64Bool, xii: Z64Bool, i: usize) {
+        dst.si = if ((xi.0 >> i) & 0x1) == 0 {GF2p64::ZERO} else {GF2p64::ONE};
+        dst.sii = if ((xii.0 >> i) & 0x1) == 0 {GF2p64::ZERO} else {GF2p64::ONE};
+    }
+    
+    for i in 0..64 {
+        embed_bit(&mut dst_a[i], ai, aii, i);
+        embed_bit(&mut dst_b[i], bi, bii, i);
+        embed_bit(&mut dst_c[i], ci, cii, i);
+    }
+}
+
+impl<'a> MulTripleEncoder for Z64TripleEncoder<'a> {
+    mul_triple_encoder_impl!(encode_z64, 64);
 }
 
 #[cfg(test)]
