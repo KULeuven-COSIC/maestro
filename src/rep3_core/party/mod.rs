@@ -643,7 +643,7 @@ pub mod test_export {
 
     pub(crate) fn create_certificates() -> (KeyPair, KeyPair, KeyPair) {
         fn key_path(filename: &str) -> PathBuf {
-            let mut p = PathBuf::from("../");
+            let mut p = PathBuf::from("./");
             p.push(TEST_KEY_DIR);
             p.push(filename);
             return p;
