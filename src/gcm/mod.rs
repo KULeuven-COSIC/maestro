@@ -126,7 +126,7 @@ pub fn get_required_prep_for_aes_128_gcm(ad_len: usize, m_len: usize) -> Require
     RequiredPrepAesGcm128 { blocks: m_blocks, mul_gf128: m_blocks + ad_blocks }
 }
 
-pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext> {
+pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key: &[RssShare<GF8>], message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext> {
     // check key length
     if key.len() != 16 { return Err(MpcError::InvalidParameters("Invalid key length, expected 128 bit (16 byte) for AES-GCM-128".to_string())); }
     // compute key schedule
@@ -134,7 +134,7 @@ pub fn aes128_gcm_encrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox
     aes128_gcm_encrypt_with_ks(party, iv, &ks, message, associated_data)
 }
 
-pub fn aes128_gcm_encrypt_with_ks<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key_schedule: &Vec<AesKeyState>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext> {
+pub fn aes128_gcm_encrypt_with_ks<Protocol: ArithmeticBlackBox<GF128> + GF8InvBlackBox>(party: &mut Protocol, iv: &[u8], key_schedule: &Vec<AesKeyState>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext> {
     // check IV length, key_schedule and message lengths
     if iv.len() != 12 { return Err(MpcError::InvalidParameters("Invalid IV length. Supported IV length is 96 bit (12 byte)".to_string())); }
     if key_schedule.len() != 11 { return Err(MpcError::InvalidParameters("Invalid Key Schedule length. Expected 11 round keys".to_string())); }

@@ -12,6 +12,7 @@ pub mod gf4_circuit_malsec;
 pub mod util;
 pub mod rep3_core;
 mod conversion;
+mod mozaik;
 
 use core::slice;
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
@@ -23,6 +24,7 @@ use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
 use furukawa::FurukawaGCMParty;
 use gcm::{batch::{batch_aes128_gcm_decrypt_with_ks, batch_aes128_gcm_encrypt_with_ks, DecParam, EncParam}, gf128::GF128, Aes128GcmCiphertext, RequiredPrepAesGcm128};
 use itertools::{izip, repeat_n, Itertools};
+use mozaik::MozaikParty;
 use rep3_core::{network::{Config, ConnectedParty}, share::{HasZero, RssShare}};
 use rep3_core::party::error::{MpcError, MpcResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -345,7 +347,7 @@ fn try_unflatten_aes128_gcm_key_schedule(key_schedule: &Vec<RssShare<GF8>>) -> M
 }
 
 fn aes128_gcm_encrypt_key_params<Protocol>(party: &mut Protocol, iv: &[u8], key: &KeyParams<RssShare<GF8>>, message: &[RssShare<GF8>], associated_data: &[u8]) -> MpcResult<Aes128GcmCiphertext>
-where Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF8> + ArithmeticBlackBox<GF128> + GF8InvBlackBox
+where Protocol: ArithmeticBlackBox<GF128> + GF8InvBlackBox
 {
     match key {
         KeyParams::KeyShare(key_share) => gcm::aes128_gcm_encrypt(party, iv, &key_share, message, associated_data),
@@ -576,7 +578,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                                 batch_aes_gcm_128_enc(&mut party, party_index, encrypt_args)
                             }
                         }else{
-                            let mut party = ChidaBenchmarkParty::setup(connected, chida::ImplVariant::Simple, cli.threads, None)?;
+                            let mut party = MozaikParty::setup(connected, cli.threads, None)?;
                             if encrypt_args.len() == 1 {
                                 let encrypt_args = encrypt_args.into_iter().next().unwrap();
                                 let res = aes_gcm_128_enc(&mut party, party_index, encrypt_args);
