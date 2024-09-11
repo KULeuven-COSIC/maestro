@@ -19,7 +19,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use crate::{rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
+use crate::{aes::AesVariant, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{error::MpcResult, MainParty, Party}, share::{RssShare, RssShareVec}}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 
 use crate::{
     aes::GF8InvBlackBox, chida::{self, ChidaParty}, share::{
@@ -98,7 +98,7 @@ impl GF8InvBlackBox for GF4CircuitSemihonestParty {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
         self.0.constant(value)
     }
-    fn do_preprocessing(&mut self, _n_keys: usize, _n_blocks: usize) -> MpcResult<()> {
+    fn do_preprocessing(&mut self, _n_keys: usize, _n_blocks: usize, _variant: AesVariant) -> MpcResult<()> {
         // nothing to do
         Ok(())
     }
@@ -338,7 +338,7 @@ fn append<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
 
 #[cfg(test)]
 mod test {
-    use crate::rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
+    use crate::{aes::test::{test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8}, rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}}};
 
     use crate::aes::test::{
             test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
@@ -458,5 +458,21 @@ mod test {
     fn inv_aes128_no_keyschedule_gf8_mt() {
         const N_THREADS: usize = 3;
         test_inv_aes128_no_keyschedule_gf8::<GF4SemihonestSetup, _>(1, Some(N_THREADS));
+    }
+
+    #[test]
+    fn aes256_keyschedule_gf8() {
+        test_aes256_keyschedule_gf8::<GF4SemihonestSetup, _>(None);
+    }
+
+    #[test]
+    fn aes256_no_keyschedule_gf8() {
+        test_aes256_no_keyschedule_gf8::<GF4SemihonestSetup, _>(1, None);
+    }
+
+    #[test]
+    fn aes256_no_keyschedule_gf8_mt() {
+        const N_THREADS: usize = 3;
+        test_aes256_no_keyschedule_gf8::<GF4SemihonestSetup, _>(100, Some(N_THREADS));
     }
 }

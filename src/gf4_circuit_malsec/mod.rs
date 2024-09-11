@@ -2,7 +2,7 @@
 use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
 
-use crate::{chida, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare}}, util::mul_triple_vec::{GF4p4TripleEncoder, GF4p4TripleRecorder, GF4p4TripleVector}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
+use crate::{aes::AesVariant, chida, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare}}, util::mul_triple_vec::{GF4p4TripleEncoder, GF4p4TripleRecorder, GF4p4TripleVector}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, share::{gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsGF4Encoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
 
 mod offline;
@@ -122,16 +122,16 @@ impl GF8InvBlackBox for GF4CircuitASParty {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
         self.inner.constant(value)
     }
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_mul_ks = (4 * 10 * n_keys * 5)/2; // 4 S-boxes per round, 10 rounds, 5 mult. per S-box (but 2 GF4 elements are packed together)
-        let n_mul = (16 * 10 * n_blocks * 5)/2; // 16 S-boxes per round, 10 rounds, 5 mult. per S-box (but 2 GF4 elements are packed together)
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize, variant: AesVariant) -> MpcResult<()> {
+        let n_mul_ks = (variant.n_ks_sboxes() * n_keys * 5)/2; //  5 mult. per S-box (but 2 GF4 elements are packed together)
+        let n_mul = (16 * variant.n_rounds() * n_blocks * 5)/2; // 16 S-boxes per round, X rounds, 5 mult. per S-box (but 2 GF4 elements are packed together)
         // allocate more memory for triples
         match self.check_type {
             MultCheckType::Recursive { use_gf4p4_check: true, .. } => {
-                let n_mul_ks_gf4 = (4 * 10 * n_keys * 2)/2; // 4 S-boxes per round, 10 rounds, 2 mult. per S-box (but 2 GF4 elements are packed together)
-                let n_mul_gf4 = (16 * 10 * n_blocks * 2)/2; // 16 S-boxes per round, 10 rounds, 2 mult. per S-box (but 2 GF4 elements are packed together)
-                let n_mul_ks_gf4p4 = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 triple per S-box (but 2 GF4 elements are packed together)
-                let n_mul_gf4p4 = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 triple per S-box (but 2 GF4 elements are packed together)
+                let n_mul_ks_gf4 = variant.n_ks_sboxes() * n_keys; // 2 mult. per S-box (but 2 GF4 elements are packed together)
+                let n_mul_gf4 = (16 * variant.n_rounds() * n_blocks * 2)/2; // 16 S-boxes per round, X rounds, 2 mult. per S-box (but 2 GF4 elements are packed together)
+                let n_mul_ks_gf4p4 = variant.n_ks_sboxes() * n_keys; // 1 triple per S-box (but 2 GF4 elements are packed together)
+                let n_mul_gf4p4 = 16 * variant.n_rounds() * n_blocks; // 16 S-boxes per round, X rounds, 1 triple per S-box (but 2 GF4 elements are packed together)
                 self.gf4_triples_to_check.reserve_for_more_triples(n_mul_gf4 + n_mul_ks_gf4);
                 self.gf4p4_triples_to_check.reserve_for_more_triples(n_mul_gf4p4 + n_mul_ks_gf4p4);
             },
@@ -334,7 +334,7 @@ fn append_slice<F: HasZero + Copy>(a: &[F], b: &[F]) -> Vec<F> {
 
 #[cfg(test)]
 mod test {
-    use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes};
+    use crate::aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes};
     use crate::rep3_core::{network::ConnectedParty, test::{localhost_connect, TestSetup}};
 
     use super::{GF4CircuitASParty, MultCheckType};
@@ -657,5 +657,22 @@ mod test {
     fn inv_aes128_no_keyschedule_rec_beaver_check_mt() {
         const N_THREADS: usize = 3;
         test_inv_aes128_no_keyschedule_gf8::<GF4CircuitAsRecBeaverSetup, _>(100, Some(N_THREADS))
+    }
+
+    #[test]
+    fn aes256_keyschedule_gf4p4_mt() {
+        const N_THREADS: usize = 3;
+        test_aes256_keyschedule_gf8::<GF4CircuitAsGF4p4CheckSetup, _>(Some(N_THREADS))
+    }
+
+    #[test]
+    fn aes_256_no_keyschedule_gf4p4() {
+        test_aes256_no_keyschedule_gf8::<GF4CircuitAsGF4p4CheckSetup, _>(1, None)
+    }
+
+    #[test]
+    fn aes_256_no_keyschedule_gf4p4_mt() {
+        const N_THREADS: usize = 3;
+        test_aes256_no_keyschedule_gf8::<GF4CircuitAsGF4p4CheckSetup, _>(100, Some(N_THREADS))
     }
 }

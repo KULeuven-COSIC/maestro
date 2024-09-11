@@ -16,6 +16,7 @@ pub mod benchmark;
 
 use crate::benchmark::{chida::ChidaBenchmark, furukawa::{MalChidaBenchmark, MalChidaRecursiveCheckBenchmark}, gf4_circuit::GF4CircuitBenchmark, gf4_circuit_malsec::GF4CircuitASBenchmark, lut256::{LUT256Benchmark, Lut256SSBenchmark, Lut256SSMalBenchmark, Lut256SSMalOhvCheckBenchmark}, wollut16::LUT16Benchmark, wollut16_malsec::{MalLUT16BitStringBenchmark, MalLUT16OhvBenchmark}};
 use crate::benchmark::gf4_circuit_malsec::GF4CircuitASGF4p4Benchmark;
+use aes::AesVariant;
 use itertools::Itertools;
 use crate::rep3_core::network::{self, ConnectedParty};
 use std::path::PathBuf;
@@ -46,6 +47,9 @@ struct Cli {
     
     #[arg(long, help="If set, benchmark all protocol variants and ignore specified targets.", default_value_t = false)]
     all: bool,
+
+    #[arg(long, help="If set, the benchmark will compute AES-256, otherwise AES-128 is computed", default_value_t = false)]
+    aes256: bool,
 
     #[arg(value_enum)]
     target: Vec<ProtocolVariant>,
@@ -187,8 +191,14 @@ fn main() -> Result<(), String> {
             boxed.push(Box::new(v.clone()));
         }
     }
+
+    let variant = if cli.aes256 {
+        AesVariant::Aes256
+    }else{
+        AesVariant::Aes128
+    };
     
-    benchmark::utils::benchmark_protocols(party_index, &config, cli.rep, cli.simd, cli.threads, boxed, cli.csv).unwrap();
+    benchmark::utils::benchmark_protocols(party_index, &config, variant, cli.rep, cli.simd, cli.threads, boxed, cli.csv).unwrap();
     Ok(())
 }
 
@@ -219,10 +229,11 @@ impl BenchmarkProtocol for ProtocolVariant {
     fn run(
         &self,
         conn: ConnectedParty,
+        variant: AesVariant,
         simd: usize,
         n_worker_threads: Option<usize>,
         prot_str: Option<String>,
     ) -> BenchmarkResult {
-        self.get_protocol().run(conn, simd, n_worker_threads, prot_str)
+        self.get_protocol().run(conn, variant, simd, n_worker_threads, prot_str)
     }
 }

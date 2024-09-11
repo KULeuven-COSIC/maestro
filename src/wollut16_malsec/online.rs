@@ -387,7 +387,7 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
 
 #[cfg(test)]
 mod test {
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::{WL16ASSetup, WL16BitString, WL16DefaultParams, WL16OhvCheck}};
+    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::{WL16ASSetup, WL16BitString, WL16DefaultParams, WL16OhvCheck}};
 
 
     #[test]
@@ -459,5 +459,21 @@ mod test {
     fn aes_128_no_keyschedule_gf4p4_bitstring_mt() {
         const N_THREADS: usize = 3;
         test_aes128_no_keyschedule_gf8::<WL16ASSetup::<WL16BitString>, _>(100, Some(N_THREADS))
+    }
+
+    #[test]
+    fn aes_256_no_keyschedule_gf4p4() {
+        test_aes256_no_keyschedule_gf8::<WL16ASSetup::<WL16OhvCheck>, _>(1, None)
+    }
+
+    #[test]
+    fn aes_256_no_keyschedule_gf4p4_mt() {
+        const N_THREADS: usize = 3;
+        test_aes256_no_keyschedule_gf8::<WL16ASSetup::<WL16OhvCheck>, _>(100, Some(N_THREADS))
+    }
+
+    #[test]
+    fn aes256_keyschedule() {
+        test_aes256_keyschedule_gf8::<WL16ASSetup::<WL16OhvCheck>, _>(None)
     }
 }

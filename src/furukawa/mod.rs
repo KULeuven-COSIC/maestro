@@ -15,7 +15,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use crate::rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, ThreadParty}, share::{RssShare, RssShareVec}};
+use crate::{aes::AesVariant, rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, ThreadParty}, share::{RssShare, RssShareVec}}};
 
 use crate::{
     aes::GF8InvBlackBox, chida, share::{gf2p64::GF2p64Subfield, gf8::GF8, Field}, util::{mul_triple_vec::{GF2p64SubfieldEncoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec
@@ -409,9 +409,9 @@ impl GF8InvBlackBox for FurukawaParty<GF8> {
             chida::online::gf8_inv_layer(self, si, sii)
         }
     }
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_muls_ks = 4 * 10 * 4 * n_keys; // 4 S-boxes per round, 10 rounds, 4 multiplications per S-box
-        let n_muls_blocks = 16 * 10 * 4 * n_blocks; // 16 S-boxes per round, 10 rounds, 4 multiplications per S-box
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize, variant: AesVariant) -> MpcResult<()> {
+        let n_muls_ks = variant.n_ks_sboxes() * 4 * n_keys; // 4 S-boxes per round, X rounds, 4 multiplications per S-box
+        let n_muls_blocks = 16 * variant.n_rounds() * 4 * n_blocks; // 16 S-boxes per round, X rounds, 4 multiplications per S-box
         self.prepare_multiplications(n_muls_ks + n_muls_blocks)
     }
     fn main_party_mut(&mut self) -> &mut MainParty {
@@ -472,8 +472,7 @@ fn gf8_inv_layer_threadparty(
 #[cfg(test)]
 pub mod test {
     use crate::aes::test::{
-        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
-        test_inv_aes128_no_keyschedule_gf8,
+        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8
     };
     use crate::share::gf8::GF8;
     use crate::share::Field;
@@ -699,5 +698,21 @@ pub mod test {
     fn inv_aes128_no_keyschedule_gf8_recursive_check_mt() {
         const N_THREADS: usize = 3;
         test_inv_aes128_no_keyschedule_gf8::<FurukawaRecursiveCheckSetup, _>(100, Some(N_THREADS));
+    }
+
+    #[test]
+    fn aes256_no_keyschedule_gf8() {
+        test_aes256_no_keyschedule_gf8::<FurukawaSetup, _>(1, None);
+    }
+
+    #[test]
+    fn aes256_no_keyschedule_gf8_mt() {
+        const N_THREADS: usize = 3;
+        test_aes256_no_keyschedule_gf8::<FurukawaSetup, _>(100, Some(N_THREADS));
+    }
+
+    #[test]
+    fn aes256_keyschedule_gf8() {
+        test_aes256_keyschedule_gf8::<FurukawaSetup, _>(None);
     }
 }

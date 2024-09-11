@@ -1,4 +1,5 @@
 
+use crate::aes::AesVariant;
 use crate::rep3_core::network::ConnectedParty;
 use crate::{aes::GF8InvBlackBox, furukawa::FurukawaParty, share::gf8::GF8, util::ArithmeticBlackBox};
 
@@ -10,7 +11,7 @@ impl_benchmark_protocol!(
     "mal-chida", // protocol name
     |conn: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>| FurukawaParty::<GF8>::setup(conn, n_worker_threads, prot_str, false).unwrap(), // setup
     |party: &mut FurukawaParty::<GF8>| party, // get ABB<GF8>
-    |party: &mut FurukawaParty::<GF8>, simd: usize| party.do_preprocessing(0, simd), // do preprocessing
+    |party: &mut FurukawaParty::<GF8>, simd: usize, variant: AesVariant| party.do_preprocessing(0, simd, variant), // do preprocessing
     |party: &mut FurukawaParty::<GF8>| party.finalize() // do finalize checks
 );
 

@@ -9,8 +9,8 @@ pub trait GF8InvBlackBox {
     /// computes inversion of the (2,3) sharing of s (si,sii) in-place
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()>;
 
-    /// run any required pre-processing phase to prepare for computation of the key schedule with n_keys and n_blocks many AES-128 block calls
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()>;
+    /// run any required pre-processing phase to prepare for computation of the key schedule with n_keys and n_blocks many AES-128/AES-256 block calls
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize, variant: AesVariant) -> MpcResult<()>;
 
     fn main_party_mut(&mut self) -> &mut MainParty;
 }
@@ -247,8 +247,9 @@ pub fn random_state<Protocol: Party>(
 /// returns random key states for benchmarking purposes
 pub fn random_keyschedule<Protocol: Party>(
     party: &mut Protocol,
+    variant: AesVariant,
 ) -> Vec<AesKeyState> {
-    (0..11)
+    (0..variant.n_rounds()+1)
         .map(|_| {
             let rk = party.generate_random(16);
             AesKeyState::from_rss_vec(rk)
@@ -269,12 +270,59 @@ macro_rules! timer {
     };
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum AesVariant {
+    Aes128,
+    Aes256
+}
+
+impl AesVariant {
+    const fn key_len(&self) -> usize {
+        match self {
+            Self::Aes128 => 16,
+            Self::Aes256 => 32,
+        }
+    }
+
+    pub const fn n_rounds(&self) -> usize {
+        match self {
+            Self::Aes128 => 10,
+            Self::Aes256 => 14,
+        }
+    }
+
+    /// Returns the number of S-boxes in the key schedule.
+    pub const fn n_ks_sboxes(&self) -> usize {
+        match self {
+            Self::Aes128 => 40,
+            Self::Aes256 => 52,
+        }
+    }
+}
+
 pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
     party: &mut Protocol,
     inputs: VectorAesState,
     round_key: &[AesKeyState],
 ) -> MpcResult<VectorAesState> {
-    debug_assert_eq!(round_key.len(), 11);
+    aes_no_keyschedule(AesVariant::Aes128, party, inputs, round_key)
+}
+
+pub fn aes256_no_keyschedule<Protocol: GF8InvBlackBox>(
+    party: &mut Protocol,
+    inputs: VectorAesState,
+    round_key: &[AesKeyState],
+) -> MpcResult<VectorAesState> {
+    aes_no_keyschedule(AesVariant::Aes256, party, inputs, round_key)
+}
+
+fn aes_no_keyschedule<Protocol: GF8InvBlackBox>(
+    variant: AesVariant,
+    party: &mut Protocol,
+    inputs: VectorAesState,
+    round_key: &[AesKeyState],
+) -> MpcResult<VectorAesState> {
+    debug_assert_eq!(round_key.len(), variant.n_rounds()+1);
     let mut state = inputs;
 
     timer!("aes_add_rk", {
@@ -282,7 +330,7 @@ pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
     });
 
     #[allow(clippy::needless_range_loop)]
-    for r in 1..=9 {
+    for r in 1..variant.n_rounds() {
         timer!("aes_sbox", {
             sbox_layer(party, &mut state.si, &mut state.sii)?;
         });
@@ -304,7 +352,7 @@ pub fn aes128_no_keyschedule<Protocol: GF8InvBlackBox>(
     });
 
     timer!("aes_add_rk", {
-        add_round_key(&mut state, &round_key[10]);
+        add_round_key(&mut state, &round_key[variant.n_rounds()]);
     });
 
     Ok(state)
@@ -384,6 +432,68 @@ pub fn aes128_keyschedule<Protocol: GF8InvBlackBox>(
     Ok(ks)
 }
 
+pub fn aes256_keyschedule<Protocol: GF8InvBlackBox>(
+    party: &mut Protocol,
+    mut key: Vec<RssShare<GF8>>,
+) -> MpcResult<Vec<AesKeyState>> {
+    debug_assert_eq!(key.len(), 32);
+    const ROUND_CONSTANTS: [GF8; 7] = [GF8(0x01), GF8(0x02), GF8(0x04), GF8(0x08), GF8(0x10), GF8(0x20), GF8(0x40)];
+    let mut ks = Vec::with_capacity(15);
+    let key2 = key.split_off(16);
+    ks.push(AesKeyState::from_bytes(key)); // rk0
+    ks.push(AesKeyState::from_bytes(key2)); // rk1
+    
+    for i in 1..=7 {
+        // RotWord
+        let mut rot_i = [ks[2*i-1].si[7], ks[2*i-1].si[11], ks[2*i-1].si[15], ks[2*i-1].si[3]];
+        let mut rot_ii = [ks[2*i-1].sii[7], ks[2*i-1].sii[11], ks[2*i-1].sii[15], ks[2*i-1].sii[3]];
+        // SubWord
+        sbox_layer(party, &mut rot_i, &mut rot_ii)?;
+        // Add Rcon
+        let rcon = party.constant(ROUND_CONSTANTS[i - 1]);
+        rot_i[0] += rcon.si;
+        rot_ii[0] += rcon.sii;
+
+        let mut rki = ks[2*i-2].clone();
+        // Add temp
+        for i in 0..4 {
+            rki.si[4 * i] += rot_i[i];
+            rki.sii[4 * i] += rot_ii[i];
+        }
+        // Add remaining
+        for j in 1..4 {
+            for i in 0..4 {
+                rki.si[4 * i + j] += rki.si[4 * i + j - 1];
+                rki.sii[4 * i + j] += rki.sii[4 * i + j - 1];
+            }
+        }
+        
+        ks.push(rki);
+        if i < 7 {
+            let mut rki = ks[2*i-1].clone();
+            // no RotWord
+            let mut sub_i = [ks[2*i].si[3], ks[2*i].si[7], ks[2*i].si[11], ks[2*i].si[15]];
+            let mut sub_ii = [ks[2*i].sii[3], ks[2*i].sii[7], ks[2*i].sii[11], ks[2*i].sii[15]];
+            // SubWord
+            sbox_layer(party, &mut sub_i, &mut sub_ii)?;
+            // Add temp
+            for i in 0..4 {
+                rki.si[4 * i] += sub_i[i];
+                rki.sii[4 * i] += sub_ii[i];
+            }
+            // Add remaining
+            for j in 1..4 {
+                for i in 0..4 {
+                    rki.si[4 * i + j] += rki.si[4 * i + j - 1];
+                    rki.sii[4 * i + j] += rki.sii[4 * i + j - 1];
+                }
+            }
+            ks.push(rki);
+        }
+    }
+    Ok(ks)
+}
+
 pub fn output<Protocol: ArithmeticBlackBox<GF8>>(
     party: &mut Protocol,
     blocks: VectorAesState,
@@ -457,6 +567,7 @@ pub mod test {
 
     use itertools::repeat_n;
     use rand::{thread_rng, CryptoRng, Rng};
+    use crate::aes::aes256_no_keyschedule;
     use crate::rep3_core::{test::TestSetup, share::RssShare};
     use crate::{
         aes::{
@@ -469,7 +580,7 @@ pub mod test {
         },
     };
 
-    use super::{AesKeyState, ArithmeticBlackBox, GF8InvBlackBox, VectorAesState};
+    use super::{aes256_keyschedule, AesKeyState, AesVariant, ArithmeticBlackBox, GF8InvBlackBox, VectorAesState};
 
     pub const AES_SBOX: [u8; 256] = [
         0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB,
@@ -493,9 +604,9 @@ pub mod test {
     ];
 
     // FIPS 197 Appendix B
-    pub const AES_TEST_INPUT: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
-    pub const AES_TEST_EXPECTED_OUTPUT: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32];
-    pub const AES_TEST_ROUNDKEYS: [[u8; 16]; 11] = [
+    pub const AES128_TEST_INPUT: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
+    pub const AES128_TEST_EXPECTED_OUTPUT: [u8; 16] = [0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32];
+    pub const AES128_TEST_ROUNDKEYS: [[u8; 16]; 11] = [
         // already in row-first representation
         [0x2b, 0x28, 0xab, 0x09, 0x7e, 0xae, 0xf7, 0xcf, 0x15, 0xd2, 0x15, 0x4f, 0x16, 0xa6, 0x88, 0x3c],
         [0xa0, 0x88, 0x23, 0x2a, 0xfa, 0x54, 0xa3, 0x6c, 0xfe, 0x2c, 0x39, 0x76, 0x17, 0xb1, 0x39, 0x05],
@@ -509,6 +620,27 @@ pub mod test {
         [0xac, 0x19, 0x28, 0x57, 0x77, 0xfa, 0xd1, 0x5c, 0x66, 0xdc, 0x29, 0x00, 0xf3, 0x21, 0x41, 0x6e],
         [0xd0, 0xc9, 0xe1, 0xb6, 0x14, 0xee, 0x3f, 0x63, 0xf9, 0x25, 0x0c, 0x0c, 0xa8, 0x89, 0xc8, 0xa6],
     ];
+
+    pub const AES256_TEST_KEY: [u8; 32] = [0x60, 0x3d, 0xeb, 0x10, 0x15, 0xca, 0x71, 0xbe, 0x2b, 0x73, 0xae, 0xf0, 0x85, 0x7d, 0x77, 0x81, 0x1f, 0x35, 0x2c, 0x07, 0x3b, 0x61, 0x08, 0xd7, 0x2d, 0x98, 0x10, 0xa3, 0x09, 0x14, 0xdf, 0xf4];
+    pub const AES256_TEST_ROUNDKEYS: [[u8; 16]; 15] = [
+        // already in row-first representation
+        [0x60, 0x15, 0x2b, 0x85, 0x3d, 0xca, 0x73, 0x7d, 0xeb, 0x71, 0xae, 0x77, 0x10, 0xbe, 0xf0, 0x81],
+        [0x1f, 0x3b, 0x2d, 0x09, 0x35, 0x61, 0x98, 0x14, 0x2c, 0x08, 0x10, 0xdf, 0x07, 0xd7, 0xa3, 0xf4],
+        [0x9b, 0x8e, 0xa5, 0x20, 0xa3, 0x69, 0x1a, 0x67, 0x54, 0x25, 0x8b, 0xfc, 0x11, 0xaf, 0x5f, 0xde],
+        [0xa8, 0x93, 0xbe, 0xb7, 0xb0, 0xd1, 0x49, 0x5d, 0x9c, 0x94, 0x84, 0x5b, 0x1a, 0xcd, 0x6e, 0x9a],
+        [0xd5, 0x5b, 0xfe, 0xde, 0x9a, 0xf3, 0xe9, 0x8e, 0xec, 0xc9, 0x42, 0xbe, 0xb8, 0x17, 0x48, 0x96],
+        [0xb5, 0x26, 0x98, 0x2f, 0xa9, 0x78, 0x31, 0x6c, 0x32, 0xa6, 0x22, 0x79, 0x8a, 0x47, 0x29, 0xb3],
+        [0x81, 0xda, 0x24, 0xfa, 0x2c, 0xdf, 0x36, 0xb8, 0x81, 0x48, 0x0a, 0xb4, 0xad, 0xba, 0xf2, 0x64],
+        [0x98, 0xbe, 0x26, 0x09, 0xc5, 0xbd, 0x8c, 0xe0, 0xbf, 0x19, 0x3b, 0x42, 0xc9, 0x8e, 0xa7, 0x14],
+        [0x68, 0xb2, 0x96, 0x6c, 0x00, 0xdf, 0xe9, 0x51, 0x7b, 0x33, 0x39, 0x8d, 0xac, 0x16, 0xe4, 0x80],
+        [0xc8, 0x76, 0x50, 0x59, 0x14, 0xa9, 0x25, 0xc5, 0xe2, 0xfb, 0xc0, 0x82, 0x04, 0x8a, 0x2d, 0x39],
+        [0xde, 0x6c, 0xfa, 0x96, 0x13, 0xcc, 0x25, 0x74, 0x69, 0x5a, 0x63, 0xee, 0x67, 0x71, 0x95, 0x15],
+        [0x58, 0x2e, 0x7e, 0x27, 0x86, 0x2f, 0x0a, 0xcf, 0xca, 0x31, 0xf1, 0x73, 0x5d, 0xd7, 0xfa, 0xc3],
+        [0x74, 0x18, 0xe2, 0x74, 0x9c, 0x50, 0x75, 0x01, 0x47, 0x1d, 0x7e, 0x90, 0xab, 0xda, 0x4f, 0x5a],
+        [0xca, 0xe4, 0x9a, 0xbd, 0xfa, 0xd5, 0xdf, 0x10, 0xaa, 0x9b, 0x6a, 0x19, 0xe3, 0x34, 0xce, 0x0d],
+        [0xfe, 0xe6, 0x04, 0x70, 0x48, 0x18, 0x6d, 0x6c, 0x90, 0x8d, 0xf3, 0x63, 0xd1, 0x0b, 0x44, 0x1e],
+    ];
+    pub const AES256_TEST_EXPECTED_OUTPUT: [u8; 16] = [0x30, 0x21, 0x61, 0x3a, 0x97, 0x3e, 0x58, 0x2f, 0x4a, 0x29, 0x23, 0x41, 0x37, 0xae, 0xc4, 0x94];
 
     fn into_rss_share(
         s1: VectorAesState,
@@ -590,7 +722,7 @@ pub mod test {
 
         let program = |mut state: VectorAesState| {
             move |p: &mut P| {
-                p.do_preprocessing(0, 2).unwrap();
+                p.do_preprocessing(0, 2, AesVariant::Aes128).unwrap();
                 sbox_layer(p, &mut state.si, &mut state.sii).unwrap();
                 state
             }
@@ -666,7 +798,7 @@ pub mod test {
         n_blocks: usize,
         n_worker_threads: Option<usize>,
     ) {
-        let input: Vec<_> = repeat_n(AES_TEST_INPUT, n_blocks)
+        let input: Vec<_> = repeat_n(AES128_TEST_INPUT, n_blocks)
             .flatten()
             .map(|x| GF8(x))
             .collect();
@@ -676,7 +808,7 @@ pub mod test {
         let mut ks2 = Vec::with_capacity(11);
         let mut ks3 = Vec::with_capacity(11);
         for i in 0..11 {
-            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES128_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
             ks1.push(s1);
             ks2.push(s2);
             ks3.push(s3);
@@ -684,7 +816,7 @@ pub mod test {
 
         let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
             move |p: &mut P| {
-                p.do_preprocessing(0, input.n).unwrap();
+                p.do_preprocessing(0, input.n, AesVariant::Aes128).unwrap();
                 let output = aes128_no_keyschedule(p, input, &ks).unwrap();
                 p.finalize().unwrap();
                 p.io().wait_for_completion();
@@ -716,7 +848,68 @@ pub mod test {
         }
 
         for (i, (s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq(s1, s2, s3, GF8(AES_TEST_EXPECTED_OUTPUT[i % 16]));
+            assert_eq(s1, s2, s3, GF8(AES128_TEST_EXPECTED_OUTPUT[i % 16]));
+        }
+    }
+
+    pub fn test_aes256_no_keyschedule_gf8<
+        S: TestSetup<P>,
+        P: GF8InvBlackBox + ArithmeticBlackBox<GF8>,
+    >(
+        n_blocks: usize,
+        n_worker_threads: Option<usize>,
+    ) {
+        let input: Vec<_> = repeat_n(AES128_TEST_INPUT, n_blocks)
+            .flatten()
+            .map(|x| GF8(x))
+            .collect();
+        let mut rng = thread_rng();
+        let (in1, in2, in3) = secret_share_vectorstate(&mut rng, &input);
+        let mut ks1 = Vec::with_capacity(15);
+        let mut ks2 = Vec::with_capacity(15);
+        let mut ks3 = Vec::with_capacity(15);
+        for i in 0..15 {
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES256_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
+            ks1.push(s1);
+            ks2.push(s2);
+            ks3.push(s3);
+        }
+
+        let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
+            move |p: &mut P| {
+                p.do_preprocessing(0, input.n, AesVariant::Aes256).unwrap();
+                let output = aes256_no_keyschedule(p, input, &ks).unwrap();
+                p.finalize().unwrap();
+                p.io().wait_for_completion();
+                output
+            }
+        };
+        let ((s1, _), (s2, _), (s3, _)) = match n_worker_threads {
+            Some(n_worker_threads) => S::localhost_setup_multithreads(
+                n_worker_threads,
+                program(in1, ks1),
+                program(in2, ks2),
+                program(in3, ks3),
+            ),
+            None => S::localhost_setup(program(in1, ks1), program(in2, ks2), program(in3, ks3)),
+        };
+        assert_eq!(s1.n, n_blocks);
+        assert_eq!(s2.n, n_blocks);
+        assert_eq!(s3.n, n_blocks);
+
+        let shares: Vec<_> = s1
+            .to_bytes()
+            .into_iter()
+            .zip(s2.to_bytes().into_iter().zip(s3.to_bytes()))
+            .map(|(s1, (s2, s3))| (s1, s2, s3))
+            .collect();
+
+        for (s1, s2, s3) in &shares {
+            consistent(s1, s2, s3);
+        }
+
+        for (i, (s1, s2, s3)) in shares.into_iter().enumerate() {
+            assert_eq(s1, s2, s3, GF8(AES256_TEST_EXPECTED_OUTPUT[i % 16]));
         }
     }
 
@@ -748,7 +941,7 @@ pub mod test {
 
         let program = |key: Vec<RssShare<GF8>>| {
             move |p: &mut P| {
-                p.do_preprocessing(1, 0).unwrap();
+                p.do_preprocessing(1, 0, AesVariant::Aes128).unwrap();
                 let ks = aes128_keyschedule(p, key).unwrap();
                 p.finalize().unwrap();
                 p.io().wait_for_completion();
@@ -766,11 +959,15 @@ pub mod test {
             None => S::localhost_setup(program(key1), program(key2), program(key3)),
         };
 
-        assert_eq!(ks1.len(), 11);
-        assert_eq!(ks2.len(), 11);
-        assert_eq!(ks3.len(), 11);
+        check_correct_key_schedule(AesVariant::Aes128, ks1, ks2, ks3);
+    }
 
-        let mut ks = Vec::with_capacity(11);
+    fn check_correct_key_schedule(variant: AesVariant, ks1: Vec<AesKeyState>, ks2: Vec<AesKeyState>, ks3: Vec<AesKeyState>) {
+        assert_eq!(ks1.len(), variant.n_rounds()+1);
+        assert_eq!(ks2.len(), variant.n_rounds()+1);
+        assert_eq!(ks3.len(), variant.n_rounds()+1);
+
+        let mut ks = Vec::with_capacity(variant.n_rounds()+1);
         for (ks1, (ks2, ks3)) in ks1.into_iter().zip(ks2.into_iter().zip(ks3)) {
             let mut rk = Vec::with_capacity(16);
             let ks1 = ks1.to_rss_vec();
@@ -785,12 +982,51 @@ pub mod test {
             }
             ks.push(rk);
         }
-        for i in 0..11 {
+
+        let expected: &[[u8; 16]] = match variant {
+            AesVariant::Aes128 => &AES128_TEST_ROUNDKEYS,
+            AesVariant::Aes256 => &AES256_TEST_ROUNDKEYS,
+        };
+
+        for i in 0..variant.n_rounds()+1 {
             for j in 0..16 {
                 let (x1, x2, x3) = ks[i][j];
-                assert_eq(x1, x2, x3, GF8(AES_TEST_ROUNDKEYS[i][j]));
+                assert_eq(x1, x2, x3, GF8(expected[i][j]));
             }
         }
+    }
+
+    pub fn test_aes256_keyschedule_gf8<
+        S: TestSetup<P>,
+        P: GF8InvBlackBox + ArithmeticBlackBox<GF8>,
+    >(
+        n_worker_threads: Option<usize>,
+    ) {
+        let mut rng = thread_rng();
+        let (key1, key2, key3) =
+            transpose(AES256_TEST_KEY.into_iter().map(|x| secret_share(&mut rng, &GF8(x))));
+
+        let program = |key: Vec<RssShare<GF8>>| {
+            move |p: &mut P| {
+                p.do_preprocessing(1, 0, AesVariant::Aes256).unwrap();
+                let ks = aes256_keyschedule(p, key).unwrap();
+                p.finalize().unwrap();
+                p.io().wait_for_completion();
+                ks
+            }
+        };
+
+        let ((ks1, _), (ks2, _), (ks3, _)) = match n_worker_threads {
+            Some(n_worker_threads) => S::localhost_setup_multithreads(
+                n_worker_threads,
+                program(key1),
+                program(key2),
+                program(key3),
+            ),
+            None => S::localhost_setup(program(key1), program(key2), program(key3)),
+        };
+
+        check_correct_key_schedule(AesVariant::Aes256, ks1, ks2, ks3);
     }
 
     #[test]
@@ -814,7 +1050,7 @@ pub mod test {
         n_blocks: usize,
         n_worker_threads: Option<usize>,
     ) {
-        let input: Vec<_> = repeat_n(AES_TEST_EXPECTED_OUTPUT, n_blocks)
+        let input: Vec<_> = repeat_n(AES128_TEST_EXPECTED_OUTPUT, n_blocks)
             .flatten()
             .map(|x| GF8(x))
             .collect();
@@ -824,7 +1060,7 @@ pub mod test {
         let mut ks2 = Vec::with_capacity(11);
         let mut ks3 = Vec::with_capacity(11);
         for i in 0..11 {
-            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES128_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
             ks1.push(s1);
             ks2.push(s2);
             ks3.push(s3);
@@ -832,7 +1068,7 @@ pub mod test {
 
         let program = |input: VectorAesState, ks: Vec<AesKeyState>| {
             move |p: &mut P| {
-                p.do_preprocessing(0, input.n).unwrap();
+                p.do_preprocessing(0, input.n, AesVariant::Aes128).unwrap();
                 let output = aes128_inv_no_keyschedule(p, input, &ks).unwrap();
                 p.finalize().unwrap();
                 p.io().wait_for_completion();
@@ -864,7 +1100,7 @@ pub mod test {
         }
 
         for (i, (s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq(s1, s2, s3, GF8(AES_TEST_INPUT[i % 16]));
+            assert_eq(s1, s2, s3, GF8(AES128_TEST_INPUT[i % 16]));
         }
     }
 }
