@@ -2,7 +2,7 @@ use std::mem;
 
 use itertools::Itertools;
 
-use crate::{aes::GF8InvBlackBox, chida, conversion::Z64Bool, furukawa::{self, OutputPhase}, gcm::gf128::GF128, gf4_circuit::GF4CircuitSemihonestParty, gf4_circuit_malsec::{gf8_inv_via_gf4_mul_gf4p4_check_mt, gf8_inv_via_gf4_mul_gf4p4_check_no_sync}, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare, RssShareVec}}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64SubfieldEncoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
+use crate::{aes::GF8InvBlackBox, chida, conversion::Z64Bool, furukawa::{InputPhase, OutputPhase}, gcm::gf128::GF128, gf4_circuit::GF4CircuitSemihonestParty, gf4_circuit_malsec::{gf8_inv_via_gf4_mul_gf4p4_check_mt, gf8_inv_via_gf4_mul_gf4p4_check_no_sync}, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare, RssShareVec}}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64SubfieldEncoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
 
 /// Semi-honest security
 pub struct MozaikParty(GF4CircuitSemihonestParty);
@@ -138,7 +138,10 @@ impl ArithmeticBlackBox<Z64Bool> for MozaikAsParty {
         Ok(())
     }
     fn input_round(&mut self, my_input: &[Z64Bool]) -> MpcResult<(RssShareVec<Z64Bool>, RssShareVec<Z64Bool>, RssShareVec<Z64Bool>)> {
-        furukawa::input_round(&mut self.inner, my_input)
+        let mut inf = InputPhase::new(&mut self.inner);
+        let out = inf.input_round(my_input)?;
+        inf.end_input_phase()?;
+        Ok(out)
     }
     fn mul(&mut self, ci: &mut [Z64Bool], cii: &mut [Z64Bool], ai: &[Z64Bool], aii: &[Z64Bool], bi: &[Z64Bool], bii: &[Z64Bool]) -> MpcResult<()> {
         chida::online::mul_no_sync(&mut self.inner, ci, cii, ai, aii, bi, bii)?;
@@ -188,7 +191,10 @@ impl ArithmeticBlackBox<GF8> for MozaikAsParty {
         Ok(())
     }
     fn input_round(&mut self, my_input: &[GF8]) -> MpcResult<(RssShareVec<GF8>, RssShareVec<GF8>, RssShareVec<GF8>)> {
-        furukawa::input_round(&mut self.inner, my_input)
+        let mut inf = InputPhase::new(&mut self.inner);
+        let out = inf.input_round(my_input)?;
+        inf.end_input_phase()?;
+        Ok(out)
     }
     fn mul(&mut self, ci: &mut [GF8], cii: &mut [GF8], ai: &[GF8], aii: &[GF8], bi: &[GF8], bii: &[GF8]) -> MpcResult<()> {
         chida::online::mul_no_sync(&mut self.inner, ci, cii, ai, aii, bi, bii)?;
@@ -232,7 +238,10 @@ impl ArithmeticBlackBox<GF128> for MozaikAsParty {
         Ok(())
     }
     fn input_round(&mut self, my_input: &[GF128]) -> MpcResult<(RssShareVec<GF128>, RssShareVec<GF128>, RssShareVec<GF128>)> {
-        furukawa::input_round(&mut self.inner, my_input)
+        let mut inf = InputPhase::new(&mut self.inner);
+        let out = inf.input_round(my_input)?;
+        inf.end_input_phase()?;
+        Ok(out)
     }
     fn mul(&mut self, ci: &mut [GF128], cii: &mut [GF128], ai: &[GF128], aii: &[GF128], bi: &[GF128], bii: &[GF128]) -> MpcResult<()> {
         chida::online::mul_no_sync(&mut self.inner, ci, cii, ai, aii, bi, bii)?;

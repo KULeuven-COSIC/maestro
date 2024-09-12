@@ -15,45 +15,50 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use crate::{conversion::Z64Bool, gcm::gf128::GF128, rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, ThreadParty}, share::{RssShare, RssShareVec}}, share::gf2p64::GF2p64Subfield, util::{mul_triple_vec::{GF2p64SubfieldEncoder, MulTripleEncoder, MulTripleRecorder, MulTripleVector, Z64TripleEncoder}, ArithmeticBlackBox}, wollut16_malsec};
+use crate::rep3_core::{network::{task::{Direction, IoLayerOwned}, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, DigestExt, MainParty, Party, RngExt, ThreadParty}, share::{RssShare, RssShareVec}};
 
 use crate::{
-    aes::GF8InvBlackBox,
-    chida,
-    share::{gf8::GF8, Field},
+    aes::GF8InvBlackBox, chida, share::{gf2p64::GF2p64Subfield, gf8::GF8, Field}, util::{mul_triple_vec::{GF2p64SubfieldEncoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec
 };
 
 pub mod offline;
 
 pub struct FurukawaParty<F: Field + DigestExt + Sync + Send + GF2p64Subfield> {
     inner: MainParty,
-    part: FurukawaPartyPart<F>,
-}
-
-struct FurukawaPartyPart<F: Field + DigestExt + Sync + Send> {
     triples_to_check: MulTripleVector<F>,
     pre_processing: Option<MulTripleVector<F>>,
     use_recursive_check: bool,
-}
-
-trait GF2p64EncoderFunctor<F: Field + DigestExt + Sync + Send> {
-    fn create_encoder<'a>(party: &'a mut FurukawaPartyPart<F>) -> impl MulTripleEncoder + Send + Sync + 'a;
 }
 
 impl<F: Field + DigestExt + Sync + Send + GF2p64Subfield> FurukawaParty<F> {
     pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_str: Option<String>, use_recursive_check: bool) -> MpcResult<Self> {
         MainParty::setup(connected, n_worker_threads, prot_str).map(|party| Self {
             inner: party,
-            part: FurukawaPartyPart::new(use_recursive_check),
+            triples_to_check: MulTripleVector::new(),
+            pre_processing: None,
+            use_recursive_check,
         })
+    }
+
+    pub fn prepare_multiplications(&mut self, n_mults: usize) -> MpcResult<()>
+    where
+        F: Send + Sync,
+    {
+        // if we use the recursive check, no need for pre-processing
+        if !self.use_recursive_check {
+            // run the bucket cut-and-choose
+            if let Some(ref pre_processing) = self.pre_processing {
+                println!("Discarding {} left-over triples", pre_processing.len());
+                self.pre_processing = None;
+            }
+            self.pre_processing = Some(offline::bucket_cut_and_choose(&mut self.inner, n_mults)?);
+        }
+        
+        Ok(())
     }
 
     pub fn start_input_phase(&mut self) -> InputPhase {
         InputPhase::new(&mut self.inner)
-    }
-
-    pub fn inner(&self) -> &MainParty {
-        &self.inner
     }
 
     #[inline]
@@ -66,86 +71,45 @@ impl<F: Field + DigestExt + Sync + Send + GF2p64Subfield> FurukawaParty<F> {
         }
     }
 
-    pub fn output_phase<T, OF: FnOnce(&mut OutputPhase) -> MpcResult<T>>(
-        &mut self,
-        block: OF,
-    ) -> MpcResult<T>
-    where
-        F: AddAssign,
-    {
-        self.finalize()?;
-
-        // now the output phase can begin
-        let mut phase = OutputPhase::new(&mut self.inner);
-        let res = block(&mut phase)?;
-        phase.end_output_phase()?;
-        Ok(res)
-    }
-}
-
-impl<F: Field + Sync + Send + DigestExt> FurukawaPartyPart<F>
-{
-    fn new(use_recursive_check: bool) -> Self {
-        Self {
-            triples_to_check: MulTripleVector::new(),
-            pre_processing: None,
-            use_recursive_check,
-        }
-    }
-
-    pub fn prepare_multiplications(&mut self, party: &mut MainParty, n_mults: usize) -> MpcResult<()>
-    where
-        F: Send + Sync,
-    {
-        // if we use the recursive check, no need for pre-processing
-        if !self.use_recursive_check {
-            // run the bucket cut-and-choose
-            if let Some(ref pre_processing) = self.pre_processing {
-                println!("Discarding {} left-over triples", pre_processing.len());
-                self.pre_processing = None;
-            }
-            self.pre_processing = Some(offline::bucket_cut_and_choose(party, n_mults)?);
-        }
-        Ok(())
-    }
-
-    pub fn mul(&mut self, party: &mut MainParty, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
+    pub fn mul(&mut self, ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<(Vec<F>, Vec<F>)> {
         debug_assert_eq!(ai.len(), aii.len());
         debug_assert_eq!(ai.len(), bi.len());
         debug_assert_eq!(ai.len(), bii.len());
 
-        izip!(ci.iter_mut(), party.generate_alpha::<F>(ai.len()), ai, aii, bi, bii)
-            .for_each(|(ci_j, alpha_j, ai_j, aii_j, bi_j, bii_j)| {
-                *ci_j = alpha_j + *ai_j * *bi_j + *ai_j * *bii_j + *aii_j * *bi_j
-            });
-        party.io()
+        let ci: Vec<_> = izip!(self.inner.generate_alpha::<F>(ai.len()), ai, aii, bi, bii)
+            .map(|(alpha_j, ai_j, aii_j, bi_j, bii_j)| {
+                alpha_j + *ai_j * *bi_j + *ai_j * *bii_j + *aii_j * *bi_j
+            })
+            .collect();
+        self.inner
+            .io()
             .send_field::<F>(Direction::Previous, ci.iter(), ci.len());
-        let rcv_cii = party.io().receive_field_slice(Direction::Next, cii);
-        rcv_cii.rcv()?;
+        let rcv_cii = self.inner.io().receive_field(Direction::Next, ci.len());
+        let cii = rcv_cii.rcv()?;
         // note down the observed multiplication triple
         self.triples_to_check.record_mul_triple(ai, aii, bi, bii, &ci, &cii);
-        party.io().wait_for_completion();
-        Ok(())
+        self.inner.io().wait_for_completion();
+        Ok((ci, cii))
     }
 
-    // pub fn verify_multiplications(&mut self, party: &mut MainParty) -> MpcResult<()> {
-    //     // check all recorded multiplications
-    //     println!(
-    //         "post-sacrifice: checking {} multiplications",
-    //         self.triples_to_check.len()
-    //     );
-    //     if self.triples_to_check.len() > 0 {
-    //         if self.use_recursive_check {
-    //             self.verify_multiplications_with_recursive_check()
-    //         }else{
-    //             self.verify_multiplications_with_sacrifice(party)
-    //         }
-    //     } else {
-    //         Ok(())
-    //     }
-    // }
+    pub fn verify_multiplications(&mut self) -> MpcResult<()> {
+        // check all recorded multiplications
+        println!(
+            "post-sacrifice: checking {} multiplications",
+            self.triples_to_check.len()
+        );
+        if self.triples_to_check.len() > 0 {
+            if self.use_recursive_check {
+                self.verify_multiplications_with_recursive_check()
+            }else{
+                self.verify_multiplications_with_sacrifice()
+            }
+        } else {
+            Ok(())
+        }
+    }
 
-    fn verify_multiplications_with_sacrifice(&mut self, party: &mut MainParty) -> MpcResult<()> {
+    fn verify_multiplications_with_sacrifice(&mut self) -> MpcResult<()> {
         let prep = self.pre_processing.as_mut().expect("No pre-processed multiplication triples found. Use prepare_multiplications to generate them before the output phase");
         if prep.len() < self.triples_to_check.len() {
             panic!("Not enough pre-processed multiplication triples left: Required {} but found only {}", self.triples_to_check.len(), prep.len());
@@ -153,11 +117,11 @@ impl<F: Field + Sync + Send + DigestExt> FurukawaPartyPart<F>
 
         let leftover = prep.len() - self.triples_to_check.len();
         let (prep_ai, prep_aii, prep_bi, prep_bii, prep_ci, prep_cii) = prep.as_mut_slices();
-        let err = if party.has_multi_threading()
-            && self.triples_to_check.len() > party.num_worker_threads()
+        let err = if self.inner.has_multi_threading()
+            && self.triples_to_check.len() > self.inner.num_worker_threads()
         {
             offline::sacrifice_mt(
-                party,
+                &mut self.inner,
                 self.triples_to_check.len(),
                 1,
                 self.triples_to_check.ai(),
@@ -175,7 +139,7 @@ impl<F: Field + Sync + Send + DigestExt> FurukawaPartyPart<F>
             )
         } else {
             offline::sacrifice(
-                party,
+                &mut self.inner,
                 self.triples_to_check.len(),
                 1,
                 self.triples_to_check.ai(),
@@ -201,32 +165,38 @@ impl<F: Field + Sync + Send + DigestExt> FurukawaPartyPart<F>
         self.triples_to_check.clear();
         err // return the sacrifice error
     }
-}
 
-impl<F: Field + DigestExt + Sync + Send> FurukawaPartyPart<F> 
-where Self: GF2p64EncoderFunctor<F>
-{
-    fn verify_multiplications_with_recursive_check(&mut self, party: &mut MainParty) -> MpcResult<()> {
+    fn verify_multiplications_with_recursive_check(&mut self) -> MpcResult<()> {
         println!("Verifying multiplications");
         let mut context = BroadcastContext::new();
-        let err = if party.has_multi_threading() && self.triples_to_check.len() > party.num_worker_threads() {
-            wollut16_malsec::mult_verification::verify_multiplication_triples_mt(party, &mut context, &mut [&mut Self::create_encoder(self)], false)
+        let err = if self.inner.has_multi_threading() && self.triples_to_check.len() > self.inner.num_worker_threads() {
+            wollut16_malsec::mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut context, &mut [&mut GF2p64SubfieldEncoder(&mut self.triples_to_check)], false)
         }else {
-            wollut16_malsec::mult_verification::verify_multiplication_triples(party, &mut context, &mut [&mut Self::create_encoder(self)], false)
+            wollut16_malsec::mult_verification::verify_multiplication_triples(&mut self.inner, &mut context, &mut [&mut GF2p64SubfieldEncoder(&mut self.triples_to_check)], false)
         };
         match err {
             Ok(true) => {
-                party.compare_view(context)
+                self.inner.compare_view(context)
             },
             Ok(false) => Err(MpcError::MultCheck),
             Err(err) => Err(err)
         }
     }
-}
 
-impl<F: Field + DigestExt + Sync + Send + GF2p64Subfield> GF2p64EncoderFunctor<F> for FurukawaPartyPart<F> {
-    fn create_encoder<'a>(party: &'a mut FurukawaPartyPart<F>) -> impl MulTripleEncoder + Send + Sync + 'a {
-        GF2p64SubfieldEncoder(&mut party.triples_to_check)
+    pub fn output_phase<T, OF: FnOnce(&mut OutputPhase) -> MpcResult<T>>(
+        &mut self,
+        block: OF,
+    ) -> MpcResult<T>
+    where
+        F: AddAssign,
+    {
+        self.verify_multiplications()?;
+
+        // now the output phase can begin
+        let mut phase = OutputPhase::new(&mut self.inner);
+        let res = block(&mut phase)?;
+        phase.end_output_phase()?;
+        Ok(res)
     }
 }
 
@@ -235,18 +205,16 @@ pub struct InputPhase<'a> {
     context: BroadcastContext,
 }
 
-impl<'a> InputPhase<'a>
-{
-    fn new(party: &'a mut MainParty) -> Self {
+impl<'a> InputPhase<'a> {
+    pub fn new(party: &'a mut MainParty) -> Self {
         Self {
             party,
             context: BroadcastContext::new(),
         }
     }
 
-    pub fn my_input<F: Field + DigestExt>(&mut self, input: &[F]) -> MpcResult<RssShareVec<F>>
-    {
-        let a = self.party.generate_random::<F>(input.len());
+    pub fn my_input<F: Field + RngExt + DigestExt>(&mut self, input: &[F]) -> MpcResult<RssShareVec<F>> {
+        let a: Vec<RssShare<F>> = self.party.generate_random(input.len());
         let b = self
             .party
             .open_rss_to(&mut self.context, &a, self.party.i)?;
@@ -254,19 +222,19 @@ impl<'a> InputPhase<'a>
         for i in 0..b.len() {
             b[i] += input[i];
         }
-        self.party.broadcast_round(&mut self.context, &mut [], &mut [], b.as_slice())?;
+        self.party
+            .broadcast_round(&mut self.context, &mut [], &mut [], b.as_slice())?;
         Ok(a.into_iter()
             .zip(b)
             .map(|(ai, bi)| self.party.constant(bi) - ai)
             .collect())
     }
 
-    pub fn other_input<F: Field + DigestExt>(
+    pub fn other_input<F: Field + RngExt + DigestExt>(
         &mut self,
         input_party: usize,
         n_inputs: usize,
-    ) -> MpcResult<RssShareVec<F>>
-    {
+    ) -> MpcResult<RssShareVec<F>> {
         assert_ne!(self.party.i, input_party);
         let a = self.party.generate_random(n_inputs);
         let b = self
@@ -276,10 +244,12 @@ impl<'a> InputPhase<'a>
         let mut b = vec![F::ZERO; n_inputs];
         match (self.party.i, input_party) {
             (0, 2) | (1, 0) | (2, 1) => {
-                self.party.broadcast_round(&mut self.context, &mut [], &mut b, &[])?
+                self.party
+                    .broadcast_round(&mut self.context, &mut [], &mut b, &[])?
             }
             (0, 1) | (1, 2) | (2, 0) => {
-                self.party.broadcast_round(&mut self.context, &mut b, &mut [], &[])?
+                self.party
+                    .broadcast_round(&mut self.context, &mut b, &mut [], &[])?
             }
             _ => unreachable!(),
         }
@@ -289,35 +259,30 @@ impl<'a> InputPhase<'a>
             .collect())
     }
 
+    pub fn input_round<F: Field + RngExt + DigestExt>(&mut self, my_input: &[F]) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
+        let in1 = if self.party.i == 0 {
+            self.my_input(my_input)
+        } else {
+            self.other_input(0, my_input.len())
+        }?;
+
+        let in2 = if self.party.i == 1 {
+            self.my_input(my_input)
+        } else {
+            self.other_input(1, my_input.len())
+        }?;
+
+        let in3 = if self.party.i == 2 {
+            self.my_input(my_input)
+        } else {
+            self.other_input(2, my_input.len())
+        }?;
+        Ok((in1, in2, in3))
+    }
+
     pub fn end_input_phase(self) -> MpcResult<()> {
         self.party.compare_view(self.context)
     }
-}
-
-pub fn input_round<F: Field + DigestExt>(party: &mut MainParty, my_input: &[F]) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>
-{
-    let party_index = party.i;
-    let mut input_phase = InputPhase::new(party);
-
-    let in1 = if party_index == 0 {
-        input_phase.my_input(my_input)
-    } else {
-        input_phase.other_input(0, my_input.len())
-    }?;
-
-    let in2 = if party_index == 1 {
-        input_phase.my_input(my_input)
-    } else {
-        input_phase.other_input(1, my_input.len())
-    }?;
-
-    let in3 = if party_index == 2 {
-        input_phase.my_input(my_input)
-    } else {
-        input_phase.other_input(2, my_input.len())
-    }?;
-    input_phase.end_input_phase()?;
-    Ok((in1, in2, in3))
 }
 
 pub struct OutputPhase<'a> {
@@ -361,16 +326,14 @@ impl<'a> OutputPhase<'a>
     }
 }
 
-impl<F: Field + Send + Sync + DigestExt + GF2p64Subfield> ArithmeticBlackBox<F> for FurukawaParty<F>
-where FurukawaPartyPart<F>: GF2p64EncoderFunctor<F>
-{
+impl<F: Field + DigestExt + Send + Sync + GF2p64Subfield> ArithmeticBlackBox<F> for FurukawaParty<F> {
 
     fn io(&self) -> &IoLayerOwned {
         self.inner.io()
     }
 
     fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-        self.part.prepare_multiplications(&mut self.inner, n_multiplications)
+        self.prepare_multiplications(n_multiplications)
     }
 
     fn constant(&self, value: F) -> RssShare<F> {
@@ -389,11 +352,43 @@ where FurukawaPartyPart<F>: GF2p64EncoderFunctor<F>
         &mut self,
         my_input: &[F],
     ) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)> {
-        input_round(&mut self.inner, my_input)
+        let party_index = self.inner.i;
+        let mut input_phase = self.start_input_phase();
+
+        let in1 = if party_index == 0 {
+            input_phase.my_input(my_input)
+        } else {
+            input_phase.other_input(0, my_input.len())
+        }?;
+
+        let in2 = if party_index == 1 {
+            input_phase.my_input(my_input)
+        } else {
+            input_phase.other_input(1, my_input.len())
+        }?;
+
+        let in3 = if party_index == 2 {
+            input_phase.my_input(my_input)
+        } else {
+            input_phase.other_input(2, my_input.len())
+        }?;
+        input_phase.end_input_phase()?;
+        Ok((in1, in2, in3))
     }
 
-    fn mul(&mut self, ci: &mut [F], cii: &mut [F], ai: &[F], aii: &[F], bi: &[F], bii: &[F]) -> MpcResult<()> {
-        self.part.mul(&mut self.inner, ci, cii, ai, aii, bi, bii)
+    fn mul(
+        &mut self,
+        ci: &mut [F],
+        cii: &mut [F],
+        ai: &[F],
+        aii: &[F],
+        bi: &[F],
+        bii: &[F],
+    ) -> MpcResult<()> {
+        let (vci, vcii) = self.mul(ai, aii, bi, bii)?;
+        ci.copy_from_slice(&vci);
+        cii.copy_from_slice(&vcii);
+        Ok(())
     }
 
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>> {
@@ -432,81 +427,23 @@ where FurukawaPartyPart<F>: GF2p64EncoderFunctor<F>
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
-        // check all recorded multiplications
-        println!(
-            "post-sacrifice: checking {} multiplications",
-            self.part.triples_to_check.len()
-        );
-        if self.part.triples_to_check.len() > 0 {
-            if self.part.use_recursive_check {
-                self.part.verify_multiplications_with_recursive_check(&mut self.inner)
-            }else{
-                self.part.verify_multiplications_with_sacrifice(&mut self.inner)
-            }
-        } else {
-            Ok(())
-        }
+        self.verify_multiplications()
     }
 }
 
-struct FurukawaPartyPartAbb<'a> {
-    party: &'a mut MainParty,
-    part: &'a mut FurukawaPartyPart<GF8>
-}
-
-impl<'a> ArithmeticBlackBox<GF8> for FurukawaPartyPartAbb<'a> {
+impl GF8InvBlackBox for FurukawaParty<GF8> {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
-        self.party.constant(value)
+        <Self as ArithmeticBlackBox<GF8>>::constant(self, value)
     }
-    fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=GF8> {
-        self.party.generate_alpha(n)
-    }
-    fn generate_random(&mut self, n: usize) -> RssShareVec<GF8> {
-        self.party.generate_random(n)
-    }
-    fn io(&self) -> &IoLayerOwned {
-        self.party.io()
-    }
-    fn pre_processing(&mut self, _n_multiplications: usize) -> MpcResult<()> {
-        unimplemented!()
-    }
-    fn input_round(
-            &mut self,
-            _my_input: &[GF8],
-        ) -> MpcResult<(RssShareVec<GF8>, RssShareVec<GF8>, RssShareVec<GF8>)> {
-        unimplemented!()
-    }
-    fn mul(
-            &mut self,
-            ci: &mut [GF8],
-            cii: &mut [GF8],
-            ai: &[GF8],
-            aii: &[GF8],
-            bi: &[GF8],
-            bii: &[GF8],
-        ) -> MpcResult<()> {
-        self.part.mul(&mut self.party, ci, cii, ai, aii, bi, bii)
-    }
-    fn finalize(&mut self) -> MpcResult<()> {
-        unimplemented!()
-    }
-    fn output_round(&mut self, _si: &[GF8], _sii: &[GF8]) -> MpcResult<Vec<GF8>> {
-        unimplemented!()
-    }
-    fn output_to(&mut self, _to_p1: &[RssShare<GF8>], _to_p2: &[RssShare<GF8>], _to_p3: &[RssShare<GF8>]) -> MpcResult<Vec<GF8>> {
-        unimplemented!()
-    }
-}
-
-impl FurukawaPartyPart<GF8> {
-    fn gf8_inv(&mut self, party: &mut MainParty, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-        if party.has_multi_threading() && party.num_worker_threads() < si.len() {
+    fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+        if self.inner.has_multi_threading() && self.inner.num_worker_threads() < si.len() {
             debug_assert_eq!(si.len(), sii.len());
-            let ranges = party.split_range_equally(si.len());
+            let ranges = self.inner.split_range_equally(si.len());
             let chunk_size = ranges[0].1 - ranges[0].0;
-            let thread_parties = party
+            let thread_parties = self
+                .inner
                 .create_thread_parties_with_additional_data(ranges, |_, _| MulTripleVector::new());
-            let observed_triples = party.run_in_threadpool(|| {
+            let observed_triples = self.inner.run_in_threadpool(|| {
                 Ok(thread_parties
                     .into_par_iter()
                     .zip_eq(si.par_chunks_mut(chunk_size))
@@ -523,163 +460,14 @@ impl FurukawaPartyPart<GF8> {
             self.triples_to_check.join_thread_mul_triple_recorders(observed_triples);
             Ok(())
         } else {
-            chida::online::gf8_inv_layer(&mut FurukawaPartyPartAbb{party, part: self}, si, sii)
+            chida::online::gf8_inv_layer(self, si, sii)
         }
     }
-
-    fn do_preprocessing(&mut self, party: &mut MainParty, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_muls_ks = 4 * 10 * 4 * n_keys; // 4 S-boxes per round, 10 rounds, 4 multiplications per S-box
-        let n_muls_blocks = 16 * 10 * 4 * n_blocks; // 16 S-boxes per round, 10 rounds, 4 multiplications per S-box
-        self.prepare_multiplications(party, n_muls_ks + n_muls_blocks)
-    }
-}
-
-impl GF8InvBlackBox for FurukawaParty<GF8> {
-    fn constant(&self, value: GF8) -> RssShare<GF8> {
-        <Self as ArithmeticBlackBox<GF8>>::constant(self, value)
-    }
-
-    fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-        self.part.gf8_inv(&mut self.inner, si, sii)
-    }
-
     fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        self.part.do_preprocessing(&mut self.inner, n_keys, n_blocks)
+        let n_muls_ks = 4 * 10 * 4 * n_keys; // 4 S-boxes per round, X rounds, 4 multiplications per S-box
+        let n_muls_blocks = 16 * 10 * 4 * n_blocks; // 16 S-boxes per round, X rounds, 4 multiplications per S-box
+        self.prepare_multiplications(n_muls_ks + n_muls_blocks)
     }
-
-    fn main_party_mut(&mut self) -> &mut MainParty {
-        &mut self.inner
-    }
-}
-
-impl GF2p64EncoderFunctor<Z64Bool> for FurukawaPartyPart<Z64Bool> {
-    fn create_encoder<'a>(party: &'a mut FurukawaPartyPart<Z64Bool>) -> impl MulTripleEncoder + Send + Sync + 'a {
-        Z64TripleEncoder(&mut party.triples_to_check)
-    }
-}
-
-pub struct FurukawaGCMParty {
-    inner: MainParty,
-    gf8: FurukawaPartyPart<GF8>,
-    gf128: FurukawaPartyPart<GF128>,
-    z64: FurukawaPartyPart<Z64Bool>,
-}
-
-impl FurukawaGCMParty {
-    pub fn setup(connected: ConnectedParty, n_worker_threads: Option<usize>, prot_string: Option<String>) -> MpcResult<Self> {
-        MainParty::setup(connected, n_worker_threads, prot_string).map(|party| Self {
-            inner: party,
-            gf8: FurukawaPartyPart::new(true),
-            gf128: FurukawaPartyPart::new(true),
-            z64: FurukawaPartyPart::new(true),
-        })
-    }
-
-    fn check_all_multiplications(&mut self) -> MpcResult<()> {
-        println!("Verifying multiplications");
-        let mut context = BroadcastContext::new();
-        
-        // recursive check for GF(2^128) not yet implemented
-        self.gf128.verify_multiplications_with_sacrifice(&mut self.inner)?;
-        
-        let n_triples = self.gf8.triples_to_check.len() + self.z64.triples_to_check.len();
-        let err = if self.inner.has_multi_threading() && n_triples > self.inner.num_worker_threads() {
-            wollut16_malsec::mult_verification::verify_multiplication_triples_mt(&mut self.inner, &mut context, &mut [
-                &mut FurukawaPartyPart::<GF8>::create_encoder(&mut self.gf8),
-                &mut FurukawaPartyPart::<Z64Bool>::create_encoder(&mut self.z64),
-            ], false)
-        }else {
-            wollut16_malsec::mult_verification::verify_multiplication_triples(&mut self.inner, &mut context, &mut [
-                &mut FurukawaPartyPart::<GF8>::create_encoder(&mut self.gf8),
-                &mut FurukawaPartyPart::<Z64Bool>::create_encoder(&mut self.z64),
-            ], false)
-        };
-        match err {
-            Ok(true) => {
-                self.inner.compare_view(context)
-            },
-            Ok(false) => Err(MpcError::MultCheck),
-            Err(err) => Err(err)
-        }
-    }
-}
-
-
-/// Macro to implement the `ArithmeticBlackBox` trait for the `FurukawaGCMParty` struct.
-/// 
-/// # Parameters
-/// - `F`: The field type for which the `ArithmeticBlackBox` trait is implemented. This can be `GF8`, `GF128`, or `Z64Bool`.
-/// - `PART`: The name of the `FurukawaPartyPart` member of the `FurukawaGCMParty` struct to which the calls are delegated.
-macro_rules! impl_arithmetic_black_box {
-    ($F:ty, $PART:ident) => {
-        impl ArithmeticBlackBox<$F> for FurukawaGCMParty {
-
-            fn constant(&self, value: $F) -> RssShare<$F> {
-                self.inner.constant(value)
-            }
-
-            fn generate_alpha(&mut self, n: usize) -> impl Iterator<Item=$F> {
-                self.inner.generate_alpha(n)
-            }
-
-            fn generate_random(&mut self, n: usize) -> RssShareVec<$F> {
-                self.inner.generate_random(n)
-            }
-
-            fn io(&self) -> &IoLayerOwned {
-                self.inner.io()
-            }
-
-            fn pre_processing(&mut self, n_multiplications: usize) -> MpcResult<()> {
-                self.$PART.prepare_multiplications(&mut self.inner, n_multiplications)
-            }
-
-            fn input_round(&mut self, my_input: &[$F]) -> MpcResult<(RssShareVec<$F>, RssShareVec<$F>, RssShareVec<$F>)> {
-                input_round(&mut self.inner, my_input)
-            }
-
-            fn mul(&mut self, ci: &mut [$F], cii: &mut [$F], ai: &[$F], aii: &[$F], bi: &[$F], bii: &[$F]) -> MpcResult<()> {
-                self.$PART.mul(&mut self.inner, ci, cii, ai, aii, bi, bii)
-            }
-
-            fn output_round(&mut self, si: &[$F], sii: &[$F]) -> MpcResult<Vec<$F>> {
-                let mut of = OutputPhase::new(&mut self.inner);
-                let res = of.output(si, sii)?;
-                of.end_output_phase()?;
-                Ok(res)
-            }
-
-            fn output_to(&mut self, to_p1: &[RssShare<$F>], to_p2: &[RssShare<$F>], to_p3: &[RssShare<$F>]) -> MpcResult<Vec<$F>> {
-                let mut of = OutputPhase::new(&mut self.inner);
-                let res = of.output_to_multiple(to_p1, to_p2, to_p3)?;
-                of.end_output_phase()?;
-                Ok(res)
-            }
-        
-            fn finalize(&mut self) -> MpcResult<()> {
-                self.check_all_multiplications()
-            }
-        }
-    };
-}
-
-impl_arithmetic_black_box!(GF8, gf8);
-impl_arithmetic_black_box!(GF128, gf128);
-impl_arithmetic_black_box!(Z64Bool, z64);
-
-impl GF8InvBlackBox for FurukawaGCMParty {
-    fn constant(&self, value: GF8) -> RssShare<GF8> {
-        self.inner.constant(value)
-    }
-
-    fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
-        self.gf8.gf8_inv(&mut self.inner, si, sii)
-    }
-
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        self.gf8.do_preprocessing(&mut self.inner, n_keys, n_blocks)
-    }
-
     fn main_party_mut(&mut self) -> &mut MainParty {
         &mut self.inner
     }
@@ -737,22 +525,19 @@ fn gf8_inv_layer_threadparty(
 
 #[cfg(test)]
 pub mod test {
-
     use crate::aes::test::{
-        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
-        test_inv_aes128_no_keyschedule_gf8,
+        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8
     };
-    use crate::rep3_core::network::ConnectedParty;
-    use crate::rep3_core::party::{DigestExt, RngExt};
-    use crate::rep3_core::share::RssShare;
-    use crate::rep3_core::test::{localhost_connect, TestSetup};
-    use crate::share::gf2p64::GF2p64Subfield;
     use crate::share::gf8::GF8;
-    use crate::share::test::{assert_eq, consistent};
     use crate::share::Field;
     use crate::util::ArithmeticBlackBox;
+    use crate::rep3_core::network::ConnectedParty;
+    use crate::rep3_core::test::{localhost_connect, TestSetup};
+    use crate::rep3_core::party::{DigestExt, RngExt};
+    use crate::rep3_core::share::RssShare;
+    use crate::share::gf2p64::GF2p64Subfield;
+    use crate::share::test::{assert_eq, consistent};
     use rand::thread_rng;
-
 
     use super::FurukawaParty;
 
