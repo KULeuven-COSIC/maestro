@@ -1,6 +1,17 @@
 # MAESTRO
 
-This crate implements different oblivious AES protocols for three parties. The new protocols are described in "MAESTRO: Multi-party AES using Lookup Tables".
+This crate implements different oblivious AES protocols for three parties. The new protocols are described in "[MAESTRO: Multi-party AES using Lookup Tables](https://eprint.iacr.org/2024/1317)".
+
+If you found the software in this repository useful, please consider citing the paper below.
+```
+@misc{cryptoeprint:2024/1317,
+      author = {Hiraku Morita and Erik Pohle and Kunihiko Sadakane and Peter Scholl and Kazunari Tozawa and Daniel Tschudi},
+      title = {{MAESTRO}: Multi-party {AES} using Lookup Tables},
+      howpublished = {Cryptology {ePrint} Archive, Paper 2024/1317},
+      year = {2024},
+      url = {https://eprint.iacr.org/2024/1317}
+}
+```
 
 ## Setup and Building
 
@@ -44,6 +55,7 @@ Options:
       --rep <REP>            The number repetitions of the protocol execution
       --csv <CSV>            Path to write benchmark result data as CSV. Default: result.csv [default: result.csv]
       --all                  If set, benchmark all protocol variants and ignore specified targets.
+      --aes256               If set, the benchmark will compute AES-256, otherwise AES-128 is computed
   -h, --help                 Print help (see more with '--help')
 ```
 The benchmark binary runs the specified protocols `<REP>` times, each computing the forward direction of `<SIMD>` AES blocks in parallel (without keyschedule). The relevant time and communication metrics are written to the file `<CSV>` in csv format.
