@@ -386,7 +386,7 @@ pub mod test {
     use crate::rep3_core::test::TestSetup;
 
     use crate::aes::ss::{aes128_inv_no_keyschedule, aes128_no_keyschedule};
-    use crate::aes::test::{secret_share_aes_key_state, AES_SBOX, AES_TEST_EXPECTED_OUTPUT, AES_TEST_INPUT, AES_TEST_ROUNDKEYS};
+    use crate::aes::test::{secret_share_aes_key_state, AES_SBOX, AES128_TEST_EXPECTED_OUTPUT, AES128_TEST_INPUT, AES128_TEST_ROUNDKEYS};
     use crate::aes::AesKeyState;
     use crate::share::gf8::GF8;
     use crate::share::Field;
@@ -448,7 +448,7 @@ pub mod test {
         n_blocks: usize,
         n_worker_threads: Option<usize>,
     ) {
-        let input: Vec<_> = repeat_n(AES_TEST_INPUT, n_blocks)
+        let input: Vec<_> = repeat_n(AES128_TEST_INPUT, n_blocks)
             .flatten()
             .map(|x| GF8(x))
             .collect();
@@ -458,7 +458,7 @@ pub mod test {
         let mut ks2 = Vec::with_capacity(11);
         let mut ks3 = Vec::with_capacity(11);
         for i in 0..11 {
-            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES128_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
             ks1.push(s1);
             ks2.push(s2);
             ks3.push(s3);
@@ -494,7 +494,7 @@ pub mod test {
             .collect();
 
         for (i, (s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq!(s1 + s2 + s3, GF8(AES_TEST_EXPECTED_OUTPUT[i % 16]));
+            assert_eq!(s1 + s2 + s3, GF8(AES128_TEST_EXPECTED_OUTPUT[i % 16]));
         }
     }
 
@@ -505,7 +505,7 @@ pub mod test {
         n_blocks: usize,
         n_worker_threads: Option<usize>,
     ) {
-        let input: Vec<_> = repeat_n(AES_TEST_EXPECTED_OUTPUT, n_blocks)
+        let input: Vec<_> = repeat_n(AES128_TEST_EXPECTED_OUTPUT, n_blocks)
             .flatten()
             .map(|x| GF8(x))
             .collect();
@@ -515,7 +515,7 @@ pub mod test {
         let mut ks2 = Vec::with_capacity(11);
         let mut ks3 = Vec::with_capacity(11);
         for i in 0..11 {
-            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
+            let (s1, s2, s3) = secret_share_aes_key_state(&mut rng, &AES128_TEST_ROUNDKEYS[i].map(|x| GF8(x)));
             ks1.push(s1);
             ks2.push(s2);
             ks3.push(s3);
@@ -550,7 +550,7 @@ pub mod test {
             .collect();
 
         for (i, (s1, s2, s3)) in shares.into_iter().enumerate() {
-            assert_eq!(s1 + s2 + s3, GF8(AES_TEST_INPUT[i % 16]));
+            assert_eq!(s1 + s2 + s3, GF8(AES128_TEST_INPUT[i % 16]));
         }
     }
 }

@@ -7,7 +7,7 @@ use rayon::{
 };
 
 use crate::{
-    aes::GF8InvBlackBox, chida::ChidaParty, share::{gf8::GF8, Field}, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox}
+    aes::{AesVariant, GF8InvBlackBox}, chida::ChidaParty, share::{gf8::GF8, Field}, util::{mul_triple_vec::NoMulTripleRecording, ArithmeticBlackBox}
 };
 use crate::rep3_core::{network::task::{Direction, IoLayerOwned},
 party::{error::MpcResult, MainParty}, share::{RssShare, RssShareVec}};
@@ -19,9 +19,9 @@ impl GF8InvBlackBox for LUT256Party {
         self.inner.constant(value)
     }
 
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_rnd_ohv_ks = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
-        let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize, variant: AesVariant) -> MpcResult<()> {
+        let n_rnd_ohv_ks = variant.n_ks_sboxes() * n_keys; // 1 LUT per S-box
+        let n_rnd_ohv = 16 * variant.n_rounds() * n_blocks; // 16 S-boxes per round, X rounds, 1 LUT per S-box
         let n_prep = n_rnd_ohv + n_rnd_ohv_ks;
         let mut prep =
             if self.inner.has_multi_threading() && 2 * n_prep > self.inner.num_worker_threads() {
@@ -168,8 +168,7 @@ mod test {
         aes::{
             self,
             test::{
-                test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
-                test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
+                test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes
             },
         },
         lut256::test::LUT256Setup,
@@ -213,7 +212,7 @@ mod test {
         test_inv_aes128_no_keyschedule_gf8::<LUT256Setup, _>(100, Some(N_THREADS))
     }
 
-    #[test]
+    // #[test]
     fn create_table() {
         fn set_bit(vec: &mut [u64; 4], index: usize, b: u8) {
             let b = b as u64;
@@ -249,5 +248,21 @@ mod test {
             println!("\t{:?},", table[i]);
         }
         println!("];");
+    }
+
+    #[test]
+    fn aes256_keyschedule_lut256() {
+        test_aes256_keyschedule_gf8::<LUT256Setup, _>(None)
+    }
+
+    #[test]
+    fn aes_256_no_keyschedule_lut256() {
+        test_aes256_no_keyschedule_gf8::<LUT256Setup, _>(1, None)
+    }
+
+    #[test]
+    fn aes_256_no_keyschedule_lut256_mt() {
+        const N_THREADS: usize = 3;
+        test_aes256_no_keyschedule_gf8::<LUT256Setup, _>(100, Some(N_THREADS))
     }
 }

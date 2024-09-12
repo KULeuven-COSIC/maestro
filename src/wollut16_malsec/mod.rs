@@ -14,7 +14,7 @@
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 use crate::{
-    aes::GF8InvBlackBox, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector, Ohv16TripleEncoder, Ohv16TripleVector}, ArithmeticBlackBox}, wollut16::{self, RndOhv16Output}
+    aes::{AesVariant, GF8InvBlackBox}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector, Ohv16TripleEncoder, Ohv16TripleVector}, ArithmeticBlackBox}, wollut16::{self, RndOhv16Output}
 };
 use crate::rep3_core::{
     network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare
@@ -178,9 +178,9 @@ impl GF8InvBlackBox for WL16ASParty {
         self.inner.constant(value)
     }
 
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_rnd_ohv_ks = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 LUT per S-box
-        let n_rnd_ohv = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 LUT per S-box
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize, variant: AesVariant) -> MpcResult<()> {
+        let n_rnd_ohv_ks = variant.n_ks_sboxes() * n_keys; // 1 LUT per S-box
+        let n_rnd_ohv = 16 * variant.n_rounds() * n_blocks; // 16 S-boxes per round, X rounds, 1 LUT per S-box
         match &self.prep_check {
             PrepCheckType::Simple => self.gf2_triples_to_check.reserve_for_more_triples(10 * n_blocks + div16_ceil(n_rnd_ohv_ks)),
             PrepCheckType::BitString => self.gf64_triples_to_check.reserve_for_more_triples(div16_ceil(n_rnd_ohv_ks+n_rnd_ohv)*16*3),

@@ -17,7 +17,7 @@ mod mozaik;
 use core::slice;
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
 
-use aes::{AesKeyState, GF8InvBlackBox};
+use aes::{AesKeyState, AesVariant, GF8InvBlackBox};
 use clap::{Parser, Subcommand};
 use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
 use gcm::{batch::{batch_aes128_gcm_decrypt_with_ks, batch_aes128_gcm_encrypt_with_ks, DecParam, EncParam}, gf128::GF128, Aes128GcmCiphertext, RequiredPrepAesGcm128};
@@ -363,7 +363,7 @@ fn aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlackBox<GF
     let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.message_share.into_iter().unzip();
     ArithmeticBlackBox::<Z64Bool>::pre_processing(party, 2*64*message_share_si.len())?;
     let prep_info = gcm::get_required_prep_for_aes_128_gcm(encrypt_args.associated_data.len(), message_share_si.len()*8);
-    GF8InvBlackBox::do_preprocessing(party, 1, prep_info.blocks)?;
+    GF8InvBlackBox::do_preprocessing(party, 1, prep_info.blocks, AesVariant::Aes128)?;
     ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
     let message_share = convert_ring_to_boolean(party, party_index, &message_share_si, &message_share_sii)?;
     let mut ct = aes128_gcm_encrypt_key_params(party, &encrypt_args.nonce, key_share, &message_share, &encrypt_args.associated_data)?;
@@ -393,7 +393,7 @@ fn batch_aes_gcm_128_enc<Protocol: ArithmeticBlackBox<Z64Bool> + ArithmeticBlack
         acc
     });
     
-    GF8InvBlackBox::do_preprocessing(party, 0, prep_info.blocks)?;
+    GF8InvBlackBox::do_preprocessing(party, 0, prep_info.blocks, AesVariant::Aes128)?;
     ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
 
     let (message_share_si, message_share_sii): (Vec<_>, Vec<_>) = encrypt_args.iter().flat_map(|arg| arg.message_share.iter().copied()).unzip();
@@ -493,7 +493,7 @@ fn batch_mozaik_decrypt<Protocol: ArithmeticBlackBox<GF8> + ArithmeticBlackBox<G
         acc.mul_gf128 += tmp.mul_gf128;
         acc
     });
-    GF8InvBlackBox::do_preprocessing(party, 0, prep_info.blocks)?;
+    GF8InvBlackBox::do_preprocessing(party, 0, prep_info.blocks, AesVariant::Aes128)?;
     ArithmeticBlackBox::<GF128>::pre_processing(party, prep_info.mul_gf128)?;
 
     // check that all ciphertexts have valid length

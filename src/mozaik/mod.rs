@@ -2,7 +2,7 @@ use std::mem;
 
 use itertools::Itertools;
 
-use crate::{aes::GF8InvBlackBox, chida, conversion::Z64Bool, furukawa::{InputPhase, OutputPhase}, gcm::gf128::GF128, gf4_circuit::GF4CircuitSemihonestParty, gf4_circuit_malsec::{gf8_inv_via_gf4_mul_gf4p4_check_mt, gf8_inv_via_gf4_mul_gf4p4_check_no_sync}, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare, RssShareVec}}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64SubfieldEncoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
+use crate::{aes::{AesVariant, GF8InvBlackBox}, chida, conversion::Z64Bool, furukawa::{InputPhase, OutputPhase}, gcm::gf128::GF128, gf4_circuit::GF4CircuitSemihonestParty, gf4_circuit_malsec::{gf8_inv_via_gf4_mul_gf4p4_check_mt, gf8_inv_via_gf4_mul_gf4p4_check_no_sync}, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare, RssShareVec}}, share::{bs_bool16::BsBool16, gf4::BsGF4, gf8::GF8, Field}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64SubfieldEncoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
 
 /// Semi-honest security
 pub struct MozaikParty(GF4CircuitSemihonestParty);
@@ -95,8 +95,8 @@ impl GF8InvBlackBox for MozaikParty {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
         GF8InvBlackBox::constant(&self.0, value)
     }
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        self.0.do_preprocessing(n_keys, n_blocks)
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize, variant: AesVariant) -> MpcResult<()> {
+        self.0.do_preprocessing(n_keys, n_blocks, variant)
     }
     fn gf8_inv(&mut self, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
         self.0.gf8_inv(si, sii)
@@ -265,11 +265,11 @@ impl GF8InvBlackBox for MozaikAsParty {
     fn constant(&self, value: GF8) -> RssShare<GF8> {
         self.inner.constant(value)
     }
-    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize) -> MpcResult<()> {
-        let n_mul_ks_gf4 = (4 * 10 * n_keys * 2)/2; // 4 S-boxes per round, 10 rounds, 2 mult. per S-box (but 2 GF4 elements are packed together)
-        let n_mul_gf4 = (16 * 10 * n_blocks * 2)/2; // 16 S-boxes per round, 10 rounds, 2 mult. per S-box (but 2 GF4 elements are packed together)
-        let n_mul_ks_gf4p4 = 4 * 10 * n_keys; // 4 S-boxes per round, 10 rounds, 1 triple per S-box (but 2 GF4 elements are packed together)
-        let n_mul_gf4p4 = 16 * 10 * n_blocks; // 16 S-boxes per round, 10 rounds, 1 triple per S-box (but 2 GF4 elements are packed together)
+    fn do_preprocessing(&mut self, n_keys: usize, n_blocks: usize, variant: AesVariant) -> MpcResult<()> {
+        let n_mul_ks_gf4 = variant.n_ks_sboxes() * n_keys; // 2 mult. per S-box (but 2 GF4 elements are packed together)
+        let n_mul_gf4 = (16 * variant.n_rounds() * n_blocks * 2)/2; // 16 S-boxes per round, X rounds, 2 mult. per S-box (but 2 GF4 elements are packed together)
+        let n_mul_ks_gf4p4 = variant.n_ks_sboxes() * n_keys; // 1 triple per S-box (but 2 GF4 elements are packed together)
+        let n_mul_gf4p4 = 16 * variant.n_rounds() * n_blocks; // 16 S-boxes per round, X rounds, 1 triple per S-box (but 2 GF4 elements are packed together)
         self.gf4_triples_to_check.reserve_for_more_triples(n_mul_gf4 + n_mul_ks_gf4);
         self.gf4p4_triples_to_check.reserve_for_more_triples(n_mul_gf4p4 + n_mul_ks_gf4p4);
         Ok(())

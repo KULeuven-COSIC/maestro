@@ -4,7 +4,7 @@ use rayon::slice::ParallelSliceMut;
 use crate::rep3_core::party::{MainParty, Party};
 use crate::rep3_core::share::{RssShare, RssShareVec};
 
-use crate::aes::GF8InvBlackBox;
+use crate::aes::{AesVariant, GF8InvBlackBox};
 use crate::util::ArithmeticBlackBox;
 use crate::rep3_core::network::task::{Direction, IoLayerOwned};
 use crate::rep3_core::party::error::MpcResult;
@@ -92,7 +92,7 @@ impl GF8InvBlackBox for ChidaBenchmarkParty {
             }
         }
     }
-    fn do_preprocessing(&mut self, _n_keys: usize, _n_blocks: usize) -> MpcResult<()> {
+    fn do_preprocessing(&mut self, _n_keys: usize, _n_blocks: usize, _variant: AesVariant) -> MpcResult<()> {
         // no preprocessing needed
         Ok(())
     }
@@ -533,8 +533,7 @@ pub fn mul<F: Field>(
 #[cfg(any(test, feature = "benchmark-helper"))]
 pub mod test {
     use crate::aes::test::{
-        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8,
-        test_inv_aes128_no_keyschedule_gf8, test_sub_bytes,
+        test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes
     };
     use crate::chida::online::{
         input_round, input_round_aes_states, mul, output_round, VectorAesState,
@@ -968,5 +967,21 @@ pub mod test {
     fn inv_aes128_no_keyschedule_gf8_optimized_mt() {
         const N_THREADS: usize = 3;
         test_inv_aes128_no_keyschedule_gf8::<ChidaSetupOpt, _>(100, Some(N_THREADS));
+    }
+
+    #[test]
+    fn aes256_keyschedule_gf8_optimized() {
+        test_aes256_keyschedule_gf8::<ChidaSetupOpt, _>(None);
+    }
+
+    #[test]
+    fn aes256_no_keyschedule_gf8_optimized() {
+        test_aes256_no_keyschedule_gf8::<ChidaSetupOpt, _>(1, None);
+    }
+
+    #[test]
+    fn aes256_no_keyschedule_gf8_optimized_mt() {
+        const N_THREADS: usize = 3;
+        test_aes256_no_keyschedule_gf8::<ChidaSetupOpt, _>(100, Some(N_THREADS));
     }
 }
