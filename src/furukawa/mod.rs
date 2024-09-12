@@ -294,7 +294,7 @@ impl<'a> InputPhase<'a>
     }
 }
 
-fn input_round<F: Field + DigestExt>(party: &mut MainParty, my_input: &[F]) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>
+pub fn input_round<F: Field + DigestExt>(party: &mut MainParty, my_input: &[F]) -> MpcResult<(RssShareVec<F>, RssShareVec<F>, RssShareVec<F>)>
 {
     let party_index = party.i;
     let mut input_phase = InputPhase::new(party);
@@ -327,7 +327,7 @@ pub struct OutputPhase<'a> {
 
 impl<'a> OutputPhase<'a>
 {
-    fn new(party: &'a mut MainParty) -> Self {
+    pub fn new(party: &'a mut MainParty) -> Self {
         Self {
             party,
             context: BroadcastContext::new(),
@@ -356,7 +356,7 @@ impl<'a> OutputPhase<'a>
         self.party.open_rss_to_multiple(&mut self.context, to_p1, to_p2, to_p3)
     }
 
-    fn end_output_phase(self) -> MpcResult<()> {
+    pub fn end_output_phase(self) -> MpcResult<()> {
         self.party.compare_view(self.context)
     }
 }

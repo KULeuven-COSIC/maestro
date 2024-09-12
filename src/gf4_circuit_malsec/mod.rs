@@ -182,7 +182,7 @@ impl GF8InvBlackBox for GF4CircuitASParty {
     }
 }
 
-fn gf8_inv_via_gf4_mul_gf4p4_check_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, gf4_triple_rec: &mut Rec, gf4p4_triple_rec: &mut GF4p4TripleVector, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
+pub fn gf8_inv_via_gf4_mul_gf4p4_check_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, gf4_triple_rec: &mut Rec, gf4p4_triple_rec: &mut GF4p4TripleVector, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     let ranges = party.split_range_equally_even(si.len());
     let mul_triple_lengths = ranges.iter().map(|(start, end)| (end-start)).collect_vec();
@@ -208,7 +208,7 @@ fn gf8_inv_via_gf4_mul_gf4p4_check_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut
     Ok(())
 }
 
-fn gf8_inv_via_gf4_mul_gf4p4_check_no_sync<P: Party, Rec: MulTripleRecorder<BsGF4>, Rec2: GF4p4TripleRecorder>(
+pub fn gf8_inv_via_gf4_mul_gf4p4_check_no_sync<P: Party, Rec: MulTripleRecorder<BsGF4>, Rec2: GF4p4TripleRecorder>(
     party: &mut P,
     gf4_triple_rec: &mut Rec,
     gf4p4_triple_rec: &mut Rec2,

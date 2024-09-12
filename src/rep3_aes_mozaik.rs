@@ -18,13 +18,11 @@ use core::slice;
 use std::{fmt::Display, io, path::PathBuf, str::FromStr, time::Duration};
 
 use aes::{AesKeyState, GF8InvBlackBox};
-use chida::{ChidaBenchmarkParty, ImplVariant};
 use clap::{Parser, Subcommand};
 use conversion::{convert_boolean_to_ring, convert_ring_to_boolean, Z64Bool};
-use furukawa::FurukawaGCMParty;
 use gcm::{batch::{batch_aes128_gcm_decrypt_with_ks, batch_aes128_gcm_encrypt_with_ks, DecParam, EncParam}, gf128::GF128, Aes128GcmCiphertext, RequiredPrepAesGcm128};
 use itertools::{izip, repeat_n, Itertools};
-use mozaik::MozaikParty;
+use mozaik::{MozaikAsParty, MozaikParty};
 use rep3_core::{network::{Config, ConnectedParty}, share::{HasZero, RssShare}};
 use rep3_core::party::error::{MpcError, MpcResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -568,7 +566,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
                         let party_index = connected.i;
                         if cli.active {
-                            let mut party = FurukawaGCMParty::setup(connected, cli.threads, None)?;
+                            let mut party = MozaikAsParty::setup(connected, cli.threads, None)?;
                             if encrypt_args.len() == 1 {
                                 let encrypt_args = encrypt_args.into_iter().next().unwrap();
                                 let res = aes_gcm_128_enc(&mut party, party_index, encrypt_args);
@@ -600,7 +598,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                         let connected = ConnectedParty::bind_and_connect(party_index, config, timeout)?;
                         let party_index = connected.i;
                         if cli.active {
-                            let mut party = FurukawaGCMParty::setup(connected, cli.threads, None)?;
+                            let mut party = MozaikAsParty::setup(connected, cli.threads, None)?;
                             if decrypt_args.len() == 1 {
                                 let decrypt_args = decrypt_args.into_iter().next().unwrap();
                                 let res = mozaik_decrypt(&mut party, party_index, decrypt_args);
@@ -610,7 +608,7 @@ fn execute_command<R: io::Read, W: io::Write>(cli: Cli, input_arg_reader: R, out
                                 batch_mozaik_decrypt(&mut party, party_index, decrypt_args)
                             }
                         }else{
-                            let mut party = ChidaBenchmarkParty::setup(connected, ImplVariant::Optimized, cli.threads, None)?;
+                            let mut party = MozaikParty::setup(connected, cli.threads, None)?;
                             if decrypt_args.len() == 1 {
                                 let decrypt_args = decrypt_args.into_iter().next().unwrap();
                                 let res = mozaik_decrypt(&mut party, party_index, decrypt_args);
