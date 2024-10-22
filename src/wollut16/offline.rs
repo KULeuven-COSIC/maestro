@@ -931,6 +931,6 @@ pub mod test {
         assert_eq!(triples1.len(), triples2.len());
         assert_eq!(triples1.len(), triples3.len());
 
-        check_correct_encoding(Ohv16TripleEncoder(&mut triples1), Ohv16TripleEncoder(&mut triples2), Ohv16TripleEncoder(&mut triples3), 2*16);
+        check_correct_encoding(Ohv16TripleEncoder(&mut triples1), Ohv16TripleEncoder(&mut triples2), Ohv16TripleEncoder(&mut triples3), 2*16, true);
     }
 }

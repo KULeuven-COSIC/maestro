@@ -658,8 +658,7 @@ mod rep3_aes_main_test {
 
     static PORT_LOCK: Mutex<()> = Mutex::new(());
 
-    #[test]
-    fn encrypt_aes_gcm_128() {
+    fn encrypt_aes_gcm_128_helper(active: bool) {
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
         let guard = PORT_LOCK.lock().unwrap();
 
@@ -676,7 +675,7 @@ mod rep3_aes_main_test {
                 };
                 let cli = Cli {
                     config: PathBuf::from(path),
-                    active: false,
+                    active,
                     timeout: None,
                     threads: None,
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
@@ -716,7 +715,16 @@ mod rep3_aes_main_test {
     }
 
     #[test]
-    fn encrypt_aes_gcm_128_ks() {
+    fn encrypt_aes_gcm_128() {
+        encrypt_aes_gcm_128_helper(false);
+    }
+
+    #[test]
+    fn encrypt_aes_gcm_128_malicious() {
+        encrypt_aes_gcm_128_helper(true);
+    }
+
+    fn encrypt_aes_gcm_128_ks_helper(active: bool) {
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
         let guard = PORT_LOCK.lock().unwrap();
 
@@ -733,7 +741,7 @@ mod rep3_aes_main_test {
                 };
                 let cli = Cli {
                     config: PathBuf::from(path),
-                    active: false,
+                    active,
                     timeout: None,
                     threads: None,
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
@@ -772,13 +780,22 @@ mod rep3_aes_main_test {
         drop(guard);        
     }
 
+    #[test]
+    fn encrypt_aes_gcm_128_ks() {
+        encrypt_aes_gcm_128_ks_helper(false);
+    }
+
+    #[test]
+    fn encrypt_aes_gcm_128_ks_malicious() {
+        encrypt_aes_gcm_128_ks_helper(true);
+    }
+
     fn additive_share_to_string(v: Vec<RssShare<GF8>>) -> String {
         let x = v.into_iter().map(|rss| rss.si.0).collect_vec();
         hex::encode(x)
     }
 
-    #[test]
-    fn encrypt_aes_gcm_128_ks_batched() {
+    fn encrypt_aes_gcm_128_ks_batched_helper(active: bool) {
         const BATCH_SIZE: usize = 64;
 
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
@@ -825,7 +842,7 @@ mod rep3_aes_main_test {
                 };
                 let cli = Cli {
                     config: PathBuf::from(path),
-                    active: false,
+                    active,
                     timeout: None,
                     threads: None,
                     command: Commands::Encrypt { mode: Mode::AesGcm128 }
@@ -887,6 +904,16 @@ mod rep3_aes_main_test {
         }
     }
 
+    #[test]
+    fn encrypt_aes_gcm_128_ks_batched() {
+        encrypt_aes_gcm_128_ks_batched_helper(false);
+    }
+
+    #[test]
+    fn encrypt_aes_gcm_128_ks_batched_malicious() {
+        encrypt_aes_gcm_128_ks_batched_helper(true);
+    }
+
     fn aes128_gcm_dec_plain(key: &[u8], iv: &[u8], ad: &[u8], ct: &[u8]) -> Option<Vec<u8>> {
         let key = Key::<Aes128Gcm>::from_slice(key);
         let cipher = Aes128Gcm::new(&key);
@@ -905,64 +932,7 @@ mod rep3_aes_main_test {
         out
     }
 
-    //#[test] todo: implement malicius cut-and-choose for bool, then retry
-    fn encrypt_aes_gcm_128_malicious() {
-        // before running this test, make sure that the ports in p1/p2/p3.toml are free
-        let guard = PORT_LOCK.lock().unwrap();
-
-        let mut rng = thread_rng();
-        let (r1, r2, r3) = secret_share_vector_ring(&mut rng, &MESSAGE_RING);
-
-        let party_f = |i: usize, key_share: &'static str, message_share: (Vec<u64>, Vec<u64>)| {
-            move || {
-                let path = match i {
-                    0 => "p1.toml",
-                    1 => "p2.toml",
-                    2 => "p3.toml",
-                    _ => panic!()
-                };
-                let cli = Cli {
-                    config: PathBuf::from(path),
-                    active: true,
-                    timeout: None,
-                    threads: None,
-                    command: Commands::Encrypt { mode: Mode::AesGcm128 }
-                };
-
-                let list_of_numbers = message_share.0.into_iter().zip(message_share.1).map(|(vi, vii)| format!("[{}, {}]", vi, vii)).join(", ");
-
-                // prepare input arg
-                let input_arg = format!("{{\"key_share\": \"{}\", \"nonce\": \"{}\", \"associated_data\": \"{}\", \"message_share\": [{}]}}", key_share, NONCE, AD, list_of_numbers);
-                let mut output = BufWriter::new(Vec::new());
-                execute_command(cli, input_arg.as_bytes(), &mut output);
-
-                // check what is written to the output
-                let buf = output.into_inner().unwrap();
-                let res: EncryptResult = serde_json::from_slice(&buf).unwrap();
-
-                assert!(res.ciphertext.is_some());
-                assert!(res.error.is_none());
-                let ciphertext = res.ciphertext.unwrap();
-                
-                assert_eq!(ciphertext.len(), CT.len() + TAG.len());
-                assert_eq!(&ciphertext[..CT.len()], CT);
-                assert_eq!(&ciphertext[CT.len()..], TAG);
-            }
-        };
-
-        let h1 = thread::spawn(party_f(0, KEY_SHARE_1, (r1.clone(), r2.clone())));
-        let h2 = thread::spawn(party_f(1, KEY_SHARE_2, (r2, r3.clone())));
-        let h3 = thread::spawn(party_f(2, KEY_SHARE_3, (r3, r1)));
-
-        h1.join().unwrap();
-        h2.join().unwrap();
-        h3.join().unwrap();
-
-        drop(guard);        
-    }
-
-    #[test]
-    fn decrypt_aes_gcm_128() {
+    fn decrypt_aes_gcm_128_helper(active: bool) {
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
         let guard = PORT_LOCK.lock().unwrap();
 
@@ -976,7 +946,7 @@ mod rep3_aes_main_test {
                 };
                 let cli = Cli {
                     config: PathBuf::from(path),
-                    active: false,
+                    active,
                     timeout: None,
                     threads: None,
                     command: Commands::Decrypt { mode: Mode::AesGcm128 }
@@ -1018,7 +988,16 @@ mod rep3_aes_main_test {
     }
 
     #[test]
-    fn decrypt_aes_gcm_128_ks() {
+    fn decrypt_aes_gcm_128() {
+        decrypt_aes_gcm_128_helper(false);
+    }
+
+    #[test]
+    fn decrypt_aes_gcm_128_malicious() {
+        decrypt_aes_gcm_128_helper(true);
+    }
+
+    fn decrypt_aes_gcm_128_ks_helper(active: bool) {
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
         let guard = PORT_LOCK.lock().unwrap();
 
@@ -1032,7 +1011,7 @@ mod rep3_aes_main_test {
                 };
                 let cli = Cli {
                     config: PathBuf::from(path),
-                    active: false,
+                    active,
                     timeout: None,
                     threads: None,
                     command: Commands::Decrypt { mode: Mode::AesGcm128 }
@@ -1074,7 +1053,16 @@ mod rep3_aes_main_test {
     }
 
     #[test]
-    fn decrypt_aes_gcm_128_ks_batched() {
+    fn decrypt_aes_gcm_128_ks() {
+        decrypt_aes_gcm_128_ks_helper(false);
+    }
+
+    #[test]
+    fn decrypt_aes_gcm_128_ks_malicious() {
+        decrypt_aes_gcm_128_ks_helper(true);
+    }
+
+    fn decrypt_aes_gcm_128_ks_batched_helper(active: bool) {
         const BATCH_SIZE: usize = 64;
 
         // before running this test, make sure that the ports in p1/p2/p3.toml are free
@@ -1122,7 +1110,7 @@ mod rep3_aes_main_test {
                 };
                 let cli = Cli {
                     config: PathBuf::from(path),
-                    active: false,
+                    active,
                     timeout: None,
                     threads: None,
                     command: Commands::Decrypt { mode: Mode::AesGcm128 }
@@ -1180,5 +1168,15 @@ mod rep3_aes_main_test {
                 assert_eq!(m, s1.0.overflowing_add(s2.0).0.overflowing_add(s3.0).0);
             }
         }
+    }
+
+    #[test]
+    fn decrypt_aes_gcm_128_ks_batched() {
+        decrypt_aes_gcm_128_ks_batched_helper(false);
+    }
+
+    #[test]
+    fn decrypt_aes_gcm_128_ks_batched_malicious() {
+        decrypt_aes_gcm_128_ks_batched_helper(true);
     }
 }

@@ -1135,7 +1135,7 @@ pub mod test {
         })
     }
 
-    pub fn check_correct_encoding<Enc: MulTripleEncoder>(mut enc1: Enc, mut enc2: Enc, mut enc3: Enc, n_expected_triples: usize) {
+    pub fn check_correct_encoding<Enc: MulTripleEncoder>(mut enc1: Enc, mut enc2: Enc, mut enc3: Enc, n_expected_triples: usize, check_weight: bool) {
         assert_eq!(enc1.len_triples_in(), enc2.len_triples_in());
         assert_eq!(enc1.len_triples_in(), enc3.len_triples_in());
         assert_eq!(enc1.len_triples_out(), enc2.len_triples_out());
@@ -1163,16 +1163,23 @@ pub mod test {
 
         let mut weight1 = weight;
         enc1.add_triples(&mut x1, &mut y1, &mut z1i, &mut z1ii, &mut weight1, rand);
-        // check that enc1 changed weight
-        let expected_weight = (0..enc1.len_triples_out()).fold(weight, |acc, _| acc * rand);
-        assert_eq!(weight1, expected_weight);
+        if check_weight {
+            // check that enc1 changed weight
+            let expected_weight = (0..enc1.len_triples_out()).fold(weight, |acc, _| acc * rand);
+            assert_eq!(weight1, expected_weight);
+        }
 
         let mut weight2 = weight;
         enc2.add_triples(&mut x2, &mut y2, &mut z2i, &mut z2ii, &mut weight2, rand);
-        assert_eq!(weight1, weight2);
+        if check_weight {
+            assert_eq!(weight1, weight2);
+        }
 
         let mut weight3 = weight;
         enc3.add_triples(&mut x3, &mut y3, &mut z3i, &mut z3ii, &mut weight3, rand);
+        if check_weight {
+            assert_eq!(weight1, weight3);
+        }
 
         let mut x_y_sum = GF2p64InnerProd::new();
         // check correct inner product
@@ -1233,7 +1240,7 @@ pub mod test {
         assert_eq(z1, z2, z3, x_y_sum);
     }
 
-    fn generate_and_fill_random_triples<F: Field, R: MulTripleRecorder<F>>(rec1: &mut R, rec2: &mut R, rec3: &mut R, n: usize) {
+    pub fn generate_and_fill_random_triples<F: Field, R: MulTripleRecorder<F>>(rec1: &mut R, rec2: &mut R, rec3: &mut R, n: usize) {
         let mut rng = thread_rng();
 
         let x = F::generate(&mut rng, n);
@@ -1267,7 +1274,7 @@ pub mod test {
         assert_eq!(rec3.len(), N);
 
         // now test if the encoding is correct
-        check_correct_encoding(GF2p64Encoder(&mut rec1), GF2p64Encoder(&mut rec2), GF2p64Encoder(&mut rec3), N);
+        check_correct_encoding(GF2p64Encoder(&mut rec1), GF2p64Encoder(&mut rec2), GF2p64Encoder(&mut rec3), N, true);
 
         // now test if the encoding is correct when encoding in parallel
         check_correct_encoding_par(GF2p64Encoder(&mut rec1), GF2p64Encoder(&mut rec2), GF2p64Encoder(&mut rec3), N);
@@ -1287,7 +1294,7 @@ pub mod test {
         assert_eq!(rec3.len(), N);
 
         // now test if the encoding is correct
-        check_correct_encoding(GF2p64SubfieldEncoder(&mut rec1), GF2p64SubfieldEncoder(&mut rec2), GF2p64SubfieldEncoder(&mut rec3), N);
+        check_correct_encoding(GF2p64SubfieldEncoder(&mut rec1), GF2p64SubfieldEncoder(&mut rec2), GF2p64SubfieldEncoder(&mut rec3), N, true);
 
         // now test if the encoding is correct when encoding in parallel
         check_correct_encoding_par(GF2p64SubfieldEncoder(&mut rec1), GF2p64SubfieldEncoder(&mut rec2), GF2p64SubfieldEncoder(&mut rec3), N);
@@ -1307,7 +1314,7 @@ pub mod test {
         assert_eq!(rec3.len(), N);
 
         // now test if the encoding is correct
-        check_correct_encoding(BsBool16Encoder(&mut rec1), BsBool16Encoder(&mut rec2), BsBool16Encoder(&mut rec3), 16*N);
+        check_correct_encoding(BsBool16Encoder(&mut rec1), BsBool16Encoder(&mut rec2), BsBool16Encoder(&mut rec3), 16*N, true);
 
         // now test if the encoding is correct when encoding in parallel
         check_correct_encoding_par(BsBool16Encoder(&mut rec1), BsBool16Encoder(&mut rec2), BsBool16Encoder(&mut rec3), 16*N);
@@ -1327,7 +1334,7 @@ pub mod test {
         assert_eq!(rec3.len(), N);
 
         // now test if the encoding is correct
-        check_correct_encoding(BsGF4Encoder(&mut rec1), BsGF4Encoder(&mut rec2), BsGF4Encoder(&mut rec3), 2*N);
+        check_correct_encoding(BsGF4Encoder(&mut rec1), BsGF4Encoder(&mut rec2), BsGF4Encoder(&mut rec3), 2*N, true);
 
         // now test if the encoding is correct when encoding in parallel
         check_correct_encoding_par(BsGF4Encoder(&mut rec1), BsGF4Encoder(&mut rec2), BsGF4Encoder(&mut rec3), 2*N);
@@ -1386,7 +1393,7 @@ pub mod test {
         });
 
         // now test if the encoding is correct
-        check_correct_encoding(Ohv16TripleEncoder(&mut rec1), Ohv16TripleEncoder(&mut rec2), Ohv16TripleEncoder(&mut rec3), 16*N);
+        check_correct_encoding(Ohv16TripleEncoder(&mut rec1), Ohv16TripleEncoder(&mut rec2), Ohv16TripleEncoder(&mut rec3), 16*N, true);
 
         // now test if the encoding is correct when encoding in parallel
         check_correct_encoding_par(Ohv16TripleEncoder(&mut rec1), Ohv16TripleEncoder(&mut rec2), Ohv16TripleEncoder(&mut rec3), 16*N);
