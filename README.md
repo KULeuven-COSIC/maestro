@@ -60,29 +60,31 @@ Options:
 ```
 The benchmark binary runs the specified protocols `<REP>` times, each computing the forward direction of `<SIMD>` AES blocks in parallel (without keyschedule). The relevant time and communication metrics are written to the file `<CSV>` in csv format.
 
-The protocols are
+The protocols are (all references refer to sections of the published version of the paper)
 - with semi-honest security
   - `chida`: the baseline work from [Chida et al., "High-Throughput Secure AES Computation" in WAHC'18](https://doi.org/10.1145/3267973.3267977). In the paper this is named GF(2^8)-Circuit.
-  - `lut16`: Protocol 3 and Protocol 4 with pre-processing from Protocol 9
-  - `gf4-circuit`: Protocol 3 where GF(2^4) inversion is computed via x^2 * x^4 * x^8
-  - `lut256`: S-box computed via 8-bit LUT (Protocol 4) with pre-processing from Protocol 5
-  - `lut256-ss`: S-box computed via 8-bit LUT (Protocol 6) with pre-processing from Protocol 4 (variant)
+  - `lut16`: the protocol described in Sect. 3.2 and 3.3 using a length-16 one hot vector for GF(2^4) inversion
+  - `gf4-circuit`: the protocol described in Sect. 3.2 where GF(2^4) inversion is computed via x^2 * x^4 * x^8
+  - `lut256`: S-box computed via 8-bit LUT as described in Sect. 3.5.2. In the paper this is named (2,3)-LUT-256.
+  - `lut256-ss`: S-box computed via 8-bit LUT in additive secret sharing, as described in Sect. 3.5.3. In the paper this named (3,3)-LUT-256.
 - with active security
-  - `mal-chida`: the maliciously secure adaptation of the `chida` baseline. In the paper this is named Mal. GF(2^8)-Circuit.
-  - `mal-chida-rec-check`: the maliciously secure adaptation of the `chida` baseline using Protocol 2 to verify multiplications.
-  - `mal-lut16-bitstring`: maliciously secure version of `lut16` using Protocol 2 to verify multiplications.
-  - `mal-lut16-ohv`: maliciously secure version of `lut16` using Protocol 2 to verify multiplications with reduced number of multiplications to verify (cf. Sect. 3.2 and Appendix C).
-  - `mal-gf4-circuit`: maliciously secure version of `gf4-circuit` using Protocol 2 to verify multiplications
-  - `mal-gf4-circuit-opt`: maliciously secure version of `gf4-circuit` using Protocol 2 to verify multiplications with reduced number of multiplications to verify (cf. Sect. 3.2)
-  - `mal-lut256-ss`: maliciously secure version of `lut256-ss` using Protocol 2 and Protocol 7 (VerifiySbox)
-  - `mal-lut256-ss-opt`: maliciously secure version of `lut256-ss` using Protocol 2 and Protocol 7 (VerifiySbox) with reduced number of multiplications to verify (cf. Appendix C)
+  - `mal-chida`: the maliciously secure adaptation of the `chida` baseline. In the paper this is named GF(2^8)-Circuit.
+  - `mal-chida-rec-check`: the maliciously secure adaptation of the `chida` baseline using the multiplication verification check from Sect. 2.9.
+  - `mal-lut16-bitstring`: maliciously secure version of `lut16` using the multiplication verification check from Sect. 2.9. *Note this protocol is the unoptimized version of `mal-lut16-ohv` and was not reported in the benchmark in the paper*
+  - `mal-lut16-ohv`: maliciously secure version of `lut16` using the multiplication verification check from Sect. 2.9 with reduced number of multiplications to verify (cf. Sect. 3.2).
+  - `mal-gf4-circuit`: maliciously secure version of `gf4-circuit` using the multiplication verification check from Sect. 2.9. *Note this protocol is the unoptimized version of `mal-gf4-circuit-opt` and was not reported in the benchmark in the paper*
+  - `mal-gf4-circuit-opt`: maliciously secure version of `gf4-circuit` using the multiplication verification check from Sect. 2.9 (cf. Sect. 3.2).
+  - `mal-lut256-ss`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 and VerifySbox from Sect. 2.5.3. In the paper this named (3,3)-LUT-256. *Note this protocol is the unoptimized version of `mal-lut256-ss-opt` and was not reported in the benchmark in the paper*
+  - `mal-lut256-ss-opt`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 and VerifySbox from Sect. 2.5.3. In the paper this named (3,3)-LUT-256.
 
 To start the benchmark, run (**in 3 terminals**) 
-- `target/release/maestro --config p1.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p1.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
-- `target/release/maestro --config p2.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p2.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
-- `target/release/maestro --config p3.toml --threads 4 benchmark --simd 250000 --rep 10 --csv result-p3.csv chida mal-chida lut16 gf4-circuit lut256 mal-lut16 mal-gf4-circuit`
+- `target/release/maestro --config p1.toml --threads 4 --simd 100000 --rep 10 --csv result-p1.csv chida lut16 gf4-circuit lut256 lut256-ss mal-chida mal-chida-rec-check mal-lut16-ohv mal-gf4-circuit-opt mal-lut256-ss-opt`
+- `target/release/maestro --config p2.toml --threads 4 --simd 100000 --rep 10 --csv result-p2.csv chida lut16 gf4-circuit lut256 lut256-ss mal-chida mal-chida-rec-check mal-lut16-ohv mal-gf4-circuit-opt mal-lut256-ss-opt`
+- `target/release/maestro --config p3.toml --threads 4 --simd 100000 --rep 10 --csv result-p3.csv chida lut16 gf4-circuit lut256 lut256-ss mal-chida mal-chida-rec-check mal-lut16-ohv mal-gf4-circuit-opt mal-lut256-ss-opt`
 
-(where the number of threads, SIMD etc can be adapted depending on the capabilities of the machine)
+(where the number of threads, SIMD etc can be adapted depending on the capabilities of the machine).
+The protocols `lut256`, `lut256-ss` and `mal-lut256-ss-opt` are very RAM intensive, so the SIMD parameter may need to be reduced.
+To test the benchmark setup on a commodity laptop (e.g., 8GB RAM, `--simd 100000` works well for all but the LUT-256 protocols. For LUT-256 protocols, `--simd 10000` works well)
 
 The benchmark should print some information about the progress. Note that it waits 2 seconds between each run to give proper time to shutdown all network components.
 
@@ -283,11 +285,15 @@ The raw data of the experiments that are reported in the paper can be found in t
 ### Throughput
 - `benchmark-data/10Gbit` contains data of all protocols in the 10 Gbit/s network with batch sizes 50 000, 100 000 and 250 000.
 - `benchmark-data/1Gbit` contains data of all protocols in the 1 Gbit/s network with batch sizes 50 000, 100 000 and 250 000.
+- `benchmark-data/200Mbps-15msRTT` contains data of all protocols in the 200 Mbit/s with 15ms round trip time network with batch sizes 10 000, 50 000 and 100 000.
+- `benchmark-data/100Mbps-30msRTT` contains data of all protocols in the 100 Mbit/s with 30ms round trip time network with batch sizes 10 000, 50 000 and 100 000.
 - `benchmark-data/50Mbps-100msrtt` contains data of all protocols in the WAN network (50 Mbit/s with 100ms round trip time) with batch sizes 10 000m 50 000 and 100 000.
 
 ### Latency
 - `benchmark-data/10Gbit-latency` contains data for 1 AES block in the 10 Gbit/s network,
 - `benchmark-data/1Gbit-latency` contains data for 1 AES block in the 1 Gbit/s network,
+- `benchmark-data/200Mbps-15msRTT-latency` contains data for 1 AES block in the 200 Mbit/s with 15ms round trip time,
+- `benchmark-data/100Mbps-30msRTT-latency` contains data for 1 AES block in the 100 Mbit/s with 30ms round trip time,
 - `benchmark-data/50Mbps-100msrtt-latency` contains data for 1 AES block in the WAN network.
 
 ## Documentation
