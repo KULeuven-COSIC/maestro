@@ -15,12 +15,12 @@ If you found the software in this repository useful, please consider citing the 
 
 ## Setup and Building
 
-1. Install rust ([https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install))
-2. Install openssl (only required for generating certificates for the benchmark setup if the benchmark is not run over localhost)
-3. Install python and the following packages: `pandas numpy` (only required to parse the benchmark results)
-4. Build and run the tests `RUSTFLAGS='-C target-cpu=native' cargo test --lib`
-5. Run the clmul benchmark to verify that the machine offers hardware support for carry-less multiplication `RUSTFLAGS='-C target-cpu=native' cargo bench "CLMUL Multiplication"`
-    You should see similar output like
+1. Install Rust ([https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)) (Version 1.75 or newer).
+2. Install OpenSSL (only required for generating certificates for the benchmark setup if the benchmark is not run over localhost).
+3. Install a recent version of Python 3 and the following packages: `pandas numpy` (only required to parse the benchmark results).
+4. Build and run the tests `RUSTFLAGS='-C target-cpu=native' cargo test --lib`.
+5. Run the clmul benchmark to verify that the machine offers hardware support for carry-less multiplication `RUSTFLAGS='-C target-cpu=native' cargo bench "CLMUL Multiplication"`.
+    You should see similar output like:
     ```
     Running benches/gf2p64_mult_benchmark.rs (target/release/deps/gf2p64_mult_benchmark-1203033260aede3b)
     Gnuplot not found, using plotters backend
@@ -31,7 +31,7 @@ If you found the software in this repository useful, please consider citing the 
     ```
     If so, then clmul has hardware support.
 
-6. Build the benchmark binary `RUSTFLAGS='-C target-cpu=native' cargo build --release --bin maestro --features="clmul"`
+6. Build the benchmark binary `RUSTFLAGS='-C target-cpu=native' cargo build --release --bin maestro --features="clmul"`.
 
 ## Running benchmarks
 The benchmark always requires three parties. These can all be run on one machine (and communicate via localhost) or are on separate machines.
