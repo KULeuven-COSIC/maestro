@@ -3,7 +3,8 @@
 This crate implements different oblivious AES protocols for three parties. The new protocols are described in "[MAESTRO: Multi-party AES using Lookup Tables](https://eprint.iacr.org/2024/1317)".
 
 If you found the software in this repository useful, please consider citing the paper below.
-```
+
+```citation
 @misc{cryptoeprint:2024/1317,
       author = {Hiraku Morita and Erik Pohle and Kunihiko Sadakane and Peter Scholl and Kazunari Tozawa and Daniel Tschudi},
       title = {{MAESTRO}: Multi-party {AES} using Lookup Tables},
@@ -21,7 +22,8 @@ If you found the software in this repository useful, please consider citing the 
 4. Build and run the tests `RUSTFLAGS='-C target-cpu=native' cargo test --lib`.
 5. Run the clmul benchmark to verify that the machine offers hardware support for carry-less multiplication `RUSTFLAGS='-C target-cpu=native' cargo bench "CLMUL Multiplication"`.
     You should see similar output like:
-    ```
+
+    ```bash
     Running benches/gf2p64_mult_benchmark.rs (target/release/deps/gf2p64_mult_benchmark-1203033260aede3b)
     Gnuplot not found, using plotters backend
     Benchmarking CLMUL Multiplication: Collecting 100 samples in estimated 5.0000 s CLMUL Multiplication    time:   [2.2679 ns 2.2710 ns 2.2742 ns]
@@ -29,19 +31,23 @@ If you found the software in this repository useful, please consider citing the 
     2 (2.00%) high mild
     3 (3.00%) high severe
     ```
+
     If so, then clmul has hardware support.
 
 6. Build the benchmark binary `RUSTFLAGS='-C target-cpu=native' cargo build --release --bin maestro --features="clmul"`.
 
 ## Running benchmarks
+
 The benchmark always requires three parties. These can all be run on one machine (and communicate via localhost) or are on separate machines.
 
 ### On localhost
+
 Running three parties on localhost requires no additional configuration. The config files in the repository `p1.toml`, `p2.toml` and `p3.toml` as well as the required key material `keys/p{i}.key`/`keys/p{i}.pem` is already prepared
 and should work out of the box.
 
 The CLI for the benchmark binary (found in `target/release/maestro`) offers some description and help on the parameters. It looks as follows
-```
+
+```bash
 $> target/release/maestro -h
 Usage: maestro [OPTIONS] --config <FILE> --rep <REP> [TARGET]...
 
@@ -58,6 +64,7 @@ Options:
       --aes256               If set, the benchmark will compute AES-256, otherwise AES-128 is computed
   -h, --help                 Print help (see more with '--help')
 ```
+
 The benchmark binary runs the specified protocols `<REP>` times, each computing the forward direction of `<SIMD>` AES blocks in parallel (without keyschedule). The relevant time and communication metrics are written to the file `<CSV>` in csv format.
 
 The protocols are (all references refer to sections of the published version of the paper)
@@ -89,18 +96,22 @@ To test the benchmark setup on a commodity laptop (e.g., 8GB RAM, `--simd 100000
 The benchmark should print some information about the progress. Note that it waits 2 seconds between each run to give proper time to shutdown all network components.
 
 At the end, the benchmark should print something like this
+
 ```
 Benchmarking chida
 Iteration 1
  <...>
 Writing CSV-formatted benchmark results to result-p1.csv
 ```
+
 and `result-p1.csv`, `result-p2.csv`, `result-p3.csv` should be created.
 
 ### On three different machines
+
 Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2` and `M3:PORT3`.
 1. Create matching TLS certificates in `keys` folder:
     - for each machine, create `openssl-config-mX.txt` with the following content
+
     ```
     [ req ]
     default_md = sha256
@@ -117,7 +128,9 @@ Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2
     [ SAN ]
     subjectAltName = IP:M1 <-- change the IP address to e.g. IP:192.168.1.10
     ```
+
     - Run
+
     ```
     for i in "m1" "m2" "m3" 
     do
@@ -127,8 +140,10 @@ Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2
     done
     rm req.csr
     ```
+
     to generate the certificates.
 2. (In the main folder) Create TOML config files for each machine, e.g. `m1.toml` as
+
     ```
     party_index = 1               <-- set to 1, 2 or 3
     [p1]
@@ -150,9 +165,9 @@ Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2
     certificate = "keys/p3.pem"
     private_key = "keys/p3.key"
     ```
+
 3. Make sure that config file `m1.toml` is on machine 1, `m2.toml` on machine 2, etc. and that all certificates (`.pem`) files are on **all** machines.
 4. Now the benchmark can be started as in the localhost case with similar CLI parameters (switching `p1.toml` with `m1.toml`, ...)
-
 
 ### Processing the benchmark data
 
@@ -167,7 +182,7 @@ The script collects the maximum value of each column and protocol execution from
 The slowest time per execution is then averaged ove the number of repeated executions. Taking the number of AES blocks (SIMD) into account, the script also outputs the throughput in blocks per second of the pre-processing and online phase.
 
 An example output is
-```
+
 ### SIMD = 50000
 
 | Protocol | Prep Time | Prep Data (MB) | Online Time | Online Data (MB) | Finalize Time | Prep Throughput | Online Throughput | Total Throughput |
@@ -186,7 +201,6 @@ An example output is
 | mal-lut256-ss 		| 1.04 | 22.00 | 0.49 | 16.00 | 14.89 | 48 049 | 3 250 | 3 044
 | mal-lut256-ss-opt 		| 1.07 | 22.00 | 0.55 | 16.00 | 3.90 | 46 658 | 11 229 | 9 051
 
-
 | Protocol | Latency (ms) |
 | ----- | ----- |
 | chida 		| 437
@@ -202,8 +216,6 @@ An example output is
 | mal-lut16-ohv 		| 2879
 | mal-lut256-ss 		| 15382
 | mal-lut256-ss-opt 		| 4453
-
-
 
 ### SIMD = 100000
 
@@ -223,7 +235,6 @@ An example output is
 | mal-lut256-ss 		| 2.11 | 44.00 | 1.08 | 32.00 | 31.04 | 47 465 | 3 112 | 2 921
 | mal-lut256-ss-opt 		| 1.98 | 44.00 | 0.96 | 32.00 | 7.82 | 50 482 | 11 381 | 9 287
 
-
 | Protocol | Latency (ms) |
 | ----- | ----- |
 | chida 		| 901
@@ -239,8 +250,6 @@ An example output is
 | mal-lut16-ohv 		| 5350
 | mal-lut256-ss 		| 32125
 | mal-lut256-ss-opt 		| 8786
-
-
 
 ### SIMD = 250000
 
@@ -260,7 +269,6 @@ An example output is
 | mal-lut256-ss 		| 5.60 | 110.00 | 2.98 | 80.00 | 65.72 | 44 630 | 3 639 | 3 364
 | mal-lut256-ss-opt 		| 5.22 | 110.00 | 2.82 | 80.00 | 15.64 | 47 884 | 13 547 | 10 560
 
-
 | Protocol | Latency (ms) |
 | ----- | ----- |
 | chida 		| 2011
@@ -276,13 +284,13 @@ An example output is
 | mal-lut16-ohv 		| 13079
 | mal-lut256-ss 		| 68700
 | mal-lut256-ss-opt 		| 18453
-```
-
 
 ## Raw Data of the benchmarks reported in the paper
+
 The raw data of the experiments that are reported in the paper can be found in the `benchmark-data` folder. The csv data format is the same as described above.
 
 ### Throughput
+
 - `benchmark-data/10Gbit` contains data of all protocols in the 10 Gbit/s network with batch sizes 50 000, 100 000 and 250 000.
 - `benchmark-data/1Gbit` contains data of all protocols in the 1 Gbit/s network with batch sizes 50 000, 100 000 and 250 000.
 - `benchmark-data/200Mbps-15msRTT` contains data of all protocols in the 200 Mbit/s with 15ms round trip time network with batch sizes 10 000, 50 000 and 100 000.
@@ -290,6 +298,7 @@ The raw data of the experiments that are reported in the paper can be found in t
 - `benchmark-data/50Mbps-100msrtt` contains data of all protocols in the WAN network (50 Mbit/s with 100ms round trip time) with batch sizes 10 000m 50 000 and 100 000.
 
 ### Latency
+
 - `benchmark-data/10Gbit-latency` contains data for 1 AES block in the 10 Gbit/s network,
 - `benchmark-data/1Gbit-latency` contains data for 1 AES block in the 1 Gbit/s network,
 - `benchmark-data/200Mbps-15msRTT-latency` contains data for 1 AES block in the 200 Mbit/s with 15ms round trip time,
@@ -301,6 +310,7 @@ The raw data of the experiments that are reported in the paper can be found in t
 All details on the implemented protocols are found in the research paper. 
 
 To generate and view the code documentation run
+
 ```
 cargo doc --open
 ```
