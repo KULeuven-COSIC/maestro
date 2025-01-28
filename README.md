@@ -67,22 +67,22 @@ Options:
 
 The benchmark binary runs the specified protocols `<REP>` times, each computing the forward direction of `<SIMD>` AES blocks in parallel (without keyschedule). The relevant time and communication metrics are written to the file `<CSV>` in csv format.
 
-The protocols are (all references refer to sections of the published version of the paper)
+The protocols are (all references refer to the published version of the paper)
 - with semi-honest security
   - `chida`: the baseline work from [Chida et al., "High-Throughput Secure AES Computation" in WAHC'18](https://doi.org/10.1145/3267973.3267977). In the paper this is named GF(2^8)-Circuit.
-  - `lut16`: the protocol described in Sect. 3.2 and 3.3 using a length-16 one hot vector for GF(2^4) inversion
-  - `gf4-circuit`: the protocol described in Sect. 3.2 where GF(2^4) inversion is computed via x^2 * x^4 * x^8
-  - `lut256`: S-box computed via 8-bit LUT as described in Sect. 3.5.2. In the paper this is named (2,3)-LUT-256.
-  - `lut256-ss`: S-box computed via 8-bit LUT in additive secret sharing, as described in Sect. 3.5.3. In the paper this named (3,3)-LUT-256.
+  - `lut16`: the protocol described in Sect. 3.2 and 3.3 using a length-16 one hot vector for GF(2^4) inversion (Protocol 3 and 4 with preprocessing from Protocol 8)
+  - `gf4-circuit`: the protocol described in Sect. 3.2 where GF(2^4) inversion is computed via x^2 * x^4 * x^8 (Protocol 3)
+  - `lut256`: S-box computed via 8-bit LUT as described in Sect. 3.5.2 (Protocol 4 with preprocessing from Protocol 5). In the paper this is named (2,3)-LUT-256.
+  - `lut256-ss`: S-box computed via 8-bit LUT in additive secret sharing, as described in Sect. 3.5.3 (Protocol 6 and 7 with preprocessing from Protocol 8). In the paper this named (3,3)-LUT-256.
 - with active security
   - `mal-chida`: the maliciously secure adaptation of the `chida` baseline. In the paper this is named GF(2^8)-Circuit.
-  - `mal-chida-rec-check`: the maliciously secure adaptation of the `chida` baseline using the multiplication verification check from Sect. 2.9.
-  - `mal-lut16-bitstring`: maliciously secure version of `lut16` using the multiplication verification check from Sect. 2.9. *Note this protocol is the unoptimized version of `mal-lut16-ohv` and was not reported in the benchmark in the paper*
-  - `mal-lut16-ohv`: maliciously secure version of `lut16` using the multiplication verification check from Sect. 2.9 with reduced number of multiplications to verify (cf. Sect. 3.2).
-  - `mal-gf4-circuit`: maliciously secure version of `gf4-circuit` using the multiplication verification check from Sect. 2.9. *Note this protocol is the unoptimized version of `mal-gf4-circuit-opt` and was not reported in the benchmark in the paper*
-  - `mal-gf4-circuit-opt`: maliciously secure version of `gf4-circuit` using the multiplication verification check from Sect. 2.9 (cf. Sect. 3.2).
-  - `mal-lut256-ss`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 and VerifySbox from Sect. 2.5.3. In the paper this named (3,3)-LUT-256. *Note this protocol is the unoptimized version of `mal-lut256-ss-opt` and was not reported in the benchmark in the paper*
-  - `mal-lut256-ss-opt`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 and VerifySbox from Sect. 2.5.3. In the paper this named (3,3)-LUT-256.
+  - `mal-chida-rec-check`: the maliciously secure adaptation of the `chida` baseline using the multiplication verification check from Sect. 2.9 (Protocol 2).
+  - `mal-lut16-bitstring`: maliciously secure version of `lut16` using the multiplication verification check from Sect. 2.9 (Protocol 2). *Note this protocol is the unoptimized version of `mal-lut16-ohv` and was not reported in the benchmark in the paper*
+  - `mal-lut16-ohv`: maliciously secure version of `lut16` using the multiplication verification check from Sect. 2.9 (Protocol 2) with reduced number of multiplications to verify (cf. Sect. 3.2).
+  - `mal-gf4-circuit`: maliciously secure version of `gf4-circuit` using the multiplication verification check from Sect. 2.9 (Protocol 2). *Note this protocol is the unoptimized version of `mal-gf4-circuit-opt` and was not reported in the benchmark in the paper*
+  - `mal-gf4-circuit-opt`: maliciously secure version of `gf4-circuit` using the multiplication verification check from Sect. 2.9 (Protocol 2) with reduced number of multiplications to verify (cf. Sect. 3.2).
+  - `mal-lut256-ss`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 (Protocol 2) and VerifySbox (Protocol 7) from Sect. 2.5.3. In the paper this named (3,3)-LUT-256. *Note this protocol is the unoptimized version of `mal-lut256-ss-opt` and was not reported in the benchmark in the paper*
+  - `mal-lut256-ss-opt`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 (Protocol 2) and VerifySbox (Protocol 7) from Sect. 2.5.3. In the paper this named (3,3)-LUT-256.
 
 To start the benchmark, run (**in 3 terminals**) 
 - `target/release/maestro --config p1.toml --threads 4 --simd 100000 --rep 10 --csv result-p1.csv chida lut16 gf4-circuit lut256 lut256-ss mal-chida mal-chida-rec-check mal-lut16-ohv mal-gf4-circuit-opt mal-lut256-ss-opt`
@@ -314,3 +314,24 @@ To generate and view the code documentation run
 ```
 cargo doc --open
 ```
+
+To find the location in the source code of each protocol, first check the corresponding `ProtocolVariant` value in `main.rs` and follow its use.
+
+All protocols are implemented via `XXParty` wrapper that represent the collection of subprotocols. Some optimizations are implemented via flags that are set during the setup of `XXParty`.
+
+
+| Protocol Name| Wrapper Class | Notes |
+|--|--|--|
+| `chida` | `chida::ChidaBenchmarkParty` in src/chida/mod.rs |
+| `lut16`| `wollut16::WL16Party` in src/wollut16/mod.rs |
+| `gf4-circuit` | `gf4_circuit::GF4CircuitSemihonestParty` in src/gf4_circuit/mod.rs |
+| `lut256` | `lut256::LUT256Party` in src/lut256/mod.rs |
+| `lut256-ss` | `lut256::Lut256SSParty` in src/lut256/lut256_ss.rs |
+| `mal-chida` | `furukawa::FurukawaParty` in src/furukawa/mod.rs |
+| `mal-chida-rec-check` | `furukawa::FurukawaParty` in src/furukawa/mod.rs | see options in `FurukawaParty::setup` |
+| `mal-lut16-bitstring` | `wollut16_malsec::WL16ASParty` in src/wollut16_malsec/mod.rs |
+| `mal-lut16-ohv` | `wollut16_malsec::WL16ASParty` in src/wollut16_malsec/mod.rs | see options in `WL16ASParty::setup` |
+| `mal-gf4-circuit` | `gf4_circuit_malsec::GF4CircuitASParty` in src/gf4_circuit_malsec/mod.rs` |
+| `mal-gf4-circuit-opt` | `gf4_circuit_malsec::GF4CircuitASParty` in src/gf4_circuit_malsec/mod.rs | see options in `GF4CircuitASParty::setup` |
+| `mal-lut256-ss` | `lut256::Lut256SSMalParty` in src/lut256/lut256_ss.rs |
+| `mal-lut256-ss-opt` | `lut256::Lut256SSMalParty` in src/lut256/lut256_ss.rs | see options in `Lut256SSMalParty::setup` |

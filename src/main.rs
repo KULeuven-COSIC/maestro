@@ -76,7 +76,7 @@ pub enum ProtocolVariant {
     /// 
     /// [^note]: Chida et al., "High-Throughput Secure AES Computation" in WAHC'18 (<https://doi.org/10.1145/3267973.3267977>)
     MalChida,
-    /// Implementation of the actively secure variant of [ProtocolVariant::Chida] with the inner product check (Verify)
+    /// Implementation of the actively secure variant of [ProtocolVariant::Chida] with the inner product check (Verify, Protocol 2)
     /// described in the MAESTRO paper.
     /// 
     /// - Security: active
@@ -87,7 +87,7 @@ pub enum ProtocolVariant {
     /// Implementation of the semi-honest variant of Protocol 3 using the lookup table protocol for length-16 one-hot vectors.
     /// 
     /// - Security: semi-honest
-    /// - Preprocessing: Generate length-16 random one-hot vectors (Protocol 9)
+    /// - Preprocessing: Generate length-16 random one-hot vectors (Protocol 8)
     /// - SubBytes step: GF(2^8) via tower GF(2^4)^2 (Protocol 3) and Protocol 4
     /// - Multiplication check: n/a
     Lut16,
@@ -108,35 +108,35 @@ pub enum ProtocolVariant {
     /// Implementation of the semi-honest variant described in Sect. 3.5.3
     /// 
     /// - Security: semi-honest
-    /// - Preprocessing: generate 2x16 random one-hot vectors (Protocol 9 variant)
+    /// - Preprocessing: generate 2x16 random one-hot vectors (Protocol 8 variant)
     /// - SubBytes step: GF(2^8) inversion via length-256 table lookup (Protocol 6)
     /// - Multiplication check: n/a
     Lut256Ss,
     /// Implementation of the actively secure variant described in Sect. 3.5.3
     /// 
     /// - Security: active
-    /// - Preprocessing: generate 2x16 random one-hot vectors (Protocol 9 variant)
+    /// - Preprocessing: generate 2x16 random one-hot vectors (Protocol 8 variant)
     /// - SubBytes step: GF(2^8) inversion via length-256 table lookup (Protocol 6)
     /// - Multiplication check: Protocol 7 (VerifySbox)
     MalLut256Ss,
     /// Implementation of the actively secure variant described in Sect. 3.5.3
     /// 
     /// - Security: active
-    /// - Preprocessing: generate 2x16 random one-hot vectors (Protocol 9 variant) with reduced number of multiplication checks
+    /// - Preprocessing: generate 2x16 random one-hot vectors (Protocol 8 variant) with reduced number of multiplication checks
     /// - SubBytes step: GF(2^8) inversion via length-256 table lookup (Protocol 6)
     /// - Multiplication check: Protocol 2 (Verify) + Protocol 7 (VerifySbox)
     MalLut256SsOpt,
     /// Implementation of the actively secure variant of Protocol 3 using the lookup table protocol for length-16 one-hot vectors.
     /// 
     /// - Security: active
-    /// - Preprocessing: Generate length-16 random one-hot vectors (Protocol 9)
+    /// - Preprocessing: Generate length-16 random one-hot vectors (Protocol 8)
     /// - SubBytes step: GF(2^8) via tower GF(2^4)^2 (Protocol 3) and Protocol 4
     /// - Multiplication check: Protocol 2 (Verify)
     MalLut16Bitstring,
     /// Implementation of the actively secure variant of Protocol 3 using the lookup table protocol for length-16 one-hot vectors.
     /// 
     /// - Security: active
-    /// - Preprocessing: Generate length-16 random one-hot vectors (Protocol 9) with reduced number of multiplication checks
+    /// - Preprocessing: Generate length-16 random one-hot vectors (Protocol 8) with reduced number of multiplication checks
     /// - SubBytes step: GF(2^8) via tower GF(2^4)^2 (Protocol 3) and Protocol 4 with reduced number of multiplication checks
     /// - Multiplication check: Protocol 2 (Verify)
     MalLut16Ohv,
