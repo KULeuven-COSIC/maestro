@@ -1041,10 +1041,27 @@ mod test {
         target_feature = "neon",
         target_feature = "aes"
     ))]
-    fn fast_test_inner_product() {
+    fn fast_test_inner_product_aarch64() {
         let mut rng = thread_rng();
-        let a: Vec<GF2p64> = rng.generate(29);
-        let b: Vec<GF2p64> = rng.generate(29);
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
+        assert_eq!(
+            GF2p64::inner_product(&a, &b),
+            GF2p64::fast_clmul_inner_product(&a, &b)
+        )
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "clmul",
+        target_arch = "x86_64",
+        target_feature = "sse2",
+        target_feature = "pclmulqdq"
+    ))]
+    fn fast_test_inner_product_x86_64() {
+        let mut rng = thread_rng();
+        let a: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
+        let b: Vec<GF2p64> = GF2p64::generate(&mut rng, 29);
         assert_eq!(
             GF2p64::inner_product(&a, &b),
             GF2p64::fast_clmul_inner_product(&a, &b)
