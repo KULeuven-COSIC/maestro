@@ -68,10 +68,11 @@ Options:
 The benchmark binary runs the specified protocols `<REP>` times, each computing the forward direction of `<SIMD>` AES blocks in parallel (without keyschedule). The relevant time and communication metrics are written to the file `<CSV>` in csv format.
 
 The protocols are (all references refer to the published version of the paper)
+
 - with semi-honest security
   - `chida`: the baseline work from [Chida et al., "High-Throughput Secure AES Computation" in WAHC'18](https://doi.org/10.1145/3267973.3267977). In the paper this is named GF(2^8)-Circuit.
   - `lut16`: the protocol described in Sect. 3.2 and 3.3 using a length-16 one hot vector for GF(2^4) inversion (Protocol 3 and 4 with preprocessing from Protocol 8)
-  - `gf4-circuit`: the protocol described in Sect. 3.2 where GF(2^4) inversion is computed via x^2 * x^4 * x^8 (Protocol 3)
+  - `gf4-circuit`: the protocol described in Sect. 3.2 where GF(2^4) inversion is computed via x^2 \* x^4 \* x^8 (Protocol 3)
   - `lut256`: S-box computed via 8-bit LUT as described in Sect. 3.5.2 (Protocol 4 with preprocessing from Protocol 5). In the paper this is named (2,3)-LUT-256.
   - `lut256-ss`: S-box computed via 8-bit LUT in additive secret sharing, as described in Sect. 3.5.3 (Protocol 6 and 7 with preprocessing from Protocol 8). In the paper this named (3,3)-LUT-256.
 - with active security
@@ -84,7 +85,8 @@ The protocols are (all references refer to the published version of the paper)
   - `mal-lut256-ss`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 (Protocol 2) and VerifySbox (Protocol 7) from Sect. 2.5.3. In the paper this named (3,3)-LUT-256. *Note this protocol is the unoptimized version of `mal-lut256-ss-opt` and was not reported in the benchmark in the paper*
   - `mal-lut256-ss-opt`: maliciously secure version of `lut256-ss` using the multiplication verification check from Sect. 2.9 (Protocol 2) and VerifySbox (Protocol 7) from Sect. 2.5.3. In the paper this named (3,3)-LUT-256.
 
-To start the benchmark, run (**in 3 terminals**) 
+To start the benchmark, run (**in 3 terminals**)
+
 - `target/release/maestro --config p1.toml --threads 4 --simd 100000 --rep 10 --csv result-p1.csv chida lut16 gf4-circuit lut256 lut256-ss mal-chida mal-chida-rec-check mal-lut16-ohv mal-gf4-circuit-opt mal-lut256-ss-opt`
 - `target/release/maestro --config p2.toml --threads 4 --simd 100000 --rep 10 --csv result-p2.csv chida lut16 gf4-circuit lut256 lut256-ss mal-chida mal-chida-rec-check mal-lut16-ohv mal-gf4-circuit-opt mal-lut256-ss-opt`
 - `target/release/maestro --config p3.toml --threads 4 --simd 100000 --rep 10 --csv result-p3.csv chida lut16 gf4-circuit lut256 lut256-ss mal-chida mal-chida-rec-check mal-lut16-ohv mal-gf4-circuit-opt mal-lut256-ss-opt`
@@ -97,7 +99,7 @@ The benchmark should print some information about the progress. Note that it wai
 
 At the end, the benchmark should print something like this
 
-```
+```bash
 Benchmarking chida
 Iteration 1
  <...>
@@ -109,10 +111,11 @@ and `result-p1.csv`, `result-p2.csv`, `result-p3.csv` should be created.
 ### On three different machines
 
 Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2` and `M3:PORT3`.
+
 1. Create matching TLS certificates in `keys` folder:
     - for each machine, create `openssl-config-mX.txt` with the following content
 
-    ```
+    ```text
     [ req ]
     default_md = sha256
     prompt = no
@@ -131,7 +134,7 @@ Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2
 
     - Run
 
-    ```
+    ```bash
     for i in "m1" "m2" "m3" 
     do
         openssl genpkey -algorithm ED25519 > $i.key
@@ -144,7 +147,7 @@ Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2
     to generate the certificates.
 2. (In the main folder) Create TOML config files for each machine, e.g. `m1.toml` as
 
-    ```
+    ```toml
     party_index = 1               <-- set to 1, 2 or 3
     [p1]
     address = "127.0.0.1"         <-- IP address of party 1
@@ -187,103 +190,103 @@ An example output is
 
 | Protocol | Prep Time | Prep Data (MB) | Online Time | Online Data (MB) | Finalize Time | Prep Throughput | Online Throughput | Total Throughput |
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
-| chida 		|  |  | 0.44 | 32.00 | 0.00 |  | 114 528 | 114 528
-| gf4-circuit 		|  |  | 0.32 | 20.00 | 0.00 |  | 158 013 | 158 013
-| lut16 		| 0.24 | 11.00 | 0.30 | 16.00 | 0.00 | 206 463 | 167 955 | 92 614
-| lut256 		| 4.60 | 247.00 | 0.42 | 8.00 | 0.00 | 10 867 | 117 704 | 9 949
-| lut256_ss 		| 0.97 | 22.00 | 0.34 | 16.00 | 0.00 | 51 596 | 148 917 | 38 319
-| mal-chida 		| 9.57 | 234.88 | 0.87 | 96.00 | 0.70 | 5 226 | 31 908 | 4 490
-| mal-chida-rec-check 		|  |  | 0.83 | 32.00 | 2.18 |  | 16 626 | 16 626
-| mal-gf4-circuit 		|  |  | 0.55 | 20.00 | 3.88 |  | 11 293 | 11 293
-| mal-gf4-circuit-gf4p4 		|  |  | 0.98 | 20.00 | 2.08 |  | 16 347 | 16 347
-| mal-lut16-bitstring 		| 1.24 | 11.00 | 0.71 | 16.00 | 2.22 | 40 376 | 17 037 | 11 981
-| mal-lut16-ohv 		| 0.30 | 11.00 | 0.70 | 16.00 | 2.18 | 167 899 | 17 365 | 15 737
-| mal-lut256-ss 		| 1.04 | 22.00 | 0.49 | 16.00 | 14.89 | 48 049 | 3 250 | 3 044
-| mal-lut256-ss-opt 		| 1.07 | 22.00 | 0.55 | 16.00 | 3.90 | 46 658 | 11 229 | 9 051
+| chida   |  |  | 0.44 | 32.00 | 0.00 |  | 114 528 | 114 528 |
+| gf4-circuit   |  |  | 0.32 | 20.00 | 0.00 |  | 158 013 | 158 013 |
+| lut16   | 0.24 | 11.00 | 0.30 | 16.00 | 0.00 | 206 463 | 167 955 | 92 614 |
+| lut256   | 4.60 | 247.00 | 0.42 | 8.00 | 0.00 | 10 867 | 117 704 | 9 949 |
+| lut256_ss   | 0.97 | 22.00 | 0.34 | 16.00 | 0.00 | 51 596 | 148 917 | 38 319 |
+| mal-chida   | 9.57 | 234.88 | 0.87 | 96.00 | 0.70 | 5 226 | 31 908 | 4 490 |
+| mal-chida-rec-check   |  |  | 0.83 | 32.00 | 2.18 |  | 16 626 | 16 626 |
+| mal-gf4-circuit   |  |  | 0.55 | 20.00 | 3.88 |  | 11 293 | 11 293 |
+| mal-gf4-circuit-gf4p4   |  |  | 0.98 | 20.00 | 2.08 |  | 16 347 | 16 347 |
+| mal-lut16-bitstring   | 1.24 | 11.00 | 0.71 | 16.00 | 2.22 | 40 376 | 17 037 | 11 981 |
+| mal-lut16-ohv   | 0.30 | 11.00 | 0.70 | 16.00 | 2.18 | 167 899 | 17 365 | 15 737 |
+| mal-lut256-ss   | 1.04 | 22.00 | 0.49 | 16.00 | 14.89 | 48 049 | 3 250 | 3 044 |
+| mal-lut256-ss-opt   | 1.07 | 22.00 | 0.55 | 16.00 | 3.90 | 46 658 | 11 229 | 9 051 |
 
 | Protocol | Latency (ms) |
 | ----- | ----- |
-| chida 		| 437
-| gf4-circuit 		| 316
-| lut16 		| 298
-| lut256 		| 425
-| lut256_ss 		| 336
-| mal-chida 		| 1567
-| mal-chida-rec-check 		| 3007
-| mal-gf4-circuit 		| 4427
-| mal-gf4-circuit-gf4p4 		| 3059
-| mal-lut16-bitstring 		| 2935
-| mal-lut16-ohv 		| 2879
-| mal-lut256-ss 		| 15382
-| mal-lut256-ss-opt 		| 4453
+| chida   | 437 |
+| gf4-circuit   | 316 |
+| lut16   | 298 |
+| lut256   | 425 |
+| lut256_ss   | 336 |
+| mal-chida   | 1567 |
+| mal-chida-rec-check   | 3007 |
+| mal-gf4-circuit   | 4427 |
+| mal-gf4-circuit-gf4p4   | 3059 |
+| mal-lut16-bitstring   | 2935 |
+| mal-lut16-ohv   | 2879 |
+| mal-lut256-ss   | 15382 |
+| mal-lut256-ss-opt   | 4453 |
 
 ### SIMD = 100000
 
 | Protocol | Prep Time | Prep Data (MB) | Online Time | Online Data (MB) | Finalize Time | Prep Throughput | Online Throughput | Total Throughput |
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
-| chida 		|  |  | 0.90 | 64.00 | 0.00 |  | 110 956 | 110 956
-| gf4-circuit 		|  |  | 0.58 | 40.00 | 0.00 |  | 172 312 | 172 312
-| lut16 		| 0.43 | 22.00 | 0.56 | 32.00 | 0.00 | 231 412 | 179 335 | 101 036
-| lut256 		| 9.15 | 494.00 | 1.01 | 16.00 | 0.00 | 10 928 | 99 155 | 9 843
-| lut256_ss 		| 1.85 | 44.00 | 0.70 | 32.00 | 0.00 | 54 056 | 142 052 | 39 156
-| mal-chida 		| 19.82 | 469.76 | 1.61 | 192.00 | 1.36 | 5 045 | 33 646 | 4 387
-| mal-chida-rec-check 		|  |  | 1.70 | 64.00 | 4.00 |  | 17 559 | 17 559
-| mal-gf4-circuit 		|  |  | 1.08 | 40.00 | 7.64 |  | 11 477 | 11 477
-| mal-gf4-circuit-gf4p4 		|  |  | 1.95 | 40.00 | 3.88 |  | 17 165 | 17 165
-| mal-lut16-bitstring 		| 3.08 | 22.00 | 1.72 | 32.00 | 4.00 | 32 452 | 17 487 | 11 363
-| mal-lut16-ohv 		| 0.55 | 22.00 | 1.43 | 32.00 | 3.92 | 180 460 | 18 691 | 16 937
-| mal-lut256-ss 		| 2.11 | 44.00 | 1.08 | 32.00 | 31.04 | 47 465 | 3 112 | 2 921
-| mal-lut256-ss-opt 		| 1.98 | 44.00 | 0.96 | 32.00 | 7.82 | 50 482 | 11 381 | 9 287
+| chida   |  |  | 0.90 | 64.00 | 0.00 |  | 110 956 | 110 956 |
+| gf4-circuit   |  |  | 0.58 | 40.00 | 0.00 |  | 172 312 | 172 312 |
+| lut16   | 0.43 | 22.00 | 0.56 | 32.00 | 0.00 | 231 412 | 179 335 | 101 036 |
+| lut256   | 9.15 | 494.00 | 1.01 | 16.00 | 0.00 | 10 928 | 99 155 | 9 843 |
+| lut256_ss   | 1.85 | 44.00 | 0.70 | 32.00 | 0.00 | 54 056 | 142 052 | 39 156 |
+| mal-chida   | 19.82 | 469.76 | 1.61 | 192.00 | 1.36 | 5 045 | 33 646 | 4 387 |
+| mal-chida-rec-check   |  |  | 1.70 | 64.00 | 4.00 |  | 17 559 | 17 559 |
+| mal-gf4-circuit   |  |  | 1.08 | 40.00 | 7.64 |  | 11 477 | 11 477 |
+| mal-gf4-circuit-gf4p4   |  |  | 1.95 | 40.00 | 3.88 |  | 17 165 | 17 165 |
+| mal-lut16-bitstring   | 3.08 | 22.00 | 1.72 | 32.00 | 4.00 | 32 452 | 17 487 | 11 363 |
+| mal-lut16-ohv   | 0.55 | 22.00 | 1.43 | 32.00 | 3.92 | 180 460 | 18 691 | 16 937 |
+| mal-lut256-ss   | 2.11 | 44.00 | 1.08 | 32.00 | 31.04 | 47 465 | 3 112 | 2 921 |
+| mal-lut256-ss-opt   | 1.98 | 44.00 | 0.96 | 32.00 | 7.82 | 50 482 | 11 381 | 9 287 |
 
 | Protocol | Latency (ms) |
 | ----- | ----- |
-| chida 		| 901
-| gf4-circuit 		| 580
-| lut16 		| 558
-| lut256 		| 1009
-| lut256_ss 		| 704
-| mal-chida 		| 2972
-| mal-chida-rec-check 		| 5695
-| mal-gf4-circuit 		| 8713
-| mal-gf4-circuit-gf4p4 		| 5826
-| mal-lut16-bitstring 		| 5718
-| mal-lut16-ohv 		| 5350
-| mal-lut256-ss 		| 32125
-| mal-lut256-ss-opt 		| 8786
+| chida   | 901 |
+| gf4-circuit   | 580 |
+| lut16   | 558 |
+| lut256   | 1009 |
+| lut256_ss   | 704  |
+| mal-chida   | 2972 |
+| mal-chida-rec-check   | 5695 |
+| mal-gf4-circuit   | 8713 |
+| mal-gf4-circuit-gf4p4   | 5826 |
+| mal-lut16-bitstring   | 5718 |
+| mal-lut16-ohv   | 5350 |
+| mal-lut256-ss   | 32125 |
+| mal-lut256-ss-opt   | 8786 |
 
 ### SIMD = 250000
 
 | Protocol | Prep Time | Prep Data (MB) | Online Time | Online Data (MB) | Finalize Time | Prep Throughput | Online Throughput | Total Throughput |
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
-| chida 		|  |  | 2.01 | 160.00 | 0.00 |  | 124 290 | 124 290
-| gf4-circuit 		|  |  | 1.39 | 100.00 | 0.00 |  | 179 369 | 179 369
-| lut16 		| 1.12 | 55.00 | 1.38 | 80.00 | 0.00 | 222 340 | 180 606 | 99 656
-| lut256 		| 22.56 | 1235.00 | 2.49 | 40.00 | 0.00 | 11 083 | 100 214 | 9 979
-| lut256_ss 		| 4.74 | 110.00 | 2.12 | 80.00 | 0.00 | 52 769 | 117 991 | 36 462
-| mal-chida 		| 84.70 | 1879.05 | 4.11 | 480.00 | 3.66 | 2 951 | 32 185 | 2 703
-| mal-chida-rec-check 		|  |  | 3.47 | 160.00 | 15.42 |  | 13 235 | 13 235
-| mal-gf4-circuit 		|  |  | 2.56 | 100.00 | 15.70 |  | 13 689 | 13 689
-| mal-gf4-circuit-gf4p4 		|  |  | 5.22 | 100.00 | 8.06 |  | 18 829 | 18 829
-| mal-lut16-bitstring 		| 8.45 | 55.00 | 5.05 | 80.00 | 15.67 | 29 580 | 12 067 | 8 570
-| mal-lut16-ohv 		| 1.33 | 55.00 | 4.18 | 80.00 | 8.90 | 187 348 | 19 113 | 17 344
-| mal-lut256-ss 		| 5.60 | 110.00 | 2.98 | 80.00 | 65.72 | 44 630 | 3 639 | 3 364
-| mal-lut256-ss-opt 		| 5.22 | 110.00 | 2.82 | 80.00 | 15.64 | 47 884 | 13 547 | 10 560
+| chida   |  |  | 2.01 | 160.00 | 0.00 |  | 124 290 | 124 290 |
+| gf4-circuit   |  |  | 1.39 | 100.00 | 0.00 |  | 179 369 | 179 369 |
+| lut16   | 1.12 | 55.00 | 1.38 | 80.00 | 0.00 | 222 340 | 180 606 | 99 656 |
+| lut256   | 22.56 | 1235.00 | 2.49 | 40.00 | 0.00 | 11 083 | 100 214 | 9 979 |
+| lut256_ss   | 4.74 | 110.00 | 2.12 | 80.00 | 0.00 | 52 769 | 117 991 | 36 462 |
+| mal-chida   | 84.70 | 1879.05 | 4.11 | 480.00 | 3.66 | 2 951 | 32 185 | 2 703 |
+| mal-chida-rec-check   |  |  | 3.47 | 160.00 | 15.42 |  | 13 235 | 13 235 |
+| mal-gf4-circuit   |  |  | 2.56 | 100.00 | 15.70 |  | 13 689 | 13 689 |
+| mal-gf4-circuit-gf4p4   |  |  | 5.22 | 100.00 | 8.06 |  | 18 829 | 18 829 |
+| mal-lut16-bitstring   | 8.45 | 55.00 | 5.05 | 80.00 | 15.67 | 29 580 | 12 067 | 8 570 |
+| mal-lut16-ohv   | 1.33 | 55.00 | 4.18 | 80.00 | 8.90 | 187 348 | 19 113 | 17 344 |
+| mal-lut256-ss   | 5.60 | 110.00 | 2.98 | 80.00 | 65.72 | 44 630 | 3 639 | 3 364 |
+| mal-lut256-ss-opt   | 5.22 | 110.00 | 2.82 | 80.00 | 15.64 | 47 884 | 13 547 | 10 560 |
 
 | Protocol | Latency (ms) |
 | ----- | ----- |
-| chida 		| 2011
-| gf4-circuit 		| 1394
-| lut16 		| 1384
-| lut256 		| 2495
-| lut256_ss 		| 2119
-| mal-chida 		| 7767
-| mal-chida-rec-check 		| 18888
-| mal-gf4-circuit 		| 18262
-| mal-gf4-circuit-gf4p4 		| 13277
-| mal-lut16-bitstring 		| 20717
-| mal-lut16-ohv 		| 13079
-| mal-lut256-ss 		| 68700
-| mal-lut256-ss-opt 		| 18453
+| chida   | 2011 |
+| gf4-circuit   | 1394 |
+| lut16   | 1384 |
+| lut256   | 2495 |
+| lut256_ss   | 2119 |
+| mal-chida   | 7767 |
+| mal-chida-rec-check   | 18888 |
+| mal-gf4-circuit   | 18262 |
+| mal-gf4-circuit-gf4p4   | 13277 |
+| mal-lut16-bitstring   | 20717 |
+| mal-lut16-ohv   | 13079 |
+| mal-lut256-ss   | 68700 |
+| mal-lut256-ss-opt   | 18453 |
 
 ## Raw Data of the benchmarks reported in the paper
 
@@ -307,11 +310,11 @@ The raw data of the experiments that are reported in the paper can be found in t
 
 ## Documentation
 
-All details on the implemented protocols are found in the research paper. 
+All details on the implemented protocols are found in the research paper.
 
 To generate and view the code documentation run
 
-```
+```bash
 cargo doc --open
 ```
 
@@ -319,19 +322,18 @@ To find the location in the source code of each protocol, first check the corres
 
 All protocols are implemented via `XXParty` wrapper that represent the collection of subprotocols. Some optimizations are implemented via flags that are set during the setup of `XXParty`.
 
-
 | Protocol Name| Wrapper Class | Notes |
 |--|--|--|
-| `chida` | `chida::ChidaBenchmarkParty` in src/chida/mod.rs |
-| `lut16`| `wollut16::WL16Party` in src/wollut16/mod.rs |
-| `gf4-circuit` | `gf4_circuit::GF4CircuitSemihonestParty` in src/gf4_circuit/mod.rs |
-| `lut256` | `lut256::LUT256Party` in src/lut256/mod.rs |
-| `lut256-ss` | `lut256::Lut256SSParty` in src/lut256/lut256_ss.rs |
-| `mal-chida` | `furukawa::FurukawaParty` in src/furukawa/mod.rs |
+| `chida` | `chida::ChidaBenchmarkParty` in src/chida/mod.rs | |
+| `lut16`| `wollut16::WL16Party` in src/wollut16/mod.rs | |
+| `gf4-circuit` | `gf4_circuit::GF4CircuitSemihonestParty` in src/gf4_circuit/mod.rs | |
+| `lut256` | `lut256::LUT256Party` in src/lut256/mod.rs | |
+| `lut256-ss` | `lut256::Lut256SSParty` in src/lut256/lut256_ss.rs | |
+| `mal-chida` | `furukawa::FurukawaParty` in src/furukawa/mod.rs | |
 | `mal-chida-rec-check` | `furukawa::FurukawaParty` in src/furukawa/mod.rs | see options in `FurukawaParty::setup` |
-| `mal-lut16-bitstring` | `wollut16_malsec::WL16ASParty` in src/wollut16_malsec/mod.rs |
+| `mal-lut16-bitstring` | `wollut16_malsec::WL16ASParty` in src/wollut16_malsec/mod.rs | |
 | `mal-lut16-ohv` | `wollut16_malsec::WL16ASParty` in src/wollut16_malsec/mod.rs | see options in `WL16ASParty::setup` |
-| `mal-gf4-circuit` | `gf4_circuit_malsec::GF4CircuitASParty` in src/gf4_circuit_malsec/mod.rs` |
+| `mal-gf4-circuit` | `gf4_circuit_malsec::GF4CircuitASParty` in src/gf4_circuit_malsec/mod.rs` | |
 | `mal-gf4-circuit-opt` | `gf4_circuit_malsec::GF4CircuitASParty` in src/gf4_circuit_malsec/mod.rs | see options in `GF4CircuitASParty::setup` |
-| `mal-lut256-ss` | `lut256::Lut256SSMalParty` in src/lut256/lut256_ss.rs |
+| `mal-lut256-ss` | `lut256::Lut256SSMalParty` in src/lut256/lut256_ss.rs | |
 | `mal-lut256-ss-opt` | `lut256::Lut256SSMalParty` in src/lut256/lut256_ss.rs | see options in `Lut256SSMalParty::setup` |
