@@ -20,7 +20,7 @@ use crate::rep3_core::{
 /// the protocol computes the component-wise multiplicative inverse.
 ///
 /// The function inputs are:
-/// - `party` - the local [WL16ASParty] `P_i`
+/// - `party` - the local [WL16ASParty](crate::wollut16_malsec::WL16ASParty) `P_i`
 /// - `si` - the first component of `[[x]]_i`
 /// - `sii` - the second component of `[[x]]_i`
 ///
@@ -130,7 +130,7 @@ pub fn gf8_inv_layer_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, tr
 /// the protocol computes the component-wise multiplicative inverse.
 ///
 /// The function inputs are:
-/// - `party` - the local [WL16ASParty] `P_i`
+/// - `party` - the local [WL16ASParty](crate::wollut16_malsec::WL16ASParty) `P_i`
 /// - `si` - the first component of `[[x]]_i`
 /// - `sii` - the second component of `[[x]]_i`
 ///
