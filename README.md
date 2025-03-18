@@ -152,25 +152,27 @@ Suppose that the machines are reachable under IP addresses `M1:PORT1`, `M2:PORT2
     [p1]
     address = "127.0.0.1"         <-- IP address of party 1
     port = 8100                   <-- port of party 1
-    certificate = "keys/p1.pem"   <-- path to certificate of party 1 (required)
-    private_key = "keys/p1.key"   <-- path to corresponding private key of party 1
+    certificate = "keys/m1.pem"   <-- path to certificate of party 1 (required)
+    private_key = "keys/m1.key"   <-- path to corresponding private key of party 1
                                       (optional if party_index != 1)
 
     [p2]
     address = "127.0.0.1"
     port = 8101
-    certificate = "keys/p2.pem"
-    private_key = "keys/p2.key"
+    certificate = "keys/m2.pem"
+    private_key = "keys/m2.key"
 
     [p3]
     address = "127.0.0.1"
     port = 8102
-    certificate = "keys/p3.pem"
-    private_key = "keys/p3.key"
+    certificate = "keys/m3.pem"
+    private_key = "keys/m3.key"
     ```
 
 3. Make sure that config file `m1.toml` is on machine 1, `m2.toml` on machine 2, etc. and that all certificates (`.pem`) files are on **all** machines.
-4. Now the benchmark can be started as in the localhost case with similar CLI parameters (switching `p1.toml` with `m1.toml`, ...)
+4. (optional) change network settings using, e.g., `tc`: `tc qdisc add dev <iface name> root netem rate <bandwidth> delay <0.5 * RTT>`.
+This will limit the bandwidth to `<bandwidth>` and result in a minimum round trip time of `<RTT>` on the network interface device named `iface name` (running `ip addr show` will list all network interfaces). For example, to simulate a 200 Mbit/s network with 15ms RTT, use `tc qdisc add dev <iface name> root netem rate 200mbit delay 7.5ms`
+5. Now the benchmark can be started as in the localhost case with similar CLI parameters (switching `p1.toml` with `m1.toml`, ...)
 
 ### Processing the benchmark data
 
@@ -296,7 +298,7 @@ The raw data of the experiments that are reported in the paper can be found in t
 
 - `benchmark-data/10Gbit` contains data of all protocols in the 10 Gbit/s network with batch sizes 50 000, 100 000 and 250 000.
 - `benchmark-data/1Gbit` contains data of all protocols in the 1 Gbit/s network with batch sizes 50 000, 100 000 and 250 000.
-- `benchmark-data/200Mbps-15msRTT` contains data of all protocols in the 200 Mbit/s with 15ms round trip time network with batch sizes 10 000, 50 000 and 100 000.
+- `benchmark-data/200Mbps-15msRTT` contains data of all protocols in the 200 Mbit/s with 15ms round trip time network with batch sizes 50 000, 100 000 and 150 000.
 - `benchmark-data/100Mbps-30msRTT` contains data of all protocols in the 100 Mbit/s with 30ms round trip time network with batch sizes 10 000, 50 000 and 100 000.
 - `benchmark-data/50Mbps-100msrtt` contains data of all protocols in the WAN network (50 Mbit/s with 100ms round trip time) with batch sizes 10 000m 50 000 and 100 000.
 
