@@ -1,6 +1,6 @@
 # MAESTRO
 
-This crate implements different oblivious AES protocols for three parties. The new protocols are described in "[MAESTRO: Multi-party AES using Lookup Tables](https://eprint.iacr.org/2024/1317)".
+This crate implements different oblivious AES protocols for three parties. The new protocols are described in "[MAESTRO: Multi-party AES using Lookup Tables](https://eprint.iacr.org/2024/1317)" and appears in *Usenix Security '25*.
 
 If you found the software in this repository useful, please consider citing the paper below.
 
@@ -13,6 +13,9 @@ If you found the software in this repository useful, please consider citing the 
       url = {https://eprint.iacr.org/2024/1317}
 }
 ```
+
+Our software has been awarded the functional and reproducible badges, see [Artifact Appendix](artifact-appendix.pdf) for more details.
+
 
 ## Setup and Building
 
