@@ -14,7 +14,7 @@
 //!
 //! [^note]: Wolkerstorfer et al. "An ASIC Implementation of the AES S-Boxes" in CT-RSA 2002, <https://doi.org/10.1007/3-540-45760-7_6>.
 use crate::{
-    aes::{AesVariant, GF8InvBlackBox}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector, Ohv16TripleEncoder, Ohv16TripleVector}, ArithmeticBlackBox}, wollut16::{self, RndOhv16Output}
+    aes::{AesVariant, GF8InvBlackBox}, share::{bs_bool16::BsBool16, gf2p64::GF2p64, gf4::BsGF4, gf8::GF8}, util::{self, ArithmeticBlackBox, mul_triple_vec::{BsBool16Encoder, BsGF4Encoder, GF2p64Encoder, GF4p4TripleEncoder, GF4p4TripleVector, MulTripleRecorder, MulTripleVector, Ohv16TripleEncoder, Ohv16TripleVector}}, wollut16::{self, RndOhv16Output}
 };
 use crate::rep3_core::{
     network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::RssShare
@@ -144,10 +144,7 @@ impl ArithmeticBlackBox<GF8> for WL16ASParty {
     }
 
     fn output_round(&mut self, si: &[GF8], sii: &[GF8]) -> MpcResult<Vec<GF8>> {
-        let output = self.inner.open_rss(&mut self.broadcast_context, si, sii)?;
-        let context = std::mem::replace(&mut self.broadcast_context, BroadcastContext::new());
-        self.inner.compare_view(context)?;
-        Ok(output)
+        util::output_rss_and_compare_view(&mut self.inner, &mut self.broadcast_context, si, sii)
     }
 
     fn finalize(&mut self) -> MpcResult<()> {

@@ -4,7 +4,7 @@ use std::mem;
 use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, ParallelIterator}, slice::{ParallelSlice, ParallelSliceMut}};
 
-use crate::{aes::ss::{GF8InvBlackBoxSS, GF8InvBlackBoxSSMal}, share::{bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf8::GF8}, util::mul_triple_vec::{BsBool16Encoder, MulTripleEncoder, MulTripleRecorder, MulTripleVector, NoMulTripleRecording, Ohv16TripleEncoder, Ohv16TripleVector}, wollut16_malsec::mult_verification};
+use crate::{aes::ss::{GF8InvBlackBoxSS, GF8InvBlackBoxSSMal}, share::{bs_bool16::BsBool16, gf2p64::{GF2p64, GF2p64InnerProd, GF2p64Subfield}, gf8::GF8}, util::{self, mul_triple_vec::{BsBool16Encoder, MulTripleEncoder, MulTripleRecorder, MulTripleVector, NoMulTripleRecording, Ohv16TripleEncoder, Ohv16TripleVector}}, wollut16_malsec::mult_verification};
 use crate::rep3_core::{network::{task::Direction, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare}};
 
 use super::{lut256_tables, offline, RndOhv256OutputSS};
@@ -332,7 +332,7 @@ impl GF8InvBlackBoxSSMal for Lut256SSMalParty {
     }
 
     fn output(&mut self, data_i: &[GF8], data_ii: &[GF8]) -> MpcResult<Vec<GF8>> {
-        self.inner.open_rss(&mut self.context, data_i, data_ii)
+        util::output_rss_and_compare_view(&mut self.inner, &mut self.context, data_i, data_ii)
     }
 
     fn main_party_mut(&mut self) -> &mut MainParty {

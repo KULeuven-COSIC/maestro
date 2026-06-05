@@ -1,4 +1,6 @@
-use crate::rep3_core::{network::task::IoLayerOwned, party::error::MpcResult, share::{RssShare, RssShareVec}};
+use std::ops::Add;
+
+use crate::rep3_core::{network::{NetSerializable, task::IoLayerOwned}, party::{DigestExt, MainParty, broadcast::{Broadcast, BroadcastContext}, error::MpcResult}, share::{RssShare, RssShareVec}};
 
 use crate::share::Field;
 
@@ -28,4 +30,16 @@ pub trait ArithmeticBlackBox<F: Field> {
     ) -> MpcResult<()>;
     fn output_round(&mut self, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>;
     fn finalize(&mut self) -> MpcResult<()>;
+}
+
+/// Opens the replicated share vector (si, sii) to all parties and runs compare-view to verify all broadcasts so far made in the given context.
+/// This check replaces the [BroadcastContext] with a fresh (empty) one.
+/// Outputs the reconstructed vector, or errors.
+pub(crate) fn output_rss_and_compare_view<F>(party: &mut MainParty, context: &mut BroadcastContext, si: &[F], sii: &[F]) -> MpcResult<Vec<F>>
+where F : NetSerializable + Add<Output = F> + Clone + DigestExt
+{
+    let output = party.open_rss(context, si, sii)?;
+    let context = std::mem::replace(context, BroadcastContext::new());
+    party.compare_view(context)?;
+    Ok(output)
 }

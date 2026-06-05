@@ -2,7 +2,7 @@
 use itertools::{izip, Itertools};
 use rayon::{iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator}, slice::ParallelSliceMut};
 
-use crate::{aes::AesVariant, chida, rep3_core::{network::{task::IoLayerOwned, ConnectedParty}, party::{broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}, MainParty, Party}, share::{HasZero, RssShare}}, util::mul_triple_vec::{GF4p4TripleEncoder, GF4p4TripleRecorder, GF4p4TripleVector}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
+use crate::{aes::AesVariant, chida, rep3_core::{network::{ConnectedParty, task::IoLayerOwned}, party::{MainParty, Party, broadcast::{Broadcast, BroadcastContext}, error::{MpcError, MpcResult}}, share::{HasZero, RssShare}}, util::{self, mul_triple_vec::{GF4p4TripleEncoder, GF4p4TripleRecorder, GF4p4TripleVector}}, wollut16_malsec::online::{un_wol_bitslice_gf4, wol_bitslice_gf4}};
 use crate::{aes::GF8InvBlackBox, furukawa, gf4_circuit, share::{gf4::BsGF4, gf8::GF8}, util::{mul_triple_vec::{BsGF4Encoder, MulTripleRecorder, MulTripleVector}, ArithmeticBlackBox}, wollut16_malsec};
 
 mod offline;
@@ -108,7 +108,7 @@ impl ArithmeticBlackBox<GF8> for GF4CircuitASParty {
     }
 
     fn output_round(&mut self, si: &[GF8], sii: &[GF8]) -> MpcResult<Vec<GF8>> {
-        self.inner.open_rss(&mut self.broadcast_context, si, sii)
+        util::output_rss_and_compare_view(&mut self.inner, &mut self.broadcast_context, si, sii)
     }
 
     fn finalize(&mut self) -> MpcResult<()> {
