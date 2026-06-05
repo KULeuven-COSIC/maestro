@@ -315,11 +315,14 @@ where
     F: InnerProduct,
 {
     // Generate RSS sharing of random value
-    let x_prime = party.generate_random(1)[0];
+    let masks = party.generate_random(2);
+    let x_prime = masks[0];
+    let r = masks[1];
     let z_prime = weak_mult(party, &x_prime, &y)?;
     let t = coin_flip(party, context)?;
     let rho = reconstruct(party, context, x + x_prime * t)?;
-    reconstruct(party, context, z + z_prime * t - y * rho).map(|x| x.is_zero())
+    let sigma = weak_mult(party, &(z + z_prime * t - y * rho), &r)?;
+    reconstruct(party, context, sigma).map(|x| x.is_zero())
 }
 
 /// Shared lagrange evaluation of the polynomial h at position x for given (shared) points h(0), h(1), h(2)
@@ -427,7 +430,7 @@ mod test {
 
     use itertools::izip;
     use rand::{thread_rng, CryptoRng, Rng};
-    use crate::rep3_core::{party::{broadcast::{Broadcast, BroadcastContext}, MainParty}, share::{HasZero, RssShare}};
+    use crate::{rep3_core::{party::{MainParty, RngExt, broadcast::{Broadcast, BroadcastContext}}, share::{HasZero, RssShare}}, wollut16_malsec::mult_verification::check_triple};
     use crate::rep3_core::test::{PartySetup, TestSetup};
     use crate::{
         share::{
@@ -463,6 +466,64 @@ mod test {
             PartySetup::localhost_setup(program(a1, b1), program(a2, b2), program(a3, b3));
         consistent(&c1, &c2, &c3);
         assert_eq(c1, c2, c3, c)
+    }
+
+    #[test]
+    fn test_check_triple_correctness() {
+        let mut rng = thread_rng();
+        let a = gen_rand_vec::<_, GF2p64>(&mut rng, 1)[0];
+        let b = gen_rand_vec::<_, GF2p64>(&mut rng, 1)[0];
+        let c = a * b;
+        let (a1, a2, a3) = secret_share(&mut rng, &a);
+        let (b1, b2, b3) = secret_share(&mut rng, &b);
+        let (c1, c2, c3) = secret_share(&mut rng, &c);
+        let program = |a: RssShare<GF2p64>, b: RssShare<GF2p64>, c: RssShare<GF2p64>| {
+            move |p: &mut MainParty| {
+                let mut context = BroadcastContext::new();
+                let out = check_triple(p, &mut context, a, b, c).unwrap();
+                // check context
+                p.compare_view(context).expect("Incorrect broadcast check");
+                out
+            }
+        };
+
+        let ((o1,_), (o2,_), (o3,_)) = PartySetup::localhost_setup(program(a1, b1, c1), program(a2, b2, c2), program(a3, b3, c3));
+        assert!(o1);
+        assert!(o2);
+        assert!(o3);
+    }
+
+    #[test]
+    fn test_check_triple_soundness() {
+        let mut rng = thread_rng();
+        let a = gen_rand_vec::<_, GF2p64>(&mut rng, 1)[0];
+        let b = gen_rand_vec::<_, GF2p64>(&mut rng, 1)[0];
+        // sample non-zero additive error
+        let err = {
+            let mut err = GF2p64::generate(&mut rng, 1)[0];
+            while err.is_zero() {
+                err = GF2p64::generate(&mut rng, 1)[0];
+            }
+            err
+        };
+        let c = a * b + err;
+        let (a1, a2, a3) = secret_share(&mut rng, &a);
+        let (b1, b2, b3) = secret_share(&mut rng, &b);
+        let (c1, c2, c3) = secret_share(&mut rng, &c);
+        let program = |a: RssShare<GF2p64>, b: RssShare<GF2p64>, c: RssShare<GF2p64>| {
+            move |p: &mut MainParty| {
+                let mut context = BroadcastContext::new();
+                let out = check_triple(p, &mut context, a, b, c).unwrap();
+                // check context
+                p.compare_view(context).expect("Incorrect broadcast check");
+                out
+            }
+        };
+
+        let ((o1,_), (o2,_), (o3,_)) = PartySetup::localhost_setup(program(a1, b1, c1), program(a2, b2, c2), program(a3, b3, c3));
+        assert!(!o1);
+        assert!(!o2);
+        assert!(!o3);
     }
 
     #[test]
