@@ -57,7 +57,7 @@ impl<F: Field + DigestExt + Sync + Send + GF2p64Subfield> FurukawaParty<F> {
         Ok(())
     }
 
-    pub fn start_input_phase(&mut self) -> InputPhase<F> {
+    pub fn start_input_phase(&mut self) -> InputPhase<'_, F> {
         InputPhase::new(self)
     }
 

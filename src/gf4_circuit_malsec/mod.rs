@@ -181,7 +181,7 @@ impl GF8InvBlackBox for GF4CircuitASParty {
 fn gf8_inv_via_gf4_mul_gf4p4_check_mt<Rec: MulTripleRecorder<BsGF4>>(party: &mut MainParty, gf4_triple_rec: &mut Rec, gf4p4_triple_rec: &mut GF4p4TripleVector, si: &mut [GF8], sii: &mut [GF8]) -> MpcResult<()> {
     debug_assert_eq!(si.len(), sii.len());
     let ranges = party.split_range_equally_even(si.len());
-    let mul_triple_lengths = ranges.iter().map(|(start, end)| (end-start)).collect_vec();
+    let mul_triple_lengths = ranges.iter().map(|(start, end)| end-start).collect_vec();
     let recorders = gf4p4_triple_rec.create_thread_mul_triple_recorders(&mul_triple_lengths);
     let chunk_size = ranges[0].1 - ranges[0].0;
     let mut threads = party.create_thread_parties_with_additional_data(ranges, |start, end| (Some(gf4_triple_rec.create_thread_mul_triple_recorder(start, end)), None));

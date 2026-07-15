@@ -225,7 +225,7 @@ impl<T: Copy + Debug + HasZero, const N: usize> GenericMulTripleVector<T, N> {
 
     /// Appends sum(task_sizes) new (empty) triples and returns mutable slices to each part of the
     /// new triples (each with length task_sizes[i])
-    pub fn create_slice(&mut self, task_sizes: &[usize]) -> Vec<GenericMulTripleVectorSlice<T, N>> {
+    pub fn create_slice(&mut self, task_sizes: &[usize]) -> Vec<GenericMulTripleVectorSlice<'_, T, N>> {
         let total_range = task_sizes.iter().sum();
         // get a slice of total_range elements
         for i in 0..N {
@@ -743,7 +743,7 @@ impl GF4p4TripleVector {
         self.c.clear();
     }
 
-    pub fn create_thread_mul_triple_recorders(&mut self, task_sizes: &[usize]) -> Vec<GF4P4TripleVectorChild> {
+    pub fn create_thread_mul_triple_recorders(&mut self, task_sizes: &[usize]) -> Vec<GF4P4TripleVectorChild<'_>> {
         let total_range = task_sizes.iter().sum();
         // get a slice of total_range elements
         self.a.append(&mut vec![RssShare::from(GF2p64::ZERO, GF2p64::ZERO); total_range]);
