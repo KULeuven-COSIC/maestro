@@ -430,10 +430,15 @@ impl CommChannel {
         let client_verifier = WebPkiClientVerifier::builder(root_store.into())
             .build()
             .unwrap();
-        ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+        let mut config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
             .with_client_cert_verifier(client_verifier)
             .with_single_cert(vec![my_cert.clone()], my_key)
-            .unwrap()
+            .unwrap();
+        // This library never resumes a session, so avoid sending unsolicited post-handshake
+        // NewSessionTicket messages: on close, unread data in a peer's receive buffer causes the
+        // OS to send an RST instead of a clean FIN, which can abort the peer's in-progress read.
+        config.send_tls13_tickets = 0;
+        config
     }
 
     fn new_client_config(
