@@ -696,7 +696,7 @@ mod tests {
             let bytes_to_read = usize::min(bytes_left, WRITE_SIZE);
             match comm_next_receiver
                 .stream
-                .read(&mut rcv_buf[..bytes_to_read])
+                .try_read(&mut rcv_buf[..bytes_to_read])
             {
                 Ok(n) => bytes_left -= n,
                 Err(io_err) => {

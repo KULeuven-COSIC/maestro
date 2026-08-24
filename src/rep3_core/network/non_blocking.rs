@@ -60,6 +60,58 @@ impl NonBlockingStream {
             Self::Server(stream) => stream.conn.write_tls(&mut stream.sock),
         }
     }
+
+    /// Reads and decrypts application data, without first trying to flush any
+    /// pending outbound ciphertext.
+    ///
+    /// `rustls::Stream::read` (used by the `Read` impl below) always tries to
+    /// fully flush pending writes before reading a single byte. When both
+    /// peers have a large enough outbound backlog that the flush keeps
+    /// returning `WouldBlock` (the peer's TCP receive window is closed
+    /// because it is stuck the same way), neither side ever calls the
+    /// underlying socket read, so neither side's receive window ever reopens.
+    /// This method drives the read side directly so it always makes progress
+    /// independently of the write side's backlog.
+    pub fn try_read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Client(stream) => {
+                match stream.conn.read_tls(&mut stream.sock) {
+                    Ok(_) => {}
+                    // WouldBlock/Interrupted: no new ciphertext available right now.
+                    // Other: rustls's own backpressure signal meaning the received-plaintext
+                    // buffer is still full from a previous call; skip ingesting more ciphertext
+                    // and fall through to draining what's already decoded below, which frees
+                    // room for the next read_tls() call to succeed.
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::Interrupted
+                        || e.kind() == io::ErrorKind::Other => {}
+                    Err(e) => return Err(e),
+                }
+                if let Err(e) = stream.conn.process_new_packets() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, e));
+                }
+                stream.conn.reader().read(buf)
+            }
+            Self::Server(stream) => {
+                match stream.conn.read_tls(&mut stream.sock) {
+                    Ok(_) => {}
+                    // WouldBlock/Interrupted: no new ciphertext available right now.
+                    // Other: rustls's own backpressure signal meaning the received-plaintext
+                    // buffer is still full from a previous call; skip ingesting more ciphertext
+                    // and fall through to draining what's already decoded below, which frees
+                    // room for the next read_tls() call to succeed.
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::Interrupted
+                        || e.kind() == io::ErrorKind::Other => {}
+                    Err(e) => return Err(e),
+                }
+                if let Err(e) = stream.conn.process_new_packets() {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, e));
+                }
+                stream.conn.reader().read(buf)
+            }
+        }
+    }
 }
 
 impl NonBlockingCommChannel {
@@ -93,39 +145,6 @@ impl NonBlockingCommChannel {
         self.bytes_received = 0;
         self.bytes_sent = 0;
         self.rounds = 0;
-    }
-}
-
-impl Read for NonBlockingStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            Self::Client(stream) => stream.read(buf),
-            Self::Server(stream) => stream.read(buf),
-        }
-    }
-    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
-        match self {
-            Self::Client(stream) => stream.read_exact(buf),
-            Self::Server(stream) => stream.read_exact(buf),
-        }
-    }
-    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        match self {
-            Self::Client(stream) => stream.read_to_end(buf),
-            Self::Server(stream) => stream.read_to_end(buf),
-        }
-    }
-    fn read_to_string(&mut self, buf: &mut String) -> io::Result<usize> {
-        match self {
-            Self::Client(stream) => stream.read_to_string(buf),
-            Self::Server(stream) => stream.read_to_string(buf),
-        }
-    }
-    fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
-        match self {
-            Self::Client(stream) => stream.read_vectored(bufs),
-            Self::Server(stream) => stream.read_vectored(bufs),
-        }
     }
 }
 

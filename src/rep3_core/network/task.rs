@@ -3,7 +3,7 @@ use std::{
     cell::OnceCell,
     collections::{BTreeMap, VecDeque},
     fmt::Debug,
-    io::{self, ErrorKind, Read, Write},
+    io::{self, ErrorKind, Write},
     sync::{
         mpsc::{channel, sync_channel, Receiver, RecvError, Sender, SyncSender, TryRecvError},
         Mutex,
@@ -466,7 +466,7 @@ impl IoThreadContext {
         match read_task_queue.peek() {
             Some(read_task) => {
                 let buf = &mut read_task.buffer[read_task.offset..];
-                match channel.stream.read(buf) {
+                match channel.stream.try_read(buf) {
                     Ok(n) => {
                         read_task.offset += n;
                         if read_task.offset >= read_task.length {
@@ -503,7 +503,7 @@ impl IoThreadContext {
                         // there are read tasks with thread_id but none are currently being read
                         match channel
                             .stream
-                            .read(&mut thread_id_buf[*thread_id_buf_offset..])
+                            .try_read(&mut thread_id_buf[*thread_id_buf_offset..])
                         {
                             Ok(n) => *thread_id_buf_offset += n,
                             Err(io_err) => {
@@ -1567,5 +1567,74 @@ mod test {
         assert!(received.is_empty());
 
         io_owned.shutdown().unwrap();
+    }
+
+    #[test]
+    fn simultaneous_large_bidirectional_transfer_does_not_deadlock() {
+        // Regression test for the deadlock fixed by `NonBlockingStream::try_read`.
+        //
+        // `rustls::Stream::read()` always tries to fully flush pending outbound writes
+        // (`complete_prior_io()`) before attempting to read a single byte. If
+        // both peers simultaneously have a large enough outbound backlog that
+        // the flush keeps returning `WouldBlock`, which happens precisely
+        // because the peer's TCP receive window is closed, which happens
+        // because it is stuck the exact same way, neither side calls
+        // the underlying socket read, so neither side's receive window ever
+        // reopens causing a deadlock.
+        //
+        // Reproducing it reliably requires each direction's payload to exceed
+        // typical OS-level socket buffer sizes; use 32 MiB in
+        // each direction
+        //
+        // If `non_blocking_read` used  the standard `Read` impl of `channel.stream`
+        // instead of `channel.stream.try_read(buf)`, this test
+        // would hang forever. The `recv_timeout` below turns that into a
+        // bounded, clearly-diagnosed test failure instead of an indefinite hang
+        // of the whole test binary.
+        const PAYLOAD_LEN: usize = 32 * 1024 * 1024;
+
+        let (p1, p2, p3) = localhost_connect(|p| p, |p| p, |p| p);
+        let io1 = IoLayerOwned::spawn_io(p1.comm_prev, p1.comm_next).unwrap();
+        let io2 = IoLayerOwned::spawn_io(p2.comm_prev, p2.comm_next).unwrap();
+        // p3 is not part of this connection; drop it
+        drop(p3);
+
+        let mut rng = thread_rng();
+        let payload_1_to_2 = random_bytes(&mut rng, PAYLOAD_LEN);
+        let payload_2_to_1 = random_bytes(&mut rng, PAYLOAD_LEN);
+        let payload_1_to_2_clone = payload_1_to_2.clone();
+        let payload_2_to_1_clone = payload_2_to_1.clone();
+
+        // Run the actual transfer on a background thread and signal completion
+        // over a channel with a timeout, so a regression fails the test instead
+        // of hanging the whole test binary forever.
+        let (done_send, done_recv) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            // Declare both receives before either send
+            let rcv_on_1 = io1.receive(Direction::Next, PAYLOAD_LEN);
+            let rcv_on_2 = io2.receive(Direction::Previous, PAYLOAD_LEN);
+
+            // Both sides start writing their large payload to each other at
+            // essentially the same time, before either has read anything.
+            io1.send(Direction::Next, payload_1_to_2_clone);
+            io2.send(Direction::Previous, payload_2_to_1_clone);
+
+            let received_on_1 = rcv_on_1.recv().unwrap();
+            let received_on_2 = rcv_on_2.recv().unwrap();
+
+            io1.wait_for_completion();
+            io2.wait_for_completion();
+
+            let _ = done_send.send((received_on_1, received_on_2));
+        });
+
+        let (received_on_1, received_on_2) = done_recv
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect(
+                "transfer did not complete within 30s: likely deadlocked in non_blocking_read",
+            );
+
+        assert_eq!(received_on_1, payload_2_to_1);
+        assert_eq!(received_on_2, payload_1_to_2);
     }
 }
