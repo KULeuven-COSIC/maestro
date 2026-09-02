@@ -865,6 +865,8 @@ impl<'a> MulTripleEncoder for GF4p4TripleEncoder<'a> {
             zii.add_prod(&c.sii, &local_weight);
             local_weight *= rand;
         });
+        // update weight
+        *weight = local_weight;
     }
 
     fn add_triples_par(&mut self, x: &mut [RssShare<GF2p64>], y: &mut [RssShare<GF2p64>], z: &mut RssShare<GF2p64>, weight: GF2p64, rand: &[GF2p64], chunk_size: usize) {
