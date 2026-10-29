@@ -245,7 +245,7 @@ pub fn wol_bitslice_gf4(x: &[GF8]) -> (Vec<BsGF4>, Vec<BsGF4>) {
         xh[n - 1] = BsGF4::new(xh1, xh2);
         xl[n - 1] = BsGF4::new(xl1, xl2);
     } else {
-        let (xh1, xl1) = wol_map(&x[x.len() - 2]);
+        let (xh1, xl1) = wol_map(&x[x.len() - 1]);
         xh[n - 1] = BsGF4::new(xh1, GF4::ZERO);
         xl[n - 1] = BsGF4::new(xl1, GF4::ZERO);
     }
@@ -387,8 +387,22 @@ pub fn un_wol_bitslice_gf4(xh: &[BsGF4], xl: &[BsGF4], x: &mut [GF8]) {
 
 #[cfg(test)]
 mod test {
-    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, wollut16_malsec::test::{WL16ASSetup, WL16BitString, WL16DefaultParams, WL16OhvCheck}};
+    use crate::{aes::test::{test_aes128_keyschedule_gf8, test_aes128_no_keyschedule_gf8, test_aes256_keyschedule_gf8, test_aes256_no_keyschedule_gf8, test_inv_aes128_no_keyschedule_gf8, test_sub_bytes}, share::gf8::GF8, wollut16_malsec::{online::{un_wol_bitslice_gf4, wol_bitslice_gf4}, test::{WL16ASSetup, WL16BitString, WL16DefaultParams, WL16OhvCheck}}};
+    use crate::rep3_core::share::HasZero;
 
+    #[test]
+    fn test_is_bijective_wol_bitslice() {
+        let inputs: Vec<_> = (0..=255).map(GF8).collect();
+        for n in [1, 2, 15, 16, 17, 255, 256] {
+            let input = &inputs[..n];
+            let (ah, al) = wol_bitslice_gf4(&input);
+            assert_eq!(ah.len(), n.div_ceil(2));
+            assert_eq!(al.len(), n.div_ceil(2));
+            let mut output = vec![GF8::ZERO; n];
+            un_wol_bitslice_gf4(&ah, &al, &mut output);
+            assert_eq!(input, &output);
+        }
+    }
 
     #[test]
     fn sub_bytes() {
